@@ -33,13 +33,9 @@ class SpicyLyricsRepository: LyricsRepository {
 
     private static let apiUrl        = "https://api.spicylyrics.org"
     private static let authHeaderKey = "SpicyLyrics-WebAuth"
-    // Confirmed via github.com/Spikerko/spicy-lyrics/releases/latest (6.1.1,
-    // released 14 Jun) that this is genuinely the current shipped version —
-    // the version-mismatch theory was a dead end, not the cause of the
-    // Static-vs-Syllable discrepancy. Leaving this accurate for future-proofing
-    // (the server may still reject very stale versions eventually) but it is
-    // NOT the explanation for the current bug.
-    private static let clientVersion = "6.1.1"
+    // Keep this aligned with the current public Spicy Lyrics client. The API
+    // replaces real lyrics with an update notice when this value is too old.
+    private static let clientVersion = "6.3.12"
 
     // MARK: - Token wait
     //
@@ -80,6 +76,7 @@ class SpicyLyricsRepository: LyricsRepository {
         request.httpMethod = "POST"
         request.setValue("application/json",                   forHTTPHeaderField: "Content-Type")
         request.setValue(SpicyLyricsRepository.clientVersion, forHTTPHeaderField: "SpicyLyrics-Version")
+        request.setValue("2",                                forHTTPHeaderField: "X-mode")
 
         // Match the real desktop Spicetify request's identity headers — captured
         // via mitmproxy from an actual desktop session that returned Syllable
