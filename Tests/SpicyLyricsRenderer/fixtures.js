@@ -44,10 +44,33 @@ window.SPICY_TEST_FIXTURES = {
   },
   lineMilliseconds: {
     Type: "Line",
+    TimeUnit: "milliseconds",
     StartTime: 5000,
     Content: [
       { Type: "Vocal", Text: "Millisecond opening line", StartTime: 5000, EndTime: 8000 },
       { Type: "Vocal", Text: "Millisecond second line", StartTime: 8200, EndTime: 12000 }
+    ]
+  },
+  desktopLongSyllable: {
+    Type: "Syllable",
+    id: "desktop-parity-fixture",
+    source: "aml",
+    StartTime: 10.1,
+    EndTime: 207.0,
+    Content: [
+      { Type: "Vocal", Lead: { StartTime: 30.0, EndTime: 34.2, Syllables: [
+        { Text: "Every", StartTime: 30.0, EndTime: 30.8 },
+        { Text: "word", StartTime: 30.85, EndTime: 31.6 },
+        { Text: "keeps", StartTime: 31.65, EndTime: 32.4 },
+        { Text: "its", StartTime: 32.45, EndTime: 32.9 },
+        { Text: "timing", StartTime: 32.95, EndTime: 34.2 }
+      ]}},
+      { Type: "Vocal", Lead: { StartTime: 198.0, EndTime: 207.0, Syllables: [
+        { Text: "Long", StartTime: 198.0, EndTime: 200.0 },
+        { Text: "songs", StartTime: 200.1, EndTime: 202.0 },
+        { Text: "stay", StartTime: 202.1, EndTime: 204.0 },
+        { Text: "synced", StartTime: 204.1, EndTime: 207.0 }
+      ]}}
     ]
   }
 };

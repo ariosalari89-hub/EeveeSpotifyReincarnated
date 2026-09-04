@@ -2,6 +2,23 @@ import Foundation
 import UIKit
 import WebKit
 
+private final class SpicyLyricsRequestCancellation {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+}
+
 final class SpicyLyricsFullscreenCoordinator {
     static let shared = SpicyLyricsFullscreenCoordinator()
 
@@ -37,6 +54,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private var isDetached = false
     private var activeTrackID = ""
     private var lyricsRequestID = UUID()
+    private var lyricsCancellation: SpicyLyricsRequestCancellation?
 
     init(controller: UIViewController) {
         self.controller = controller
@@ -129,6 +147,8 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         foregroundResyncTimer = nil
         lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
         lifecycleObservers.removeAll()
+        lyricsCancellation?.cancel()
+        lyricsCancellation = nil
         lyricsRequestID = UUID()
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "eevee")
         webView?.navigationDelegate = nil
@@ -238,23 +258,33 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
             let track = SpicyLyricsPlaybackBridge.shared.trackPayload()
             emit(type: "track", payload: track)
         }
+        // Desktop Spicy Lyrics has one canonical millisecond player clock. Give
+        // the renderer that clock before an asynchronously fetched lyric can be
+        // delivered. The renderer no longer depends on this ordering for unit
+        // conversion, but preserving it prevents a loading/ready transition
+        // from briefly painting against a stale duration or position.
+        emit(type: "playback", payload: playback)
         if changedTrack {
             requestLyrics(for: currentID, force: false)
         }
-        // Track/loading is emitted before playback so a new song's position can
-        // never animate the previous song's lyrics for one frame.
-        emit(type: "playback", payload: playback)
     }
 
     private func requestLyrics(for trackID: String, force: Bool) {
         guard !trackID.isEmpty else { return }
         let requestID = UUID()
+        lyricsCancellation?.cancel()
+        let cancellation = SpicyLyricsRequestCancellation()
+        lyricsCancellation = cancellation
         lyricsRequestID = requestID
         emit(type: "lyrics", payload: ["state": "loading", "trackId": trackID, "force": force])
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
-                let data = try SpicyLyricsRepository.shared.rendererPayloadData(for: trackID)
+                let data = try SpicyLyricsRepository.shared.rendererPayloadData(
+                    for: trackID,
+                    forceRefresh: force,
+                    shouldContinue: { !cancellation.isCancelled }
+                )
                 let payload = try JSONSerialization.jsonObject(with: data, options: [])
                 DispatchQueue.main.async {
                     guard let self,

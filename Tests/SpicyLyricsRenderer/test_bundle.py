@@ -8,6 +8,7 @@ index = (BUNDLE / "index.html").read_text(encoding="utf-8")
 renderer = (BUNDLE / "renderer.js").read_text(encoding="utf-8")
 styles = (BUNDLE / "styles.css").read_text(encoding="utf-8")
 bridge = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackBridge.swift").read_text(encoding="utf-8")
+repository = (ROOT / "Sources/EeveeSpotify/Lyrics/Repositories/SpicyLyricsRepository.swift").read_text(encoding="utf-8")
 c_header = (ROOT / "Sources/EeveeSpotifyC/include/Tweak.h").read_text(encoding="utf-8")
 
 assert 'src="renderer.js"' in index
@@ -21,6 +22,9 @@ assert 'tokens: []' in renderer
 assert 'element.classList.add("line-timed")' in renderer
 assert ".lyric-line.line-timed.active > .line-text" in styles
 assert "function lyricTimeScale(data)" in renderer
+assert "state.playback.durationMs" not in renderer[renderer.index("function lyricTimeScale(data)"):renderer.index("const toMilliseconds")]
+assert 'data?.TimeUnit' in renderer
+assert 'return 1000;' in renderer[renderer.index("function lyricTimeScale(data)"):renderer.index("const toMilliseconds")]
 assert "source[index - 1]?.IsPartOfWord === true" in renderer
 assert 'case "lifecycle"' in renderer
 assert 'document.addEventListener("visibilitychange"' in renderer
@@ -35,5 +39,14 @@ assert "capturedPlayer ?? statefulCandidate" not in bridge
 assert "requestedPlaybackState" in bridge
 assert "setLocalPlaying(!state.playback.isPlaying)" in renderer
 assert "position -= state.preferences.playbackOffset" in renderer
+assert "rendererCacheLifetime: TimeInterval = 3 * 24 * 60 * 60" in repository
+assert "SpicyLyricsServiceError.queued" in repository
+assert "2 * pow(1.5, Double(queuedAttempt))" in repository
+assert "forceRefresh: Bool = false" in repository
+assert "shouldContinue: () -> Bool" in repository
+
+host = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsFullscreenHost.swift").read_text(encoding="utf-8")
+publish = host[host.index("private func publishPlaybackAndTrack"):host.index("private func requestLyrics")]
+assert publish.index('emit(type: "playback"') < publish.index("requestLyrics(for:")
 
 print("Spicy Lyrics renderer bundle policy tests passed")

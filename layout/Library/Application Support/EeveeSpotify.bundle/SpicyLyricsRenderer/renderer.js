@@ -84,45 +84,22 @@
   };
 
   function lyricTimeScale(data) {
-    const values = [];
-    const add = (value) => {
-      const number = optionalFinite(value);
-      if (number != null && number >= 0) values.push(number);
-    };
-    const addTimed = (value) => {
-      if (!value || typeof value !== "object") return;
-      add(value.StartTime);
-      add(value.EndTime);
-    };
+    const declaredUnit = String(
+      data?.TimeUnit
+      ?? data?.timeUnit
+      ?? data?.TimingUnit
+      ?? data?.timingUnit
+      ?? ""
+    ).trim().toLowerCase();
+    if (["ms", "millisecond", "milliseconds"].includes(declaredUnit)) return 1;
+    if (["us", "microsecond", "microseconds"].includes(declaredUnit)) return .001;
 
-    addTimed(data);
-    (Array.isArray(data?.Content) ? data.Content : []).forEach((entry) => {
-      addTimed(entry);
-      addTimed(entry?.Lead);
-      (entry?.Lead?.Syllables || []).forEach(addTimed);
-      (entry?.Background || []).forEach((background) => {
-        addTimed(background);
-        (background?.Syllables || []).forEach(addTimed);
-      });
-    });
-
-    const maximum = values.length ? Math.max(...values) : 0;
-    if (maximum <= 0) return 1000;
-
-    // Spicy Lyrics normally reports seconds, but community/provider payloads
-    // also exist in milliseconds (and occasionally microseconds). Pick one
-    // scale for the whole payload. The previous per-value heuristic mixed
-    // units inside one song, corrupting its opening timestamps.
-    const duration = state.playback.durationMs;
-    const candidates = [1000, 1, .001];
-    if (duration > 0) {
-      return candidates.reduce((best, candidate) => {
-        const error = Math.abs(maximum * candidate - duration) / duration;
-        return error < best.error ? { scale: candidate, error } : best;
-      }, { scale: 1000, error: Infinity }).scale;
-    }
-    if (maximum > 1_000_000) return .001;
-    if (maximum > 10_000) return 1;
+    // This is the same contract as desktop Spicy Lyrics' ConvertTime(): every
+    // API/TTML lyric timestamp is expressed in seconds and is multiplied by
+    // 1000. Never infer the unit from Spotify's current duration. Track and
+    // playback callbacks are independent, so doing that made identical lyrics
+    // normalize differently depending on which callback happened to arrive
+    // first (the reproducible failure behind songs such as No Scrubs).
     return 1000;
   }
 
