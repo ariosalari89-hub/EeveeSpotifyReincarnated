@@ -288,7 +288,10 @@ class SpicyLyricsRepository: LyricsRepository {
         let retryAfter = Self.retryAfter(from: urlResponse?.value(forHTTPHeaderField: "Retry-After"))
         writeDebugLog("[SpicyLyrics] Transport status \(statusCode), \(data.count) bytes for \(trackId)")
         guard (200 ..< 300).contains(statusCode) else {
-            if statusCode == 401 || statusCode == 403 { spotifyAccessToken = nil }
+            if statusCode == 401 || statusCode == 403 {
+                spotifyAccessToken = nil
+                throw SpicyLyricsServiceError.authenticationUnavailable
+            }
             if statusCode == 429 { throw SpicyLyricsServiceError.rateLimited }
             throw SpicyLyricsServiceError.transportStatus(statusCode, retryAfter)
         }
@@ -366,11 +369,12 @@ class SpicyLyricsRepository: LyricsRepository {
             throw LyricsError.decodingError
         }
 
+        let rendererData: Data
         do {
-            let rendererData = try packed.jsonData()
-            cacheRendererPayload(rendererData, for: trackId)
+            rendererData = try packed.jsonData()
         } catch {
             writeDebugLog("[SpicyLyrics] Could not serialize renderer payload for \(trackId): \(error)")
+            throw LyricsError.decodingError
         }
 
         guard let type = packed["Type"]?.stringValue else {
@@ -386,14 +390,17 @@ class SpicyLyricsRepository: LyricsRepository {
             "[SpicyLyrics] Lyrics type=\(type), source=\(source), entries=\(contentCount) for \(trackId)"
         )
 
+        let dto: LyricsDto
         switch type {
-        case "Syllable": return parseSyllableLyrics(packed)
-        case "Line":     return parseLineLyrics(packed)
-        case "Static":   return parseStaticLyrics(packed)
+        case "Syllable": dto = parseSyllableLyrics(packed)
+        case "Line":     dto = parseLineLyrics(packed)
+        case "Static":   dto = parseStaticLyrics(packed)
         default:
             writeDebugLog("[SpicyLyrics] Unknown type '\(type)' for \(trackId)")
             throw LyricsError.decodingError
         }
+        cacheRendererPayload(rendererData, for: trackId)
+        return dto
     }
 
     // MARK: Syllable lyrics
