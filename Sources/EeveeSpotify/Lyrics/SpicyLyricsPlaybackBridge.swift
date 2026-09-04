@@ -213,46 +213,34 @@ final class SpicyLyricsPlaybackBridge {
         switch current {
         case .off:
             guard canContext else { return false }
-            let trackAccepted = !canTrack || invokeObject(
+            return invokeObject(
+                player,
+                selector: ABI.repeatContext,
+                value: NSNumber(value: true)
+            )
+        case .context:
+            guard canTrack else { return false }
+            return invokeObject(
                 player,
                 selector: ABI.repeatTrack,
-                value: NSNumber(value: false)
-            )
-            let contextAccepted = invokeObject(
-                player,
-                selector: ABI.repeatContext,
                 value: NSNumber(value: true)
             )
-            return trackAccepted && contextAccepted
-        case .context:
-            guard canTrack else {
-                guard canContext else { return false }
-                return invokeObject(player, selector: ABI.repeatContext, value: NSNumber(value: false))
-            }
-            let contextAccepted = invokeObject(
-                player,
-                selector: ABI.repeatContext,
-                value: NSNumber(value: true)
-            )
+        case .track:
+            // Repeat-track is layered on top of repeat-context in the verified
+            // 9.1.76 state. Both toggles must be available to reach `off`;
+            // otherwise do not leave Spotify in a partially changed mode.
+            guard canTrack, canContext else { return false }
             let trackAccepted = invokeObject(
                 player,
                 selector: ABI.repeatTrack,
-                value: NSNumber(value: true)
-            )
-            return contextAccepted && trackAccepted
-        case .track:
-            guard canTrack || canContext else { return false }
-            let trackAccepted = !canTrack || invokeObject(
-                player,
-                selector: ABI.repeatTrack,
                 value: NSNumber(value: false)
             )
-            let contextAccepted = !canContext || invokeObject(
+            guard trackAccepted else { return false }
+            return invokeObject(
                 player,
                 selector: ABI.repeatContext,
                 value: NSNumber(value: false)
             )
-            return trackAccepted && contextAccepted
         }
     }
 
@@ -266,8 +254,9 @@ final class SpicyLyricsPlaybackBridge {
     }
 
     private func isSupportedPlayer(_ player: AnyObject) -> Bool {
-        let className = String(describing: type(of: player))
-        return className == ABI.playerClass && player.responds(to: ABI.state)
+        guard let expectedClass = NSClassFromString(ABI.playerClass),
+              let object = player as? NSObject else { return false }
+        return object.isKind(of: expectedClass) && player.responds(to: ABI.state)
     }
 
     private func stateObject(from player: AnyObject) -> AnyObject? {

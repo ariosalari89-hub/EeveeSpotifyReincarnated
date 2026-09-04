@@ -420,8 +420,9 @@ class SpicyLyricsRepository: LyricsRepository {
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let queriesRaw = json["queries"] as? [[String: Any]]
         else {
-            let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
-            writeDebugLog("[SpicyLyrics] Malformed envelope for \(trackId): \(rawBody)")
+            writeDebugLog(
+                "[SpicyLyrics] Malformed envelope for \(trackId), bytes=\(data.count)"
+            )
             throw LyricsError.decodingError
         }
 
@@ -434,8 +435,10 @@ class SpicyLyricsRepository: LyricsRepository {
             let matchedQuery = queriesRaw.first(where: { $0["operationId"] as? String == "0" }),
             let result = matchedQuery["result"] as? [String: Any]
         else {
-            let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
-            writeDebugLog("[SpicyLyrics] No matching operationId 0 for \(trackId): \(rawBody)")
+            writeDebugLog(
+                "[SpicyLyrics] No operationId 0 for \(trackId), "
+                + "queries=\(queriesRaw.count), bytes=\(data.count)"
+            )
             throw LyricsError.decodingError
         }
 

@@ -76,6 +76,18 @@ require(clock.generation == 2, "track transition did not increment generation")
 require(clock.snapshot(at: 3).identity?.trackIdentifier == "track-b", "track identity did not swap")
 requireNear(clock.snapshot(at: 3).positionSeconds, 0.4, "new track retained old position")
 
+// A callback captured before the new generation cannot seize the clock even
+// if it arrives after the UI has already displayed the next song.
+require(!clock.submit(observation(
+    track: "track-a",
+    playback: "playback-a",
+    session: "session-a",
+    position: 99,
+    sourceTimestamp: 101,
+    observedAt: 2.9
+)), "late old-generation callback was accepted")
+require(clock.snapshot(at: 3).identity?.trackIdentifier == "track-b", "stale track took over")
+
 // Missing optional IDs on a callback do not manufacture another generation.
 let stableGeneration = clock.generation
 require(clock.submit(observation(
@@ -87,6 +99,18 @@ require(clock.submit(observation(
     observedAt: 3.6
 )), "partial identity observation rejected")
 require(clock.generation == stableGeneration, "partial identity split one playback")
+
+// Replaying the same track with a distinct Spotify playback identifier is a
+// real generation boundary, not a seek within the old song.
+require(clock.submit(observation(
+    track: "track-b",
+    playback: "playback-b-2",
+    session: "session-b",
+    position: 0,
+    sourceTimestamp: 4,
+    observedAt: 4
+)), "same-track replay rejected")
+require(clock.generation == stableGeneration + 1, "same-track replay reused stale generation")
 
 // Pause/resume is observation-only and never accumulates command latency.
 var pauseClock = SpicyLyricsPlaybackClock()

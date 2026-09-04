@@ -98,6 +98,7 @@ button { -webkit-tap-highlight-color: transparent; }
 #lyrics { display: flex; flex-direction: column; gap: clamp(17px, 2.5vh, 30px); }
 .lyric-line {
   position: relative;
+  min-height: 44px;
   border: 0;
   padding: 3px 2px;
   margin: 0;

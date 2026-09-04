@@ -10,6 +10,9 @@ index = (BUNDLE / "index.html").read_text(encoding="utf-8")
 model = (BUNDLE / "renderer-model.js").read_text(encoding="utf-8")
 renderer = (BUNDLE / "renderer.js").read_text(encoding="utf-8")
 styles = (BUNDLE / "styles.css").read_text(encoding="utf-8")
+browser_fixture = (ROOT / "Tests/SpicyLyricsRenderer/browser-fixture.js").read_text(
+    encoding="utf-8"
+)
 bridge = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackBridge.swift").read_text(encoding="utf-8")
 clock = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackClock.swift").read_text(encoding="utf-8")
 host = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsFullscreenHost.swift").read_text(encoding="utf-8")
@@ -131,6 +134,16 @@ assert "recoverOrFallBack" in host
 assert "maximumWebContentRestarts" in host
 assert "webViewWebContentProcessDidTerminate" in host
 assert 'payload.state === "hidden" || payload.state === "resuming"' in renderer
+assert "isRecoveringRenderer" in host
+assert "rendererStabilityInterval" in host
+assert "guard webView === self.webView" in host
+
+# Lower-fidelity API races can improve in place without blanking already valid
+# lyrics. This is bounded and never lets a Static/404 response overwrite a
+# working Line/Syllable cache entry.
+assert "lyricsUpgradeDelays" in host
+assert "scheduleLyricsUpgrade" in host
+assert "showLoading: false" in host
 
 # Accessibility/adaptive layout invariants.
 assert 'aria-label="Turn shuffle on"' in index
@@ -142,6 +155,14 @@ assert "prefers-reduced-motion" in styles and "native-reduce-motion" in styles
 assert "prefers-contrast: more" in styles
 assert "safe-area-inset" in styles
 assert "max-height: 520px" in styles
+assert 'role="dialog"' in index and 'aria-modal="true"' in index
+assert "dom.app.inert = open" in renderer
+assert "min-height: 44px" in styles
+
+# Artwork and pending command state stay generation-safe during rapid skips.
+assert "artworkRequest" in renderer
+assert "request !== this.artworkRequest" in renderer
+assert "[...state.pendingCommands.keys()].forEach(settleCommand)" in renderer
 
 # Cache refresh and racing responses can upgrade fidelity, never downgrade it.
 assert "Joined in-flight request" in repository
@@ -152,11 +173,16 @@ assert "preservedPayload" in repository
 assert "Refresh failed; retained" in repository
 assert "SpicyLyricsServiceError.queued" in repository
 assert "2 * pow(1.5, Double(queuedAttempt))" in repository
+assert "rawBody" not in repository
 
 node = shutil.which("node")
 assert node, "Node.js is required for renderer regression tests"
 subprocess.run([node, "--check", str(BUNDLE / "renderer-model.js")], check=True)
 subprocess.run([node, "--check", str(BUNDLE / "renderer.js")], check=True)
+subprocess.run(
+    [node, "--check", str(ROOT / "Tests/SpicyLyricsRenderer/browser-fixture.js")],
+    check=True,
+)
 subprocess.run(
     [node, str(ROOT / "Tests/SpicyLyricsRenderer/model.test.js")],
     check=True,

@@ -160,6 +160,7 @@
       this.enabled = true;
       this.lastFrame = 0;
       this.phase = 0;
+      this.artworkRequest = 0;
       this.resize = this.resize.bind(this);
       this.frame = this.frame.bind(this);
       addEventListener("resize", this.resize, { passive: true });
@@ -184,6 +185,7 @@
     setPlaying(playing) { this.playing = playing; }
 
     setArtwork(url, fallbackColor) {
+      const request = ++this.artworkRequest;
       if (fallbackColor && /^#?[0-9a-f]{6}$/i.test(fallbackColor)) {
         const color = fallbackColor.startsWith("#") ? fallbackColor : `#${fallbackColor}`;
         this.colors = [color, shade(color, .55), shade(color, 1.3), "#101010"];
@@ -192,11 +194,16 @@
       const image = new Image();
       image.decoding = "async";
       image.onload = () => {
+        if (request !== this.artworkRequest) return;
         this.image = image;
         this.sampleColors(image);
         this.draw();
       };
-      image.onerror = () => { this.image = null; this.draw(); };
+      image.onerror = () => {
+        if (request !== this.artworkRequest) return;
+        this.image = null;
+        this.draw();
+      };
       image.src = url;
     }
 
@@ -379,7 +386,16 @@
     if (artwork) {
       if (dom.cover.src !== artwork) {
         dom.cover.classList.remove("ready");
-        dom.cover.onload = () => dom.cover.classList.add("ready");
+        dom.cover.onload = () => {
+          if (dom.cover.getAttribute("src") === artwork) {
+            dom.cover.classList.add("ready");
+          }
+        };
+        dom.cover.onerror = () => {
+          if (dom.cover.getAttribute("src") === artwork) {
+            dom.cover.classList.remove("ready");
+          }
+        };
         dom.cover.src = artwork;
       }
       dom.cover.alt = `Cover art for ${title}`;
@@ -463,6 +479,9 @@
       state.frozenPositionMs = incoming.positionMs;
     }
     reconcileCommands();
+    if (changed) {
+      [...state.pendingCommands.keys()].forEach(settleCommand);
+    }
   }
 
   function renderLyrics(raw, trackId, generation) {
@@ -668,12 +687,25 @@
     savePreferences();
   }
 
+  let settingsReturnFocus = null;
+
   function setSettingsOpen(open) {
+    const wasOpen = !dom.settingsSheet.hidden;
+    if (open === wasOpen) return;
+    if (open) settingsReturnFocus = document.activeElement;
     dom.settingsSheet.hidden = !open;
     dom.settingsScrim.hidden = !open;
     dom.settings.setAttribute("aria-expanded", String(open));
+    dom.app.inert = open;
+    dom.app.setAttribute("aria-hidden", String(open));
     if (open) requestAnimationFrame(() => dom.settingsClose.focus());
-    else dom.settings.focus();
+    else {
+      const destination = settingsReturnFocus instanceof HTMLElement
+        ? settingsReturnFocus
+        : dom.settings;
+      settingsReturnFocus = null;
+      requestAnimationFrame(() => destination.focus());
+    }
   }
 
   function updateFollowButton() {
@@ -833,7 +865,26 @@
   }));
 
   addEventListener("keydown", (event) => {
-    if (event.key === "Escape") setSettingsOpen(false);
+    const settingsOpen = !dom.settingsSheet.hidden;
+    if (event.key === "Escape" && settingsOpen) {
+      event.preventDefault();
+      setSettingsOpen(false);
+      return;
+    }
+    if (event.key !== "Tab" || !settingsOpen) return;
+    const focusable = [...dom.settingsSheet.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )].filter((element) => !element.hidden);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
   let resizeFrame = 0;
   addEventListener("resize", () => {
