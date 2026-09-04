@@ -621,6 +621,19 @@
   }
 
   function fitWordGroups() {
+    if (state.surface === "inline") {
+      const root = document.documentElement;
+      root.style.setProperty("--inline-fit", "1");
+      const line = dom.lyrics.querySelector(".lyric-line:not(.interlude)");
+      const rowHeight = line ? parseFloat(getComputedStyle(line).lineHeight) : 0;
+      const available = dom.scroller.clientHeight;
+      if (rowHeight > 0 && available > 0) {
+        const fit = Math.min(1, available / rowHeight);
+        root.style.setProperty("--inline-fit", String(fit));
+        root.style.setProperty("--inline-lines", String(Math.max(1,
+          Math.min(2, Math.floor(available / (rowHeight * fit) + 0.001)))));
+      }
+    }
     // Keep ordinary joined syllables together. Only an over-wide group may
     // wrap at its real token boundaries; a single huge token can wrap within
     // its own box without changing its timestamps or text.

@@ -186,6 +186,16 @@ struct QAFailure: Error { let message: String }
         let contextPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("qa-embedded-context.png")
         try contextImage.pngData()?.write(to: contextPath)
+        inline.frame.size = CGSize(width: 280, height: 48)
+        inline.setNeedsLayout(); inline.layoutIfNeeded()
+        _ = try await inlineWeb.evaluateJavaScript("SpicyNative.receive({type:'bootstrap',payload:{surface:'inline',preferences:{fontSize:126}}})")
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let captionFits = try await inlineWeb.evaluateJavaScript("""
+        (() => { const text=document.querySelector('.inline-visible .line-text').getBoundingClientRect();
+          return text.top >= -1 && text.bottom <= innerHeight + 1; })()
+        """)
+        guard captionFits as? Bool == true else { throw QAFailure(message: "enlarged native caption clips glyph rows") }
+        checks.append("enlarged caption fits a short native lyric slot without clipped glyph rows")
         SpicyLyricsPlaybackBridge.shared.onSkip = nil
         _ = SpicyLyricsPlaybackBridge.shared.perform(command: "next")
         try await waitForBoth("track-4")

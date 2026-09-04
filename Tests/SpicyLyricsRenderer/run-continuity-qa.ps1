@@ -108,6 +108,19 @@ try {
     &&!document.querySelector('.lyric-line.active'),count:shown.length,text:shown[0]?.textContent});
 })()
 '@)
+    & agent-browser --session $session set viewport 280 48
+    Require-Qa 'narrow above-title caption at enlarged text never clips glyph rows' (Eval-Qa @'
+(async () => {
+  SpicyQA.send('bootstrap',{surface:'inline',preferences:{fontSize:126}});
+  SpicyQA.lyrics.line.Content=[{Type:'Vocal',Text:'A very long caption must fit in the short native lyric slot without cutting through letters',StartTime:0,EndTime:30}];
+  SpicyQA.scenario('line',{positionMs:4500,isPlaying:false,isPaused:true,isAdvancing:false});
+  await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+  const box=document.querySelector('.inline-visible').getBoundingClientRect();
+  const text=document.querySelector('.inline-visible .line-text').getBoundingClientRect();
+  return JSON.stringify({pass:box.height<=innerHeight+1&&text.top>=-1&&text.bottom<=innerHeight+1,
+    height:box.height,textTop:text.top,textBottom:text.bottom,slot:innerHeight});
+})()
+'@)
     $errors = & agent-browser --session $session errors
     if (($errors | Out-String).Trim()) { throw "Browser console errors: $errors" }
 } finally {
