@@ -356,7 +356,10 @@
         kind: "lead",
         start,
         end,
-        tokens: [{ text, transliterated: String(entry.TransliteratedText || ""), start, end, spaceBefore: false }],
+        // Line-synced payloads contain no word timestamps. Desktop Spicy
+        // Lyrics highlights the line as a unit; a progressive wipe across one
+        // synthetic token misleadingly looks like broken word timing.
+        tokens: [],
         text,
         romanizedText: String(entry.TransliteratedText || text),
         translation: translationFrom(entry, entry),
@@ -373,6 +376,7 @@
     state.lines = normalizeLyrics(raw);
     state.lineElements = [];
     state.activeLine = -1;
+    dom.lyrics.dataset.timing = String(raw?.Type || "unknown").toLowerCase();
     dom.lyrics.replaceChildren();
 
     if (!state.lines.length) {
@@ -709,23 +713,15 @@
     post("setPreference", { key: "fontSize", value: state.preferences.fontSize });
   });
   addEventListener("keydown", (event) => { if (event.key === "Escape") setSettingsOpen(false); });
+  let resizeFollowFrame = 0;
+  addEventListener("resize", () => {
+    cancelAnimationFrame(resizeFollowFrame);
+    resizeFollowFrame = requestAnimationFrame(() => updateLyrics(positionNow(), true));
+  }, { passive: true });
   prefersReducedMotion.addEventListener?.("change", () => applyPreferences());
 
   applyPreferences();
   showLoading();
   requestAnimationFrame(animationFrame);
   post("ready");
-
-  // Deterministic browser-only preview used by repository visual tests. It is
-  // never entered in the app because the native host loads the bare file URL.
-  if (!window.webkit?.messageHandlers?.eevee && new URLSearchParams(location.search).get("preview") === "1") {
-    setTimeout(() => {
-      window.SpicyNative.receive({ type: "track", payload: {
-        id: "preview", title: "After Midnight", artist: "The Night Drive", album: "Neon Rooms", durationMs: 214000,
-        artwork: "preview-cover.svg", dominantColor: "6b3c91"
-      }});
-      window.SpicyNative.receive({ type: "lyrics", payload: { state: "ready", data: window.SPICY_PREVIEW_LYRICS } });
-      window.SpicyNative.receive({ type: "playback", payload: { positionMs: 18500, durationMs: 214000, isPlaying: true, playbackRate: 1, sequence: "1" } });
-    }, 80);
-  }
 })();

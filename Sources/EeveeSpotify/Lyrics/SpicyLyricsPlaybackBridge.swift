@@ -11,12 +11,9 @@ final class SpicyLyricsPlaybackBridge {
 
     private let queue = DispatchQueue(label: "com.eevee.spicylyrics.playback")
     private weak var player: AnyObject?
-    private var positionSeconds: Double = 0
-    private var durationSeconds: Double = 0
-    private var playbackRate: Double = 1
-    private var isPlaying = false
-    private var stateStamp = 0.0
-    private var trackIdentifier: String?
+    private var clock = SpicyLyricsPlaybackClock()
+    private var lastObserverStamp = 0.0
+    private var lastObserverReportedPlaying: Bool?
     private var sequence: UInt64 = 0
 
     private init() {}
@@ -25,20 +22,26 @@ final class SpicyLyricsPlaybackBridge {
         let positionRaw = (safeRead(state, key: "position") as? NSNumber)?.doubleValue ?? 0
         let durationRaw = (safeRead(state, key: "duration") as? NSNumber)?.doubleValue ?? 0
         let rate = (safeRead(state, key: "playbackSpeed") as? NSNumber)?.doubleValue ?? 1
-        let playing = (safeRead(state, key: "isPlaying") as? Bool) ?? false
+        let playing = safeBool(state, key: "isPlaying")
         let track = safeRead(state, key: "track") as AnyObject?
         let uri = extractURI(from: track)
+        let trackIdentifier = uri.flatMap { spotifyTrackID(from: $0) }
         let duration = normalizeSeconds(durationRaw, durationHint: durationRaw)
         let position = normalizeSeconds(positionRaw, durationHint: durationRaw)
+        let stamp = uptimeSeconds()
 
         queue.async {
             self.player = player
-            self.positionSeconds = max(0, position)
-            self.durationSeconds = max(0, duration)
-            self.playbackRate = rate > 0 ? rate : 1
-            self.isPlaying = playing
-            self.stateStamp = self.uptimeSeconds()
-            if let uri, !uri.isEmpty { self.trackIdentifier = self.spotifyTrackID(from: uri) }
+            self.clock.observe(
+                positionSeconds: position,
+                durationSeconds: duration,
+                playbackRate: rate,
+                isPlaying: playing,
+                trackIdentifier: trackIdentifier,
+                at: stamp
+            )
+            self.lastObserverStamp = stamp
+            self.lastObserverReportedPlaying = playing
             self.sequence &+= 1
         }
     }
@@ -50,20 +53,36 @@ final class SpicyLyricsPlaybackBridge {
         let fallbackRate = (nowPlaying?[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue
 
         return queue.sync {
-            let stateIsFresh = stateStamp != 0 && uptimeSeconds() - stateStamp < 2
-            let basePosition = stateIsFresh ? positionSeconds : (fallbackPosition ?? positionSeconds)
-            let baseDuration = stateIsFresh ? durationSeconds : (fallbackDuration ?? durationSeconds)
-            let baseRate = stateIsFresh ? playbackRate : max(0, fallbackRate ?? (isPlaying ? playbackRate : 0))
-            let playing = stateIsFresh ? isPlaying : baseRate > 0
-            let elapsed = stateIsFresh && stateStamp != 0 ? uptimeSeconds() - stateStamp : 0
-            let estimated = playing ? basePosition + elapsed * baseRate : basePosition
-            let bounded = baseDuration > 0 ? min(max(0, estimated), baseDuration) : max(0, estimated)
+            let now = uptimeSeconds()
+            let observerIsFresh = lastObserverStamp != 0 && now - lastObserverStamp < 2
+
+            if (!observerIsFresh || !clock.hasAnchor), let fallbackPosition {
+                clock.observe(
+                    positionSeconds: max(0, fallbackPosition),
+                    durationSeconds: max(0, fallbackDuration ?? 0),
+                    playbackRate: fallbackRate ?? 1,
+                    isPlaying: fallbackRate.map { $0 > 0 },
+                    trackIdentifier: clock.trackIdentifier,
+                    at: now
+                )
+                sequence &+= 1
+            } else if observerIsFresh,
+                      lastObserverReportedPlaying == nil,
+                      let fallbackRate {
+                clock.reconcilePlaybackState(
+                    isPlaying: fallbackRate > 0,
+                    playbackRate: fallbackRate,
+                    at: now
+                )
+            }
+
+            let snapshot = clock.snapshot(at: now)
             return [
-                "positionMs": Int(bounded * 1000),
-                "durationMs": Int(baseDuration * 1000),
-                "isPlaying": playing,
-                "playbackRate": baseRate > 0 ? baseRate : 1,
-                "trackId": trackIdentifier ?? "",
+                "positionMs": Int(snapshot.positionSeconds * 1000),
+                "durationMs": Int(snapshot.durationSeconds * 1000),
+                "isPlaying": snapshot.isPlaying,
+                "playbackRate": snapshot.playbackRate,
+                "trackId": snapshot.trackIdentifier ?? "",
                 "sequence": String(sequence)
             ]
         }
@@ -74,7 +93,7 @@ final class SpicyLyricsPlaybackBridge {
             let identifier = track.trackIdentifier
             if !identifier.isEmpty { return identifier }
         }
-        return queue.sync { trackIdentifier }
+        return queue.sync { clock.trackIdentifier }
     }
 
     /// UI metadata is deliberately read on the main thread. The artwork is
@@ -161,6 +180,11 @@ final class SpicyLyricsPlaybackBridge {
             return String(cString: raw)
         }()
         let argument = argumentType == "d" ? seconds : seconds * 1000
+        let stamp = uptimeSeconds()
+        queue.async {
+            self.clock.requestedSeek(to: seconds, at: stamp)
+            self.sequence &+= 1
+        }
         DispatchQueue.main.async { EeveeSBInvokeSeekDouble(player, selector, argument) }
         return true
     }
@@ -207,6 +231,12 @@ final class SpicyLyricsPlaybackBridge {
     private func safeRead(_ object: AnyObject?, key: String) -> Any? {
         guard let object, object.responds(to: NSSelectorFromString(key)) else { return nil }
         return object.value(forKey: key)
+    }
+
+    private func safeBool(_ object: AnyObject?, key: String) -> Bool? {
+        guard let value = safeRead(object, key: key) else { return nil }
+        if let number = value as? NSNumber { return number.boolValue }
+        return value as? Bool
     }
 
     private func normalizeSeconds(_ raw: Double, durationHint: Double) -> Double {

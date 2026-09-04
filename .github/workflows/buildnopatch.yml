@@ -69,6 +69,17 @@ jobs:
           chmod +x Tools/SwiftProtobufBuild/build-eeveeswiftprotobuf.sh
           Tools/SwiftProtobufBuild/build-eeveeswiftprotobuf.sh
 
+      - name: Test Spicy Lyrics playback clock
+        run: |
+          xcrun swiftc \
+            Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackClock.swift \
+            Tests/SpicyLyricsPlaybackClock/main.swift \
+            -o "$RUNNER_TEMP/spicy-lyrics-clock-tests"
+          "$RUNNER_TEMP/spicy-lyrics-clock-tests"
+
+      - name: Test Spicy Lyrics renderer bundle
+        run: python3 Tests/SpicyLyricsRenderer/test_bundle.py
+
       - name: Build .deb (rootless)
         env:
           REPO_SLUG: ${{ github.repository }}

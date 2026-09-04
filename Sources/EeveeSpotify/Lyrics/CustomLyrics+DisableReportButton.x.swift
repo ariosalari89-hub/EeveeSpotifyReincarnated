@@ -14,16 +14,18 @@ class LyricsFullscreenViewControllerHook: ClassHook<UIViewController> {
 
     func viewDidLoad() {
         orig.viewDidLoad()
+
+        if EeveeSpotify.hookTarget == .v91 {
+            if UserDefaults.lyricsSource == .spicylyrics {
+                SpicyLyricsFullscreenCoordinator.shared.attach(to: target)
+            }
+            return
+        }
         
         if UserDefaults.lyricsSource == .musixmatch
             && lyricsState.fallbackError == nil
             && !lyricsState.wasRomanized
             && !lyricsState.isEmpty {
-            return
-        }
-        
-        // 9.1.x has different view structure - skip headerView access
-        if EeveeSpotify.hookTarget == .v91 {
             return
         }
         
@@ -54,14 +56,13 @@ class LyricsFullscreenViewControllerHook: ClassHook<UIViewController> {
         }
     }
 
-    func viewDidAppear(_ animated: Bool) {
-        orig.viewDidAppear(animated)
+    func viewWillAppear(_ animated: Bool) {
+        orig.viewWillAppear(animated)
         guard EeveeSpotify.hookTarget == .v91,
               UserDefaults.lyricsSource == .spicylyrics else { return }
-        let controller = target
-        DispatchQueue.main.async {
-            SpicyLyricsFullscreenCoordinator.shared.attach(to: controller)
-        }
+        // viewDidLoad performs the normal pre-warm. This idempotent call also
+        // covers a reused controller whose previous host was detached.
+        SpicyLyricsFullscreenCoordinator.shared.attach(to: target)
     }
 
     func viewWillDisappear(_ animated: Bool) {

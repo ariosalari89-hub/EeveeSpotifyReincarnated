@@ -70,6 +70,10 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         webView.scrollView.isScrollEnabled = false
         webView.allowsLinkPreview = false
         webView.accessibilityLabel = "Spicy Lyrics"
+        // Load before the lyrics controller is presented. Keeping the native
+        // view visible until WebKit is ready avoids the late full-screen pop
+        // that occurred when the overlay was attached from viewDidAppear.
+        webView.alpha = 0
 
         controller.view.addSubview(webView)
         NSLayoutConstraint.activate([
@@ -153,6 +157,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         ])
 
         publishPlaybackAndTrack(forceTrack: true)
+        revealRenderer()
         playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             self?.publishPlaybackAndTrack(forceTrack: false)
         }
@@ -268,6 +273,26 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         } else {
             controller.view.window?.rootViewController?.dismiss(animated: true)
         }
+    }
+
+    private func revealRenderer() {
+        guard let controller, let webView, webView.alpha < 1 else { return }
+        controller.view.bringSubviewToFront(webView)
+
+        // If presentation has not started, make the renderer part of the
+        // controller's normal transition. If it became ready unusually late,
+        // use a very short continuity fade over the still-live native view.
+        guard controller.viewIfLoaded?.window != nil,
+              !UIAccessibility.isReduceMotionEnabled else {
+            webView.alpha = 1
+            return
+        }
+        UIView.animate(
+            withDuration: 0.16,
+            delay: 0,
+            options: [.beginFromCurrentState, .curveEaseOut, .allowUserInteraction],
+            animations: { webView.alpha = 1 }
+        )
     }
 
     private func fallBackToNative(reason: String) {
