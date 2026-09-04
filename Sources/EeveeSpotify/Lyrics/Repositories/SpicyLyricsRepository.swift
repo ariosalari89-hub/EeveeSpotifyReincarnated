@@ -30,6 +30,8 @@ class SpicyLyricsRepository: LyricsRepository {
     }
 
     private let session: URLSession
+    private let rendererCacheLock = NSLock()
+    private var rendererPayloadCache: [String: Data] = [:]
 
     private static let apiUrl        = "https://api.spicylyrics.org"
     private static let authHeaderKey = "SpicyLyrics-WebAuth"
@@ -192,6 +194,21 @@ class SpicyLyricsRepository: LyricsRepository {
             throw LyricsError.decodingError
         }
 
+        do {
+            let rendererData = try packed.jsonData()
+            rendererCacheLock.lock()
+            rendererPayloadCache[trackId] = rendererData
+            // A few songs are enough for instant reopen/back behavior without
+            // letting a long listening session grow this cache indefinitely.
+            if rendererPayloadCache.count > 8,
+               let oldestOtherKey = rendererPayloadCache.keys.first(where: { $0 != trackId }) {
+                rendererPayloadCache.removeValue(forKey: oldestOtherKey)
+            }
+            rendererCacheLock.unlock()
+        } catch {
+            writeDebugLog("[SpicyLyrics] Could not serialize renderer payload for \(trackId): \(error)")
+        }
+
         guard let type = packed["Type"]?.stringValue else {
             writeDebugLog("[SpicyLyrics] Missing Type for \(trackId)")
             throw LyricsError.decodingError
@@ -309,5 +326,23 @@ class SpicyLyricsRepository: LyricsRepository {
         }
         let data = try performQuery(trackId: trackId)
         return try parseLyricsData(data, trackId: trackId)
+    }
+
+    /// Returns the lossless Spicy Lyrics payload used by the local full-screen
+    /// renderer. This intentionally contains no Spotify access token.
+    func rendererPayloadData(for trackId: String) throws -> Data {
+        rendererCacheLock.lock()
+        let cached = rendererPayloadCache[trackId]
+        rendererCacheLock.unlock()
+        if let cached { return cached }
+
+        let response = try performQuery(trackId: trackId)
+        _ = try parseLyricsData(response, trackId: trackId)
+
+        rendererCacheLock.lock()
+        let loaded = rendererPayloadCache[trackId]
+        rendererCacheLock.unlock()
+        guard let loaded else { throw LyricsError.decodingError }
+        return loaded
     }
 }

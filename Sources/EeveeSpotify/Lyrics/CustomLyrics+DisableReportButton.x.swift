@@ -53,4 +53,20 @@ class LyricsFullscreenViewControllerHook: ClassHook<UIViewController> {
             reportButton.isEnabled = false
         }
     }
+
+    func viewDidAppear(_ animated: Bool) {
+        orig.viewDidAppear(animated)
+        guard EeveeSpotify.hookTarget == .v91,
+              UserDefaults.lyricsSource == .spicylyrics else { return }
+        DispatchQueue.main.async {
+            SpicyLyricsFullscreenCoordinator.shared.attach(to: target)
+        }
+    }
+
+    func viewWillDisappear(_ animated: Bool) {
+        if EeveeSpotify.hookTarget == .v91 {
+            SpicyLyricsFullscreenCoordinator.shared.detach(from: target)
+        }
+        orig.viewWillDisappear(animated)
+    }
 }

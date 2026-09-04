@@ -48,6 +48,10 @@ class BundleHelper {
         }
         return nil
     }
+
+    func resourceURL(_ name: String, withExtension ext: String?, subdirectory: String? = nil) -> URL? {
+        bundle?.url(forResource: name, withExtension: ext, subdirectory: subdirectory)
+    }
     
     func localizedString(_ key: String) -> String {
         guard let bundle = self.bundle else { return key }

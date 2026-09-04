@@ -7,10 +7,12 @@ private let eeveeObserver = EeveeSponsorBlockObserver()
 
 @objc final class EeveeSponsorBlockObserver: NSObject {
     @objc func player(_ player: AnyObject, stateDidChange newState: AnyObject) {
+        SpicyLyricsPlaybackBridge.shared.processStateChange(player: player, state: newState)
         SponsorBlockSkipper.shared.processStateChange(player: player, state: newState)
     }
 
     @objc func player(_ player: AnyObject, stateDidChange newState: AnyObject, fromState oldState: AnyObject) {
+        SpicyLyricsPlaybackBridge.shared.processStateChange(player: player, state: newState)
         SponsorBlockSkipper.shared.processStateChange(player: player, state: newState)
     }
 

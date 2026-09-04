@@ -227,4 +227,29 @@ extension SLObjPackValue {
         guard let arr = arrayValue, index < arr.count else { return nil }
         return arr[index]
     }
+
+    /// Converts the decoded value into a JSONSerialization-compatible tree.
+    /// The desktop-style renderer consumes the full Spicy payload so timings,
+    /// background vocals, transliterations, and future optional fields are not
+    /// flattened away by Spotify's line-only LyricsDto.
+    var foundationObject: Any {
+        switch self {
+        case .null:
+            return NSNull()
+        case .bool(let value):
+            return value
+        case .number(let value):
+            return value
+        case .string(let value):
+            return value
+        case .array(let values):
+            return values.map { $0.foundationObject }
+        case .object(let values):
+            return values.mapValues { $0.foundationObject }
+        }
+    }
+
+    func jsonData() throws -> Data {
+        try JSONSerialization.data(withJSONObject: foundationObject, options: [])
+    }
 }

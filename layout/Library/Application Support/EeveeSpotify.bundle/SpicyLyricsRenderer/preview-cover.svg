@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#221947"/><stop offset=".48" stop-color="#83477e"/><stop offset="1" stop-color="#f18b68"/></linearGradient>
+    <radialGradient id="r"><stop stop-color="#ffceb5" stop-opacity=".8"/><stop offset="1" stop-color="#ffceb5" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="640" height="640" fill="url(#g)"/>
+  <circle cx="470" cy="140" r="220" fill="url(#r)"/>
+  <path d="M0 460 190 265l122 128 78-76 250 250v73H0z" fill="#11152a" opacity=".72"/>
+  <text x="54" y="116" fill="white" font-family="Arial,sans-serif" font-size="58" font-weight="700">NEON</text>
+  <text x="54" y="174" fill="white" font-family="Arial,sans-serif" font-size="58" font-weight="700">ROOMS</text>
+</svg>

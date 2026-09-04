@@ -24,6 +24,13 @@ void EeveeSBInvokeSeekDouble(id target, SEL selector, double argument) {
     (void)fn(target, selector, argument);
 }
 
+void EeveeInvokeVoidNoArg(id target, SEL selector) {
+    if (!target || !selector) return;
+    typedef void (*VoidFn)(id, SEL);
+    VoidFn fn = (VoidFn)objc_msgSend;
+    fn(target, selector);
+}
+
 static void writeDebugLog(NSString *message) {
     NSString *logPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"eeveespotify_debug.log"];
     NSString *timestamp = [[NSDate date] description];
