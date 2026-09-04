@@ -8,6 +8,9 @@ const model = require(path.resolve(
 ));
 
 assert.equal(model.compareSequence("90071992547409930", "90071992547409929"), 1);
+assert.equal(model.shouldAcceptGeneration("8", "7"), false, "an older track generation must be rejected");
+assert.equal(model.shouldAcceptGeneration("8", "8"), true, "the current track generation must be accepted");
+assert.equal(model.shouldAcceptGeneration("8", "9"), true, "a newer track generation must be accepted");
 assert.equal(
   model.shouldAcceptPlayback(
     { generation: "7", sequence: "12" },
@@ -15,6 +18,14 @@ assert.equal(
   ),
   false,
   "an older sequence in the current generation must be rejected"
+);
+assert.equal(
+  model.shouldAcceptPlayback(
+    { generation: "8", sequence: "2" },
+    { generation: "7", sequence: "999" }
+  ),
+  false,
+  "a late playback message from the previous song must never rewind the renderer"
 );
 assert.equal(
   model.shouldAcceptPlayback(

@@ -21,9 +21,18 @@
     }
   }
 
+  function shouldAcceptGeneration(current, incoming) {
+    const currentGeneration = String(current || "");
+    const incomingGeneration = String(incoming || "");
+    if (!incomingGeneration) return !currentGeneration;
+    if (!currentGeneration) return true;
+    return compareSequence(incomingGeneration, currentGeneration) >= 0;
+  }
+
   function shouldAcceptPlayback(current, incoming) {
     const currentGeneration = String(current?.generation || "");
     const incomingGeneration = String(incoming?.generation || "");
+    if (!shouldAcceptGeneration(currentGeneration, incomingGeneration)) return false;
     if (incomingGeneration !== currentGeneration) return true;
     return compareSequence(incoming?.sequence, current?.sequence) > 0;
   }
@@ -75,6 +84,7 @@
 
   return {
     compareSequence,
+    shouldAcceptGeneration,
     shouldAcceptPlayback,
     interpolatedPosition,
     groupTokens,

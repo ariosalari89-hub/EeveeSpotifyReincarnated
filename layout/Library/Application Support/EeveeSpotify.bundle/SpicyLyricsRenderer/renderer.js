@@ -739,6 +739,7 @@
   function applyTrack(track) {
     const incomingTrackId = String(track?.id || "");
     const incomingGeneration = String(track?.generation || state.generation || "");
+    if (!model.shouldAcceptGeneration(state.generation, incomingGeneration)) return;
     const changedIdentity = incomingTrackId
       && (incomingTrackId !== state.trackId
         || (incomingGeneration && incomingGeneration !== state.generation));
@@ -791,6 +792,7 @@
   function applyPlayback(playback) {
     const incomingTrackId = String(playback.trackId || "");
     const incomingGeneration = String(playback.generation || "");
+    if (!model.shouldAcceptGeneration(state.generation, incomingGeneration)) return;
     if (incomingGeneration && state.generation && incomingGeneration !== state.generation) {
       // The track envelope normally arrives first, but treating playback as a
       // generation boundary makes rapid repeated skips safe even if WebKit
