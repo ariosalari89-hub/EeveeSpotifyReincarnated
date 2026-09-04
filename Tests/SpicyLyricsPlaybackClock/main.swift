@@ -8,6 +8,28 @@ private func requireNear(_ value: Double, _ expected: Double, tolerance: Double 
     require(abs(value - expected) <= tolerance, "\(message): expected \(expected), got \(value)")
 }
 
+var secondsUnits = SpicyLyricsPlaybackUnitNormalizer()
+let secondsDuration = secondsUnits.durationSeconds(193_000)
+requireNear(secondsDuration, 193, "millisecond duration was not normalized")
+requireNear(
+    secondsUnits.positionSeconds(2, durationSeconds: secondsDuration, referenceSeconds: 2),
+    2,
+    "seconds position was divided because duration used milliseconds"
+)
+
+var millisecondsUnits = SpicyLyricsPlaybackUnitNormalizer()
+let millisecondsDuration = millisecondsUnits.durationSeconds(193_000)
+requireNear(
+    millisecondsUnits.positionSeconds(100, durationSeconds: millisecondsDuration, referenceSeconds: 0.1),
+    0.1,
+    "early millisecond position did not use the system clock reference"
+)
+requireNear(
+    millisecondsUnits.positionSeconds(2_000, durationSeconds: millisecondsDuration, referenceSeconds: 2),
+    2,
+    "learned millisecond position scale was not retained"
+)
+
 private func sample(
     _ clock: inout SpicyLyricsPlaybackClock,
     position: Double,
@@ -123,5 +145,30 @@ requireNear(trackClock.snapshot(at: 5).positionSeconds, 120, "clock ran past dur
 sample(&trackClock, position: 2, at: 5, track: "track-b", duration: 200)
 requireNear(trackClock.snapshot(at: 5).positionSeconds, 2, "track change retained old position")
 require(trackClock.snapshot(at: 5).trackIdentifier == "track-b", "track identifier did not update")
+
+// Returning from the background replaces the old interpolated position with
+// the authoritative system transport clock, regardless of time spent hidden.
+var foregroundClock = SpicyLyricsPlaybackClock()
+sample(&foregroundClock, position: 20, at: 0)
+foregroundClock.reanchor(
+    positionSeconds: 47.25,
+    durationSeconds: 180,
+    playbackRate: 1,
+    isPlaying: true,
+    trackIdentifier: "track-a",
+    at: 30
+)
+requireNear(foregroundClock.snapshot(at: 30).positionSeconds, 47.25, "foreground reanchor kept stale hidden time")
+requireNear(foregroundClock.snapshot(at: 31).positionSeconds, 48.25, "foreground reanchor did not resume")
+
+foregroundClock.reanchor(
+    positionSeconds: 61,
+    durationSeconds: 180,
+    playbackRate: 1,
+    isPlaying: false,
+    trackIdentifier: "track-a",
+    at: 40
+)
+requireNear(foregroundClock.snapshot(at: 50).positionSeconds, 61, "paused foreground reanchor advanced")
 
 print("Spicy Lyrics playback clock regression tests passed")

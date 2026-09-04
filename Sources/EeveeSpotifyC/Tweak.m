@@ -40,9 +40,9 @@ void EeveeInvokeBoolArg(id target, SEL selector, BOOL argument) {
 
 void EeveeInvokeObjectArg(id target, SEL selector, id argument) {
     if (!target || !selector) return;
-    typedef id (*ObjectFn)(id, SEL, id);
+    typedef void (*ObjectFn)(id, SEL, id);
     ObjectFn fn = (ObjectFn)objc_msgSend;
-    (void)fn(target, selector, argument);
+    fn(target, selector, argument);
 }
 
 static void writeDebugLog(NSString *message) {

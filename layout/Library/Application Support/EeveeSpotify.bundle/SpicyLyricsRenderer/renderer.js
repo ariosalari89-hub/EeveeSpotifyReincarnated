@@ -44,12 +44,16 @@
 
   const state = {
     rawLyrics: null,
+    trackId: "",
+    lyricsTrackId: "",
+    lyricsTimeScale: 1000,
     lines: [],
     lineElements: [],
     activeLine: -1,
     followLyrics: true,
     draggingSeek: false,
     dragPosition: 0,
+    clockSuspended: false,
     nativeReduceMotion: false,
     playback: {
       positionMs: 0,
@@ -73,9 +77,58 @@
   const reduceMotion = () => state.nativeReduceMotion || prefersReducedMotion.matches;
   const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
   const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-  const toMilliseconds = (value) => {
-    const number = finite(value, 0);
-    return Math.abs(number) > 10000 ? number : number * 1000;
+  const optionalFinite = (value) => {
+    if (value == null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+
+  function lyricTimeScale(data) {
+    const values = [];
+    const add = (value) => {
+      const number = optionalFinite(value);
+      if (number != null && number >= 0) values.push(number);
+    };
+    const addTimed = (value) => {
+      if (!value || typeof value !== "object") return;
+      add(value.StartTime);
+      add(value.EndTime);
+    };
+
+    addTimed(data);
+    (Array.isArray(data?.Content) ? data.Content : []).forEach((entry) => {
+      addTimed(entry);
+      addTimed(entry?.Lead);
+      (entry?.Lead?.Syllables || []).forEach(addTimed);
+      (entry?.Background || []).forEach((background) => {
+        addTimed(background);
+        (background?.Syllables || []).forEach(addTimed);
+      });
+    });
+
+    const maximum = values.length ? Math.max(...values) : 0;
+    if (maximum <= 0) return 1000;
+
+    // Spicy Lyrics normally reports seconds, but community/provider payloads
+    // also exist in milliseconds (and occasionally microseconds). Pick one
+    // scale for the whole payload. The previous per-value heuristic mixed
+    // units inside one song, corrupting its opening timestamps.
+    const duration = state.playback.durationMs;
+    const candidates = [1000, 1, .001];
+    if (duration > 0) {
+      return candidates.reduce((best, candidate) => {
+        const error = Math.abs(maximum * candidate - duration) / duration;
+        return error < best.error ? { scale: candidate, error } : best;
+      }, { scale: 1000, error: Infinity }).scale;
+    }
+    if (maximum > 1_000_000) return .001;
+    if (maximum > 10_000) return 1;
+    return 1000;
+  }
+
+  const toMilliseconds = (value, scale) => {
+    const number = optionalFinite(value);
+    return number == null ? null : number * scale;
   };
 
   function formatTime(milliseconds) {
@@ -84,12 +137,12 @@
     return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
   }
 
-  function post(type, payload = {}, button = null) {
+  function post(type, payload = {}, button = null, timeoutMs = 1800) {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     if (button) {
       button.classList.add("pending");
       button.setAttribute("aria-busy", "true");
-      const timeout = setTimeout(() => settleCommand(requestId), 1800);
+      const timeout = setTimeout(() => settleCommand(requestId), timeoutMs);
       state.pendingCommands.set(requestId, { button, timeout });
     }
     const message = { type, requestId, ...payload };
@@ -252,7 +305,11 @@
       const original = String(syllable?.Text ?? "").replace(/[\u200B-\u200D\uFEFF]/g, "");
       const transliterated = String(syllable?.TransliteratedText ?? "").trim();
       const text = romanized && transliterated ? transliterated : original;
-      if (index > 0 && !syllable?.IsPartOfWord) result += " ";
+      // Spicy's flag means this syllable joins the *next* one. It is not a
+      // marker saying the current syllable joins the previous one.
+      const previousJoinsCurrent = index > 0 && syllables[index - 1]?.IsPartOfWord === true;
+      const punctuation = /^[,.;:!?%\)\]\}\u2019\u201d]/u.test(text);
+      if (index > 0 && !previousJoinsCurrent && !punctuation && !/^\s/u.test(text)) result += " ";
       result += text;
     });
     return result;
@@ -269,22 +326,41 @@
     return candidates.find((value) => typeof value === "string" && value.trim()) || "";
   }
 
-  function normalizeTokens(syllables) {
-    return (syllables || []).map((syllable, index) => ({
-      text: String(syllable?.Text ?? "").replace(/[\u200B-\u200D\uFEFF]/g, ""),
-      transliterated: String(syllable?.TransliteratedText ?? ""),
-      start: toMilliseconds(syllable?.StartTime),
-      end: toMilliseconds(syllable?.EndTime),
-      spaceBefore: index > 0 && !syllable?.IsPartOfWord
-    })).filter((token) => token.text || token.transliterated);
+  function normalizeTokens(syllables, timeScale, parentStart, parentEnd) {
+    const source = Array.isArray(syllables) ? syllables : [];
+    return source.map((syllable, index) => {
+      const text = String(syllable?.Text ?? "").replace(/[\u200B-\u200D\uFEFF]/g, "");
+      const transliterated = String(syllable?.TransliteratedText ?? "");
+      const previousJoinsCurrent = index > 0 && source[index - 1]?.IsPartOfWord === true;
+      const displayText = transliterated.trim() || text;
+      const punctuation = /^[,.;:!?%\)\]\}\u2019\u201d]/u.test(displayText);
+      const start = toMilliseconds(syllable?.StartTime, timeScale)
+        ?? (index === 0 ? parentStart : null);
+      const nextStart = toMilliseconds(source[index + 1]?.StartTime, timeScale);
+      const explicitEnd = toMilliseconds(syllable?.EndTime, timeScale);
+      const end = explicitEnd != null && start != null && explicitEnd > start
+        ? explicitEnd
+        : (nextStart != null && start != null && nextStart > start
+          ? nextStart
+          : (index === source.length - 1 ? parentEnd : null));
+      return {
+        text,
+        transliterated,
+        start,
+        end: start != null && end != null && end > start ? end : (start != null ? start + 250 : null),
+        spaceBefore: index > 0 && !previousJoinsCurrent && !punctuation && !/^\s/u.test(displayText)
+      };
+    }).filter((token) => (token.text || token.transliterated) && Number.isFinite(token.start));
   }
 
   function normalizeLyrics(data) {
     if (!data || typeof data !== "object") return [];
-    const type = String(data.Type || "");
+    const type = String(data.Type || "").toLowerCase();
+    const timeScale = lyricTimeScale(data);
+    state.lyricsTimeScale = timeScale;
     const output = [];
 
-    if (type === "Static") {
+    if (type === "static") {
       (data.Lines || []).forEach((line) => {
         const text = String(line?.Text ?? "").trim();
         if (text) output.push({ kind: "static", text, start: null, end: null });
@@ -295,49 +371,55 @@
     const content = Array.isArray(data.Content) ? data.Content : [];
     let previousLeadEnd = 0;
     content.forEach((entry, index) => {
-      if (entry?.Type && entry.Type !== "Vocal") {
-        const start = toMilliseconds(entry.StartTime);
-        const end = toMilliseconds(entry.EndTime);
-        if (end > start) output.push({ kind: "interlude", start, end });
+      if (entry?.Type && String(entry.Type).toLowerCase() !== "vocal") {
+        const start = toMilliseconds(entry.StartTime, timeScale);
+        const end = toMilliseconds(entry.EndTime, timeScale);
+        if (start != null && end != null && end > start) output.push({ kind: "interlude", start, end });
         return;
       }
 
-      if (type === "Syllable" || entry?.Lead?.Syllables) {
+      if (type === "syllable" || Array.isArray(entry?.Lead?.Syllables)) {
         const lead = entry?.Lead || {};
-        const tokens = normalizeTokens(lead.Syllables);
+        const leadStart = toMilliseconds(lead.StartTime, timeScale);
+        const leadEnd = toMilliseconds(lead.EndTime, timeScale);
+        const tokens = normalizeTokens(lead.Syllables, timeScale, leadStart, leadEnd);
         if (!tokens.length && !lead.Text) return;
-        const start = lead.StartTime != null
-          ? toMilliseconds(lead.StartTime)
-          : finite(tokens[0]?.start);
-        const end = lead.EndTime != null
-          ? toMilliseconds(lead.EndTime)
-          : finite(tokens[tokens.length - 1]?.end);
+        const start = leadStart ?? tokens[0]?.start;
+        const end = leadEnd ?? tokens[tokens.length - 1]?.end;
+        if (!Number.isFinite(start)) return;
+        const safeEnd = Number.isFinite(end) && end > start ? end : start + 250;
         if (start - previousLeadEnd >= 4200) output.push({ kind: "interlude", start: previousLeadEnd, end: start });
         output.push({
           kind: "lead",
           start,
-          end: Math.max(end, start + 250),
+          end: safeEnd,
           tokens,
           text: lead.Text || textFromSyllables(lead.Syllables, false),
           romanizedText: lead.TransliteratedText || textFromSyllables(lead.Syllables, true),
           translation: translationFrom(entry, lead),
           opposite: Boolean(entry.OppositeAligned ?? lead.OppositeAligned)
         });
-        previousLeadEnd = Math.max(previousLeadEnd, end);
+        previousLeadEnd = Math.max(previousLeadEnd, safeEnd);
 
         (entry.Background || []).forEach((background) => {
-          const backgroundTokens = normalizeTokens(background?.Syllables);
+          const rawBackgroundStart = toMilliseconds(background?.StartTime, timeScale);
+          const rawBackgroundEnd = toMilliseconds(background?.EndTime, timeScale);
+          const backgroundTokens = normalizeTokens(
+            background?.Syllables,
+            timeScale,
+            rawBackgroundStart,
+            rawBackgroundEnd
+          );
           if (!backgroundTokens.length) return;
-          const backgroundStart = background.StartTime != null
-            ? toMilliseconds(background.StartTime)
-            : finite(backgroundTokens[0]?.start);
-          const backgroundEnd = background.EndTime != null
-            ? toMilliseconds(background.EndTime)
-            : finite(backgroundTokens[backgroundTokens.length - 1]?.end);
+          const backgroundStart = rawBackgroundStart ?? backgroundTokens[0]?.start;
+          const backgroundEnd = rawBackgroundEnd ?? backgroundTokens[backgroundTokens.length - 1]?.end;
+          if (!Number.isFinite(backgroundStart)) return;
           output.push({
             kind: "background",
             start: backgroundStart,
-            end: Math.max(backgroundEnd, backgroundStart + 250),
+            end: Number.isFinite(backgroundEnd) && backgroundEnd > backgroundStart
+              ? backgroundEnd
+              : backgroundStart + 250,
             tokens: backgroundTokens,
             text: textFromSyllables(background.Syllables, false),
             romanizedText: textFromSyllables(background.Syllables, true),
@@ -350,10 +432,16 @@
 
       const text = String(entry?.Text ?? entry?.Lead?.Text ?? "").trim();
       if (!text) return;
-      const start = toMilliseconds(entry.StartTime ?? entry.Lead?.StartTime);
-      const explicitEnd = toMilliseconds(entry.EndTime ?? entry.Lead?.EndTime);
-      const nextStart = toMilliseconds(content[index + 1]?.StartTime ?? content[index + 1]?.Lead?.StartTime);
-      const end = explicitEnd > start ? explicitEnd : (nextStart > start ? nextStart : start + 4200);
+      const start = toMilliseconds(entry.StartTime ?? entry.Lead?.StartTime, timeScale);
+      if (!Number.isFinite(start)) return;
+      const explicitEnd = toMilliseconds(entry.EndTime ?? entry.Lead?.EndTime, timeScale);
+      const nextVocal = content.slice(index + 1).find((candidate) => (
+        !candidate?.Type || String(candidate.Type).toLowerCase() === "vocal"
+      ));
+      const nextStart = toMilliseconds(nextVocal?.StartTime ?? nextVocal?.Lead?.StartTime, timeScale);
+      const end = explicitEnd != null && explicitEnd > start
+        ? explicitEnd
+        : (nextStart != null && nextStart > start ? nextStart : start + 4200);
       if (start - previousLeadEnd >= 4200) output.push({ kind: "interlude", start: previousLeadEnd, end: start });
       output.push({
         kind: "lead",
@@ -374,8 +462,9 @@
     return output.filter((line) => line.kind === "interlude" ? line.end > line.start : Boolean(line.text || line.tokens?.length));
   }
 
-  function renderLyrics(raw) {
+  function renderLyrics(raw, trackId = state.trackId) {
     state.rawLyrics = raw;
+    state.lyricsTrackId = trackId || "";
     state.lines = normalizeLyrics(raw);
     state.lineElements = [];
     state.activeLine = -1;
@@ -448,6 +537,17 @@
 
     dom.lyricState.hidden = true;
     dom.app.setAttribute("aria-busy", "false");
+    const timedLines = state.lines.filter((line) => Number.isFinite(line.start));
+    post("diagnostic", {
+      kind: "lyricsNormalized",
+      trackId: state.lyricsTrackId,
+      lyricsType: String(raw?.Type || "unknown"),
+      lineCount: state.lines.length,
+      timedLineCount: timedLines.length,
+      firstStartMs: timedLines[0]?.start ?? -1,
+      lastEndMs: timedLines[timedLines.length - 1]?.end ?? -1,
+      timeScale: state.lyricsTimeScale
+    });
     requestAnimationFrame(() => updateLyrics(positionNow(), true));
   }
 
@@ -458,7 +558,7 @@
   function positionNow() {
     if (state.draggingSeek) return state.dragPosition;
     const base = state.playback.positionMs;
-    if (!state.playback.isPlaying) return base;
+    if (!state.playback.isPlaying || state.clockSuspended) return base;
     return base + (performance.now() - state.playback.receivedAt) * state.playback.playbackRate;
   }
 
@@ -485,8 +585,13 @@
     const activeIndex = findActiveLine(position);
     state.lines.forEach((line, index) => {
       const isBackgroundActive = line.kind === "background" && position >= line.start && position <= line.end;
-      line.element?.classList.toggle("active", index === activeIndex || isBackgroundActive);
+      const isActive = index === activeIndex || isBackgroundActive;
+      line.element?.classList.toggle("active", isActive);
       line.element?.classList.toggle("past", Number.isFinite(line.end) && position > line.end);
+      if (line.element && line.kind === "lead") {
+        if (isActive) line.element.setAttribute("aria-current", "true");
+        else line.element.removeAttribute("aria-current");
+      }
     });
     if (activeIndex !== state.activeLine) {
       state.activeLine = activeIndex;
@@ -564,6 +669,17 @@
   }
 
   function applyTrack(track) {
+    const incomingTrackId = String(track?.id || "");
+    if (incomingTrackId && incomingTrackId !== state.trackId) {
+      state.trackId = incomingTrackId;
+      state.lyricsTrackId = "";
+      state.rawLyrics = null;
+      state.lines = [];
+      state.activeLine = -1;
+      state.followLyrics = true;
+      updateFollowButton();
+      showLoading();
+    }
     const title = track?.title || "Unknown track";
     const artist = track?.artist || "Unknown artist";
     dom.title.textContent = title;
@@ -585,6 +701,11 @@
   }
 
   function applyPlayback(playback) {
+    const incomingTrackId = String(playback.trackId || "");
+    // Native publishes the new track envelope before its playback envelope.
+    // If an observer races and still carries the old track, never apply that
+    // position to the new song's lyrics.
+    if (incomingTrackId && state.trackId && incomingTrackId !== state.trackId) return;
     const incomingDuration = finite(playback.durationMs);
     state.playback = {
       positionMs: finite(playback.positionMs),
@@ -594,6 +715,7 @@
       receivedAt: performance.now(),
       sequence: String(playback.sequence || "0")
     };
+    state.clockSuspended = false;
     dom.play.classList.toggle("is-playing", state.playback.isPlaying);
     dom.play.setAttribute("aria-label", state.playback.isPlaying ? "Pause" : "Play");
     ambient.setPlaying(state.playback.isPlaying);
@@ -674,9 +796,19 @@
       case "track": applyTrack(payload); break;
       case "playback": applyPlayback(payload); break;
       case "lyrics":
+        if (payload.trackId && state.trackId && payload.trackId !== state.trackId) break;
         if (payload.state === "loading") showLoading();
-        else if (payload.state === "ready") renderLyrics(payload.data);
+        else if (payload.state === "ready") renderLyrics(payload.data, payload.trackId);
         else showLyricsState(payload.message || "Lyrics are temporarily unavailable.", true);
+        break;
+      case "lifecycle":
+        if (payload.state === "hidden") {
+          state.playback.positionMs = positionNow();
+          state.playback.receivedAt = performance.now();
+          state.clockSuspended = true;
+        } else if (payload.state === "visible") {
+          state.clockSuspended = true;
+        }
         break;
       case "commandResult": settleCommand(payload.requestId); break;
       }
@@ -688,8 +820,8 @@
     setLocalPlaying(!state.playback.isPlaying);
     post("togglePlay", {}, dom.play);
   });
-  dom.previous.addEventListener("click", () => post("previous", {}, dom.previous));
-  dom.next.addEventListener("click", () => post("next", {}, dom.next));
+  dom.previous.addEventListener("click", () => post("previous", {}, dom.previous, 9000));
+  dom.next.addEventListener("click", () => post("next", {}, dom.next, 9000));
   dom.settings.addEventListener("click", () => setSettingsOpen(true));
   dom.settingsClose.addEventListener("click", () => setSettingsOpen(false));
   dom.settingsScrim.addEventListener("click", () => setSettingsOpen(false));
@@ -698,7 +830,22 @@
     updateFollowButton();
     if (state.activeLine >= 0) scrollToLine(state.activeLine);
   });
-  dom.scroller.addEventListener("pointerdown", () => {
+  let scrollPointerStart = null;
+  dom.scroller.addEventListener("pointerdown", (event) => {
+    scrollPointerStart = { y: event.clientY, scrollTop: dom.scroller.scrollTop };
+  }, { passive: true });
+  dom.scroller.addEventListener("pointermove", (event) => {
+    if (!scrollPointerStart || !state.followLyrics) return;
+    const moved = Math.abs(event.clientY - scrollPointerStart.y) >= 8;
+    const scrolled = Math.abs(dom.scroller.scrollTop - scrollPointerStart.scrollTop) >= 4;
+    if (!moved && !scrolled) return;
+    state.followLyrics = false;
+    updateFollowButton();
+  }, { passive: true });
+  const clearScrollPointer = () => { scrollPointerStart = null; };
+  dom.scroller.addEventListener("pointerup", clearScrollPointer, { passive: true });
+  dom.scroller.addEventListener("pointercancel", clearScrollPointer, { passive: true });
+  dom.scroller.addEventListener("wheel", () => {
     state.followLyrics = false;
     updateFollowButton();
   }, { passive: true });
@@ -748,6 +895,16 @@
   addEventListener("resize", () => {
     cancelAnimationFrame(resizeFollowFrame);
     resizeFollowFrame = requestAnimationFrame(() => updateLyrics(positionNow(), true));
+  }, { passive: true });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      state.playback.positionMs = positionNow();
+      state.playback.receivedAt = performance.now();
+      state.clockSuspended = true;
+    } else {
+      state.clockSuspended = true;
+      post("resync");
+    }
   }, { passive: true });
   prefersReducedMotion.addEventListener?.("change", () => applyPreferences());
 

@@ -240,16 +240,19 @@ class SpicyLyricsRepository: LyricsRepository {
 
             let lineText: String
             if let syllables = lead["Syllables"]?.arrayValue, !syllables.isEmpty {
-                // Real client rule (Syllable.ts): a syllable with IsPartOfWord=true
-                // attaches directly to the previous syllable (continues the same
-                // word, e.g. "re" + "call" -> "recall"); otherwise it starts a new
-                // word and needs a preceding space. Plain .joined() (no separator)
-                // ignored this entirely, producing "Doyourecall,notlongago?".
+                // Real client rule (Syllable.ts): IsPartOfWord marks a syllable
+                // that joins the *next* syllable. The old parser read the flag in
+                // the opposite direction, producing "A ny" and "fanta sy" on a
+                // broad class of otherwise-valid karaoke payloads.
                 var text = ""
-                for syllable in syllables {
+                for (index, syllable) in syllables.enumerated() {
                     guard let syllableText = syllable["Text"]?.stringValue else { continue }
-                    let isPartOfWord = syllable["IsPartOfWord"]?.boolValue ?? false
-                    if !text.isEmpty && !isPartOfWord {
+                    let previousJoinsCurrent = index > 0
+                        && (syllables[index - 1]["IsPartOfWord"]?.boolValue ?? false)
+                    let startsWithPunctuation = syllableText.first.map {
+                        ",.;:!?%)]}\u{2019}\u{201D}".contains($0)
+                    } ?? false
+                    if !text.isEmpty && !previousJoinsCurrent && !startsWithPunctuation {
                         text += " "
                     }
                     text += syllableText

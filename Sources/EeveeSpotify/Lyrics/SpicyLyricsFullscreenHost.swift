@@ -30,6 +30,9 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private var webView: WKWebView?
     private var playbackTimer: Timer?
     private var readyWatchdog: Timer?
+    private var revealWatchdog: Timer?
+    private var foregroundResyncTimer: Timer?
+    private var lifecycleObservers = [NSObjectProtocol]()
     private var isReady = false
     private var isDetached = false
     private var activeTrackID = ""
@@ -88,6 +91,23 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         let directory = pageURL.deletingLastPathComponent()
         webView.loadFileURL(pageURL, allowingReadAccessTo: directory)
 
+        lifecycleObservers = [
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.willResignActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.emit(type: "lifecycle", payload: ["state": "hidden"])
+            },
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.resynchronizeAfterForeground()
+            }
+        ]
+
         readyWatchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
             guard let self, !self.isReady else { return }
             self.fallBackToNative(reason: "renderer did not become ready")
@@ -103,6 +123,12 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         playbackTimer = nil
         readyWatchdog?.invalidate()
         readyWatchdog = nil
+        revealWatchdog?.invalidate()
+        revealWatchdog = nil
+        foregroundResyncTimer?.invalidate()
+        foregroundResyncTimer = nil
+        lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
+        lifecycleObservers.removeAll()
         lyricsRequestID = UUID()
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "eevee")
         webView?.navigationDelegate = nil
@@ -127,15 +153,41 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
             let milliseconds = (body["positionMs"] as? NSNumber)?.doubleValue ?? 0
             let accepted = SpicyLyricsPlaybackBridge.shared.perform(command: "seek", value: milliseconds / 1000)
             sendCommandResult(requestID: requestID, accepted: accepted)
-        case "togglePlay", "play", "pause", "next", "previous":
+        case "next", "previous":
+            SpicyLyricsPlaybackBridge.shared.performSkip(command: type) { [weak self] accepted in
+                DispatchQueue.main.async {
+                    guard let self, !self.isDetached else { return }
+                    self.sendCommandResult(requestID: requestID, accepted: accepted)
+                    if accepted {
+                        self.publishPlaybackAndTrack(forceTrack: true, forceClockReanchor: false)
+                    }
+                }
+            }
+        case "togglePlay", "play", "pause":
             let accepted = SpicyLyricsPlaybackBridge.shared.perform(command: type)
             sendCommandResult(requestID: requestID, accepted: accepted)
+        case "resync":
+            resynchronizeAfterForeground()
+            sendCommandResult(requestID: requestID, accepted: true)
         case "retryLyrics":
             requestLyrics(for: activeTrackID, force: true)
         case "setPreference":
             let key = body["key"] as? String ?? ""
             let accepted = persistPreference(key: key, value: body["value"])
             sendCommandResult(requestID: requestID, accepted: accepted)
+        case "diagnostic":
+            let kind = body["kind"] as? String ?? "unknown"
+            let trackID = body["trackId"] as? String ?? ""
+            let lyricsType = body["lyricsType"] as? String ?? "unknown"
+            let lineCount = (body["lineCount"] as? NSNumber)?.intValue ?? -1
+            let timedLineCount = (body["timedLineCount"] as? NSNumber)?.intValue ?? -1
+            let firstStart = (body["firstStartMs"] as? NSNumber)?.doubleValue ?? -1
+            let lastEnd = (body["lastEndMs"] as? NSNumber)?.doubleValue ?? -1
+            let scale = (body["timeScale"] as? NSNumber)?.doubleValue ?? -1
+            writeDebugLog(
+                "[SpicyRenderer] \(kind) track=\(trackID) type=\(lyricsType) "
+                + "lines=\(lineCount)/\(timedLineCount) range=\(firstStart)..\(lastEnd) scale=\(scale)"
+            )
         default:
             sendCommandResult(requestID: requestID, accepted: false)
         }
@@ -157,30 +209,41 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         ])
 
         publishPlaybackAndTrack(forceTrack: true)
-        revealRenderer()
+        // Keep Spotify's already-present native surface in place until either
+        // real lyrics arrive or a short watchdog decides a loading state is
+        // preferable. This removes the empty/stale one-frame transition.
+        revealWatchdog = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+            self?.revealRenderer()
+        }
         playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             self?.publishPlaybackAndTrack(forceTrack: false)
         }
         RunLoop.main.add(playbackTimer!, forMode: .common)
     }
 
-    private func publishPlaybackAndTrack(forceTrack: Bool) {
+    private func publishPlaybackAndTrack(forceTrack: Bool, forceClockReanchor: Bool = false) {
         guard isReady, !isDetached else { return }
-        let playback = SpicyLyricsPlaybackBridge.shared.playbackPayload()
-        emit(type: "playback", payload: playback)
+        let liveID = SpicyLyricsPlaybackBridge.shared.currentTrackID() ?? ""
+        let playback = forceClockReanchor
+            ? SpicyLyricsPlaybackBridge.shared.foregroundPayload()
+            : SpicyLyricsPlaybackBridge.shared.playbackPayload()
 
         let bridgeID = playback["trackId"] as? String ?? ""
-        let currentID = bridgeID.isEmpty
-            ? (SpicyLyricsPlaybackBridge.shared.currentTrackID() ?? "")
-            : bridgeID
+        let currentID = liveID.isEmpty ? bridgeID : liveID
         guard !currentID.isEmpty else { return }
 
-        if forceTrack || currentID != activeTrackID {
+        let changedTrack = currentID != activeTrackID
+        if forceTrack || changedTrack {
             activeTrackID = currentID
             let track = SpicyLyricsPlaybackBridge.shared.trackPayload()
             emit(type: "track", payload: track)
+        }
+        if changedTrack {
             requestLyrics(for: currentID, force: false)
         }
+        // Track/loading is emitted before playback so a new song's position can
+        // never animate the previous song's lyrics for one frame.
+        emit(type: "playback", payload: playback)
     }
 
     private func requestLyrics(for trackID: String, force: Bool) {
@@ -203,6 +266,9 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
                         "trackId": trackID,
                         "data": payload
                     ])
+                    self.revealWatchdog?.invalidate()
+                    self.revealWatchdog = nil
+                    self.revealRenderer()
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -215,6 +281,9 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
                         "trackId": trackID,
                         "message": "Lyrics are temporarily unavailable."
                     ])
+                    self.revealWatchdog?.invalidate()
+                    self.revealWatchdog = nil
+                    self.revealRenderer()
                     writeDebugLog("[SpicyRenderer] lyrics failed for \(trackID): \(error)")
                 }
             }
@@ -235,6 +304,23 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private func sendCommandResult(requestID: String, accepted: Bool) {
         guard !requestID.isEmpty else { return }
         emit(type: "commandResult", payload: ["requestId": requestID, "accepted": accepted])
+    }
+
+    private func resynchronizeAfterForeground() {
+        guard isReady, !isDetached else { return }
+        emit(type: "lifecycle", payload: ["state": "visible"])
+        foregroundResyncTimer?.invalidate()
+        // Spotify posts a fresh player snapshot just after activation. Give it
+        // one run-loop beat, then prefer that observer; only fall back to the
+        // system Now Playing clock when the observer remains stale.
+        foregroundResyncTimer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { [weak self] _ in
+            guard let self, !self.isDetached else { return }
+            self.foregroundResyncTimer = nil
+            self.publishPlaybackAndTrack(forceTrack: true, forceClockReanchor: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.publishPlaybackAndTrack(forceTrack: true, forceClockReanchor: false)
+            }
+        }
     }
 
     private func rendererPreferences() -> [String: Any] {

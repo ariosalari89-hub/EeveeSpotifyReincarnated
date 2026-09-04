@@ -20,9 +20,15 @@ assert 'dom.lyrics.dataset.timing' in renderer
 assert 'tokens: []' in renderer
 assert 'element.classList.add("line-timed")' in renderer
 assert ".lyric-line.line-timed.active > .line-text" in styles
+assert "function lyricTimeScale(data)" in renderer
+assert "source[index - 1]?.IsPartOfWord === true" in renderer
+assert 'case "lifecycle"' in renderer
+assert 'document.addEventListener("visibilitychange"' in renderer
 assert 'NSSelectorFromString("setIsPaused:")' in bridge
-assert '["skipToNextTrack", "skipToNext"]' in bridge
-assert '["skipToPreviousTrack", "skipToPrevious"]' in bridge
+assert "func performSkip(command:" in bridge
+assert '"skipToNextTrackWithOptions:"' in bridge
+assert '"skipToPreviousTrackWithOptions:"' in bridge
+assert "verifyTransportEffect" in bridge
 assert 'let names = ["seekTo:", "scrubTo:", "seekToPosition:"]' in bridge
 assert "EeveeInvokeBoolArg" in bridge and "EeveeInvokeBoolArg" in c_header
 assert "capturedPlayer ?? statefulCandidate" not in bridge

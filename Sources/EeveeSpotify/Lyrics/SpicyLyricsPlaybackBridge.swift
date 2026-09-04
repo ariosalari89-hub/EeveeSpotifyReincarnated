@@ -12,6 +12,7 @@ final class SpicyLyricsPlaybackBridge {
     private let queue = DispatchQueue(label: "com.eevee.spicylyrics.playback")
     private weak var player: AnyObject?
     private var clock = SpicyLyricsPlaybackClock()
+    private var playbackUnits = SpicyLyricsPlaybackUnitNormalizer()
     private var lastObserverStamp = 0.0
     private var lastObserverReportedPlaying: Bool?
     private var sequence: UInt64 = 0
@@ -26,11 +27,26 @@ final class SpicyLyricsPlaybackBridge {
         let track = safeRead(state, key: "track") as AnyObject?
         let uri = extractURI(from: track)
         let trackIdentifier = uri.flatMap { spotifyTrackID(from: $0) }
-        let duration = normalizeSeconds(durationRaw, durationHint: durationRaw)
-        let position = normalizeSeconds(positionRaw, durationHint: durationRaw)
         let stamp = uptimeSeconds()
+        let systemPosition = Thread.isMainThread
+            ? (MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? NSNumber)?.doubleValue
+            : nil
 
         queue.async {
+            let duration = self.playbackUnits.durationSeconds(durationRaw)
+            let referencePosition: Double?
+            if let systemPosition {
+                referencePosition = systemPosition
+            } else if self.clock.hasAnchor {
+                referencePosition = self.clock.snapshot(at: stamp).positionSeconds
+            } else {
+                referencePosition = nil
+            }
+            let position = self.playbackUnits.positionSeconds(
+                positionRaw,
+                durationSeconds: duration,
+                referenceSeconds: referencePosition
+            )
             self.player = player
             self.clock.observe(
                 positionSeconds: position,
@@ -46,23 +62,37 @@ final class SpicyLyricsPlaybackBridge {
         }
     }
 
-    func playbackPayload() -> [String: Any] {
+    func playbackPayload(forceNowPlayingReanchor: Bool = false) -> [String: Any] {
         let nowPlaying = Thread.isMainThread ? MPNowPlayingInfoCenter.default().nowPlayingInfo : nil
         let fallbackPosition = (nowPlaying?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? NSNumber)?.doubleValue
         let fallbackDuration = (nowPlaying?[MPMediaItemPropertyPlaybackDuration] as? NSNumber)?.doubleValue
         let fallbackRate = (nowPlaying?[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue
+        let liveTrackIdentifier = Thread.isMainThread ? statefulPlayer?.currentTrack()?.trackIdentifier : nil
 
         return queue.sync {
             let now = uptimeSeconds()
             let observerIsFresh = lastObserverStamp != 0 && now - lastObserverStamp < 2
 
-            if (!observerIsFresh || !clock.hasAnchor), let fallbackPosition {
+            if forceNowPlayingReanchor, !observerIsFresh, let fallbackPosition {
+                let prior = clock.snapshot(at: now)
+                clock.reanchor(
+                    positionSeconds: max(0, fallbackPosition),
+                    durationSeconds: max(0, fallbackDuration ?? prior.durationSeconds),
+                    playbackRate: fallbackRate ?? prior.playbackRate,
+                    isPlaying: fallbackRate.map { $0 > 0 } ?? prior.isPlaying,
+                    trackIdentifier: liveTrackIdentifier ?? prior.trackIdentifier,
+                    at: now
+                )
+                lastObserverStamp = 0
+                lastObserverReportedPlaying = fallbackRate.map { $0 > 0 }
+                sequence &+= 1
+            } else if (!observerIsFresh || !clock.hasAnchor), let fallbackPosition {
                 clock.observe(
                     positionSeconds: max(0, fallbackPosition),
                     durationSeconds: max(0, fallbackDuration ?? 0),
                     playbackRate: fallbackRate ?? 1,
                     isPlaying: fallbackRate.map { $0 > 0 },
-                    trackIdentifier: clock.trackIdentifier,
+                    trackIdentifier: liveTrackIdentifier ?? clock.trackIdentifier,
                     at: now
                 )
                 sequence &+= 1
@@ -86,6 +116,13 @@ final class SpicyLyricsPlaybackBridge {
                 "sequence": String(sequence)
             ]
         }
+    }
+
+    /// Forces the next payload to use iOS's live Now Playing position. The app
+    /// and WKWebView can suspend independently, so their old monotonic anchors
+    /// cannot safely be extrapolated after returning to the foreground.
+    func foregroundPayload() -> [String: Any] {
+        playbackPayload(forceNowPlayingReanchor: true)
     }
 
     func currentTrackID() -> String? {
@@ -171,19 +208,180 @@ final class SpicyLyricsPlaybackBridge {
         case "pause":
             return setPlaying(false, candidates: candidates)
         case "next":
-            return invokeVoid(
-                names: ["skipToNextTrack", "skipToNext"],
-                candidates: candidates,
-                command: command
-            )
+            return false
         case "previous":
-            return invokeVoid(
-                names: ["skipToPreviousTrack", "skipToPrevious"],
-                candidates: candidates,
-                command: command
-            )
+            return false
         default:
             return false
+        }
+    }
+
+    /// Tries the transport APIs actually exposed by Spotify 9.1.x and reports
+    /// success only after playback state changes. Several objects respond to a
+    /// zero-argument skip selector while silently doing nothing; treating
+    /// `responds(to:)` as success is what broke the renderer's skip buttons.
+    func performSkip(command: String, completion: @escaping (Bool) -> Void) {
+        guard command == "next" || command == "previous" else {
+            completion(false)
+            return
+        }
+
+        let capturedPlayer = queue.sync(execute: { self.player })
+        let statefulCandidate: AnyObject? = statefulPlayer.map { $0 as AnyObject }
+        let corePlayer = safeRead(statefulCandidate, key: "player") as AnyObject?
+        // The observer's concrete player owns working transport methods more
+        // often than the feature-scoped StatefulPlayer facade.
+        let candidates = uniqueCandidates([capturedPlayer, corePlayer, statefulCandidate])
+        let attempts = transportAttempts(command: command, candidates: candidates)
+        guard !attempts.isEmpty else {
+            writeDebugLog("[SpicyRenderer] command \(command) unavailable: no compatible transport selector")
+            completion(false)
+            return
+        }
+
+        let baseline = transportMarker()
+        runTransportAttempt(
+            attempts,
+            index: 0,
+            command: command,
+            baseline: baseline,
+            completion: completion
+        )
+    }
+
+    private enum TransportInvocation {
+        case noArgument
+        case nilObject
+    }
+
+    private struct TransportAttempt {
+        let target: AnyObject
+        let selector: Selector
+        let invocation: TransportInvocation
+    }
+
+    private struct TransportMarker {
+        let trackIdentifier: String?
+        let positionSeconds: Double
+    }
+
+    private func transportAttempts(command: String, candidates: [AnyObject]) -> [TransportAttempt] {
+        let oneArgumentNames = command == "next"
+            ? ["skipToNextTrackWithOptions:", "skipToNextTrackWithCompletionHandler:", "skipToNextTrack:"]
+            : ["skipToPreviousTrackWithOptions:", "skipToPreviousTrackWithCompletionHandler:", "skipToPreviousTrack:"]
+        let zeroArgumentNames = command == "next"
+            ? ["skipToNextTrack", "skipToNext", "nextTrack"]
+            : ["skipToPreviousTrack", "skipToPrevious", "previousTrack"]
+
+        var attempts = [TransportAttempt]()
+        for target in candidates {
+            for name in oneArgumentNames {
+                let selector = NSSelectorFromString(name)
+                guard target.responds(to: selector),
+                      let method = class_getInstanceMethod(object_getClass(target), selector),
+                      method_getNumberOfArguments(method) == 3,
+                      let rawType = method_copyArgumentType(method, 2) else { continue }
+                defer { free(rawType) }
+                let argumentType = String(cString: rawType)
+                // A nil options object is safe; a nonnull completion block is
+                // not. Block-taking variants remain excluded unless their ABI
+                // can be invoked with a correctly typed callback.
+                guard argumentType.hasPrefix("@"), !argumentType.hasPrefix("@?") else { continue }
+                attempts.append(TransportAttempt(target: target, selector: selector, invocation: .nilObject))
+            }
+            for name in zeroArgumentNames {
+                let selector = NSSelectorFromString(name)
+                guard target.responds(to: selector),
+                      let method = class_getInstanceMethod(object_getClass(target), selector),
+                      method_getNumberOfArguments(method) == 2 else { continue }
+                attempts.append(TransportAttempt(target: target, selector: selector, invocation: .noArgument))
+            }
+        }
+        // Bound the retry window so a genuinely restricted queue does not leave
+        // the UI pending indefinitely.
+        return Array(attempts.prefix(8))
+    }
+
+    private func runTransportAttempt(
+        _ attempts: [TransportAttempt],
+        index: Int,
+        command: String,
+        baseline: TransportMarker,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard index < attempts.count else {
+            writeDebugLog("[SpicyRenderer] command \(command) exhausted \(attempts.count) transport attempts")
+            completion(false)
+            return
+        }
+
+        let attempt = attempts[index]
+        let typeName = String(describing: type(of: attempt.target))
+        let selectorName = NSStringFromSelector(attempt.selector)
+        writeDebugLog("[SpicyRenderer] command \(command) trying -[\(typeName) \(selectorName)]")
+        executeOnMain {
+            switch attempt.invocation {
+            case .noArgument:
+                EeveeInvokeVoidNoArg(attempt.target, attempt.selector)
+            case .nilObject:
+                EeveeInvokeObjectArg(attempt.target, attempt.selector, nil)
+            }
+        }
+
+        verifyTransportEffect(
+            baseline: baseline,
+            remainingPolls: 8
+        ) { [weak self] changed in
+            guard let self else { return }
+            if changed {
+                writeDebugLog("[SpicyRenderer] command \(command) accepted by -[\(typeName) \(selectorName)]")
+                completion(true)
+            } else {
+                self.runTransportAttempt(
+                    attempts,
+                    index: index + 1,
+                    command: command,
+                    baseline: baseline,
+                    completion: completion
+                )
+            }
+        }
+    }
+
+    private func verifyTransportEffect(
+        baseline: TransportMarker,
+        remainingPolls: Int,
+        completion: @escaping (Bool) -> Void
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self else { return }
+            let marker = self.transportMarker()
+            let trackChanged = marker.trackIdentifier?.isEmpty == false
+                && marker.trackIdentifier != baseline.trackIdentifier
+            let restarted = baseline.positionSeconds > 1.5
+                && marker.positionSeconds + 1.25 < baseline.positionSeconds
+            if trackChanged || restarted {
+                completion(true)
+            } else if remainingPolls > 1 {
+                self.verifyTransportEffect(
+                    baseline: baseline,
+                    remainingPolls: remainingPolls - 1,
+                    completion: completion
+                )
+            } else {
+                completion(false)
+            }
+        }
+    }
+
+    private func transportMarker() -> TransportMarker {
+        let liveIdentifier = Thread.isMainThread ? statefulPlayer?.currentTrack()?.trackIdentifier : nil
+        return queue.sync {
+            let snapshot = clock.snapshot(at: uptimeSeconds())
+            return TransportMarker(
+                trackIdentifier: liveIdentifier ?? snapshot.trackIdentifier,
+                positionSeconds: snapshot.positionSeconds
+            )
         }
     }
 
@@ -350,10 +548,6 @@ final class SpicyLyricsPlaybackBridge {
         guard let value = safeRead(object, key: key) else { return nil }
         if let number = value as? NSNumber { return number.boolValue }
         return value as? Bool
-    }
-
-    private func normalizeSeconds(_ raw: Double, durationHint: Double) -> Double {
-        (raw > 10_000 || durationHint > 10_000) ? raw / 1000 : raw
     }
 
     private func uptimeSeconds() -> Double {

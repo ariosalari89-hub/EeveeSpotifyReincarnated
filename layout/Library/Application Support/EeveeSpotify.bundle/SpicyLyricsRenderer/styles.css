@@ -121,7 +121,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .lyric-line.active { opacity: 1; transform: scale(1) translateY(-1px); filter: drop-shadow(0 5px 16px rgba(0,0,0,.18)); }
 .lyric-line:active { transform: scale(.975); }
 .line-text { display: block; transition: color .18s ease, text-shadow .18s ease; }
-.lyric-line.line-timed.active > .line-text { color: var(--text); text-shadow: 0 0 10px rgba(255,255,255,.14); }
+.lyric-line.line-timed.active { color: var(--text); -webkit-text-fill-color: var(--text); }
+.lyric-line.line-timed.active > .line-text { color: var(--text); -webkit-text-fill-color: var(--text); text-shadow: 0 0 10px rgba(255,255,255,.14); }
 .token { position: relative; display: inline-block; color: rgba(255,255,255,.25); --fill: 0%; --pulse: 0; transform: translateY(calc(var(--pulse) * -2px)) scale(calc(1 + var(--pulse) * .035)); transform-origin: center bottom; transition: transform .1s linear; }
 .token.space-before { margin-left: .255em; }
 .token::after { content: attr(data-text); position: absolute; inset: 0; width: 100%; color: #fff; clip-path: inset(0 calc(100% - var(--fill)) 0 0); text-shadow: 0 0 calc(2px + var(--pulse) * 13px) rgba(255,255,255,calc(.1 + var(--pulse) * .34)); }

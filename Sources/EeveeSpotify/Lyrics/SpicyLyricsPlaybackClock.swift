@@ -1,5 +1,63 @@
 import Foundation
 
+struct SpicyLyricsPlaybackUnitNormalizer {
+    private(set) var positionScale: Double?
+
+    mutating func durationSeconds(_ raw: Double) -> Double {
+        guard raw.isFinite, raw > 0 else { return 0 }
+        return raw > 10_000 ? raw / 1000 : raw
+    }
+
+    mutating func positionSeconds(
+        _ raw: Double,
+        durationSeconds: Double,
+        referenceSeconds: Double?
+    ) -> Double {
+        guard raw.isFinite, raw > 0 else { return 0 }
+        if let scale = positionScale { return raw * scale }
+        guard durationSeconds > 0 else {
+            let scale = raw > 10_000 ? 0.001 : 1
+            positionScale = scale
+            return raw * scale
+        }
+
+        let secondsCandidate = raw
+        let millisecondsCandidate = raw / 1000
+        let tolerance = max(2, durationSeconds * 0.03)
+        let secondsFits = secondsCandidate <= durationSeconds + tolerance
+        let millisecondsFits = millisecondsCandidate <= durationSeconds + tolerance
+
+        if secondsFits && !millisecondsFits {
+            positionScale = 1
+            return secondsCandidate
+        }
+        if millisecondsFits && !secondsFits {
+            positionScale = 0.001
+            return millisecondsCandidate
+        }
+        if secondsFits && millisecondsFits {
+            if let referenceSeconds {
+                let secondsError = abs(secondsCandidate - referenceSeconds)
+                let millisecondsError = abs(millisecondsCandidate - referenceSeconds)
+                if millisecondsError + 0.5 < secondsError {
+                    positionScale = 0.001
+                    return millisecondsCandidate
+                }
+                if secondsError + 0.5 < millisecondsError {
+                    positionScale = 1
+                    return secondsCandidate
+                }
+            }
+            // Do not lock an ambiguous early sample. A later report or the
+            // system transport reference will establish the unit.
+            return secondsCandidate
+        }
+
+        positionScale = 0.001
+        return millisecondsCandidate
+    }
+}
+
 struct SpicyLyricsPlaybackClockSnapshot {
     let positionSeconds: Double
     let durationSeconds: Double
@@ -154,6 +212,31 @@ struct SpicyLyricsPlaybackClock {
         anchorUptimeSeconds = uptimeSeconds
         pendingSeekTargetSeconds = target
         pendingSeekDeadlineSeconds = uptimeSeconds + 2
+    }
+
+    /// Replaces the interpolation anchor with an authoritative transport
+    /// snapshot. This is used when the app returns from the background: WebKit
+    /// and native timers may have been suspended for different lengths of time,
+    /// so advancing the old anchor by wall time is not valid.
+    mutating func reanchor(
+        positionSeconds rawPosition: Double,
+        durationSeconds rawDuration: Double,
+        playbackRate rawRate: Double,
+        isPlaying: Bool,
+        trackIdentifier: String?,
+        at uptimeSeconds: Double
+    ) {
+        guard rawPosition.isFinite, rawDuration.isFinite, rawRate.isFinite, uptimeSeconds.isFinite else {
+            return
+        }
+        reset(
+            positionSeconds: max(0, rawPosition),
+            durationSeconds: max(0, rawDuration),
+            playbackRate: rawRate > 0 ? rawRate : max(0.1, playbackRate),
+            isPlaying: isPlaying,
+            trackIdentifier: trackIdentifier?.isEmpty == false ? trackIdentifier : self.trackIdentifier,
+            at: uptimeSeconds
+        )
     }
 
     mutating func requestedPlaybackState(

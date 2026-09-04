@@ -21,8 +21,16 @@ window.SPICY_TEST_FIXTURES = {
         { Text: "Meet", StartTime: 16.6, EndTime: 17.2 },
         { Text: "me", StartTime: 17.25, EndTime: 17.8 },
         { Text: "after", StartTime: 17.85, EndTime: 19 },
-        { Text: "mid", StartTime: 19.1, EndTime: 19.8 },
-        { Text: "night", IsPartOfWord: true, StartTime: 19.8, EndTime: 21.4 }
+        { Text: "mid", IsPartOfWord: true, StartTime: 19.1, EndTime: 19.8 },
+        { Text: "night", StartTime: 19.8, EndTime: 21.4 }
+      ]}},
+      { Type: "Vocal", Lead: { StartTime: 22, EndTime: 25.4, Syllables: [
+        { Text: "A", IsPartOfWord: true, StartTime: 22, EndTime: 22.25 },
+        { Text: "ny", StartTime: 22.25, EndTime: 22.8 },
+        { Text: "time", StartTime: 22.9, EndTime: 23.5 },
+        { Text: "I", StartTime: 23.6, EndTime: 23.9 },
+        { Text: "count", StartTime: 24, EndTime: 24.6 },
+        { Text: "sheep", StartTime: 24.7, EndTime: 25.4 }
       ]}}
     ]
   },
@@ -32,6 +40,14 @@ window.SPICY_TEST_FIXTURES = {
     Content: [
       { Type: "Vocal", Text: "First line timing", StartTime: 5, EndTime: 8 },
       { Type: "Vocal", Text: "Second line timing", StartTime: 8.2, EndTime: 12 }
+    ]
+  },
+  lineMilliseconds: {
+    Type: "Line",
+    StartTime: 5000,
+    Content: [
+      { Type: "Vocal", Text: "Millisecond opening line", StartTime: 5000, EndTime: 8000 },
+      { Type: "Vocal", Text: "Millisecond second line", StartTime: 8200, EndTime: 12000 }
     ]
   }
 };
