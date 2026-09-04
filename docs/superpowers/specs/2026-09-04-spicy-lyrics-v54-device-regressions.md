@@ -21,7 +21,7 @@ The user has authorized implementation without another approval round.
    with one transition. Do not launch Spotify's native zoom and cover it afterwards.
 6. Landscape: artwork remains on the left; remove the duplicate title/artist there.
    Keep bottom-left metadata, portrait metadata and all control hit targets.
-7. Caption clipping: show the complete current phrase without ellipsis; fit short native
+7. Caption clipping: show the current phrase without ellipsis; fit short native
    slots by showing a measured, word-boundary segment containing the currently timed
    word. No arbitrary syllable spaces, hidden active word, truncated glyphs, or clipped
    interlude dots. Preserve true provider timestamps, RTL, line-timed and static fallback.
@@ -79,3 +79,16 @@ outside the 320px viewport, while the Follow control has zero height. Screenshot
 This is an actual browser wheel gesture, not a dispatched DOM wheel event.
 Video recording was unavailable because the browser CLI could not find ffmpeg;
 discard the earlier blank fixture capture, retain the numbered r2 screenshots.
+
+The same actual thumb-hold test against archived shipping v5.3 (`89a4b6a`) jumps
+from 10000 to 20200ms while the pointer is held still. v5.4 stays at 10000ms,
+then follows a real move to 8800ms and emits exactly one native seek on release.
+The first v5.4 pointerup implementation exposed a new browser event-order failure
+(zero seeks on release); replacing the premature microtask with a post-change task
+fixes that regression. Both failures were observed, not inferred from source alone.
+
+Native red run `33930117133` at `b0eff6c`: FAIL "shuffle dispatch failed" with the
+real contextURI-only state. The source fix reads contextURI before contextURL.
+All existing model/bundle/control/lifecycle/browser scenarios pass locally after
+the repair. Added actual-gesture tests cover hold/drag/release, card wheel/reentry,
+timed caption pages, line-timed glyph bounds, dots and landscape metadata.

@@ -4,6 +4,19 @@ import ObjectiveC.runtime
 /// Owns only the verified native card's expand hit target. Keeping its original
 /// view underneath preserves Spotify's icon, tint, sizing, and share controls.
 enum SpicyLyricsPreviewEntry {
+    private final class ExpandButton: UIButton {
+        var accessibilityOriginals: [UIView: Bool] = [:]
+        func ownAccessibility(in container: UIView) {
+            for view in container.subviews where view !== self {
+                if accessibilityOriginals[view] == nil { accessibilityOriginals[view] = view.accessibilityElementsHidden }
+                view.accessibilityElementsHidden = true
+            }
+        }
+        func restoreAccessibility() {
+            accessibilityOriginals.forEach { $0.key.accessibilityElementsHidden = $0.value }
+            accessibilityOriginals.removeAll()
+        }
+    }
     private static var key: UInt8 = 0
     private static var installed = false
     static func install(isEnabled: @escaping () -> Bool) {
@@ -30,8 +43,9 @@ enum SpicyLyricsPreviewEntry {
     }
 
     private static func update(_ header: UIView, enabled: Bool) {
-        let previous = objc_getAssociatedObject(header, &key) as? UIButton
+        let previous = objc_getAssociatedObject(header, &key) as? ExpandButton
         guard enabled, header.window != nil else {
+            previous?.restoreAccessibility()
             previous?.removeFromSuperview()
             objc_setAssociatedObject(header, &key, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             return
@@ -42,12 +56,16 @@ enum SpicyLyricsPreviewEntry {
               let container = object_getIvar(header, ivar) as? UIView,
               container.isDescendant(of: header), container.bounds.width > 0 else { return }
         if let previous {
-            if previous.superview !== container { container.addSubview(previous) }
+            if previous.superview !== container {
+                previous.restoreAccessibility()
+                container.addSubview(previous)
+            }
             previous.frame = container.bounds
+            previous.ownAccessibility(in: container)
             container.bringSubviewToFront(previous)
             return
         }
-        let button = UIButton(type: .custom)
+        let button = ExpandButton(type: .custom)
         button.frame = container.bounds
         button.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         button.accessibilityLabel = "Open lyrics"
@@ -65,5 +83,6 @@ enum SpicyLyricsPreviewEntry {
         }, for: .touchUpInside)
         objc_setAssociatedObject(header, &key, button, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         container.addSubview(button)
+        button.ownAccessibility(in: container)
     }
 }

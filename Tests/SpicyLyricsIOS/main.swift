@@ -139,6 +139,8 @@ struct QAFailure: Error { let message: String }
         let original = UILabel(frame: card.bounds)
         original.text = "ORIGINAL NATIVE LYRICS MUST NOT FLASH"
         card.addSubview(original)
+        let originalTap = UITapGestureRecognizer()
+        card.addGestureRecognizer(originalTap)
         let header = QACardHeaderView(frame: CGRect(x: 16, y: 180, width: width, height: 40))
         let heading = UILabel(frame: CGRect(x: 8, y: 0, width: 220, height: 40))
         heading.text = "Lyrics · native share"
@@ -180,7 +182,7 @@ struct QAFailure: Error { let message: String }
         try await waitForBoth("track-3")
         header.setNeedsLayout(); header.layoutIfNeeded()
         guard original.alpha == 0, originalInline.alpha == 0, header.alpha == 1,
-              card.bounds.height == 320, inline.bounds.height == 52 else {
+              card.bounds.height == 320, inline.bounds.height == 52, !originalTap.isEnabled else {
             throw QAFailure(message: "replacement must preserve native surrounding controls and intrinsic bounds")
         }
         originalInline.alpha = 1 // native fade-in runs AFTER replacement layout
@@ -273,7 +275,7 @@ struct QAFailure: Error { let message: String }
         header.setNeedsLayout(); header.layoutIfNeeded()
         guard findWeb(card) == nil, findWeb(inline) == nil, original.alpha == 1,
               originalInline.alpha == 1, !original.accessibilityElementsHidden,
-              originalInline.layer.mask == nil, lateNativeChild.layer.mask == nil,
+              originalInline.layer.mask == nil, lateNativeChild.layer.mask == nil, originalTap.isEnabled,
               !header.expandButtonContainerView.subviews.contains(where: { $0.accessibilityIdentifier == "spicy-preview-expand" }) else {
             throw QAFailure(message: "embedded detach did not restore native content and clean up WebKit")
         }

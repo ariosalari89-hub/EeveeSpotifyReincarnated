@@ -101,6 +101,15 @@ enum SpicyLyricsEmbeddedSurfaces {
 }
 
 private final class SpicyLyricsEmbeddedHost {
+    private final class NativeTap {
+        weak var recognizer: UITapGestureRecognizer?
+        let enabled: Bool
+        init(_ recognizer: UITapGestureRecognizer) {
+            self.recognizer = recognizer
+            enabled = recognizer.isEnabled
+        }
+        func restore() { recognizer?.isEnabled = enabled }
+    }
     private final class NativeView {
         weak var view: UIView?
         let alpha: CGFloat
@@ -132,6 +141,7 @@ private final class SpicyLyricsEmbeddedHost {
     private let surface: SpicyLyricsSurface
     private var renderer: SpicyLyricsFullscreenHost?
     private var originals = [NativeView]()
+    private var nativeTaps = [NativeTap]()
     private var updating = false
     private var failed = false
 
@@ -164,6 +174,22 @@ private final class SpicyLyricsEmbeddedHost {
         updating = true
         defer { updating = false }
         UIView.performWithoutAnimation {
+            // Card taps belong to the replacement. A native ancestor tap
+            // must not also start Spotify's zoom behind the new window.
+            if surface == .card {
+                var ancestor: UIView? = container
+                while let view = ancestor {
+                    let name = NSStringFromClass(type(of: view))
+                    if view === container || name == "Lyrics_CardElementImpl.CardView"
+                        || name == "_TtC22Lyrics_CardElementImpl8CardView" {
+                        for tap in (view.gestureRecognizers ?? []).compactMap({ $0 as? UITapGestureRecognizer }) {
+                            if !nativeTaps.contains(where: { $0.recognizer === tap }) { nativeTaps.append(NativeTap(tap)) }
+                            tap.isEnabled = false
+                        }
+                    }
+                    ancestor = view.superview
+                }
+            }
             // Alpha preserves intrinsic sizes and stack layout. isHidden would
             // collapse the original layout and shrink the replacement to zero.
             for child in container.subviews where child !== controller.view {
@@ -204,6 +230,8 @@ private final class SpicyLyricsEmbeddedHost {
         controller.removeFromParent()
         originals.forEach { $0.restore() }
         originals.removeAll()
+        nativeTaps.forEach { $0.restore() }
+        nativeTaps.removeAll()
         updating = false
     }
 

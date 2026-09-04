@@ -269,6 +269,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
   .token { transform: none; }
 }
 
+@media (orientation: landscape) {
+  .media-pane .media-copy { display: none; }
+  .mini-track { display: flex; }
+}
+
 .native-reduce-motion *, .native-reduce-motion *::before, .native-reduce-motion *::after {
   scroll-behavior: auto !important;
   animation-duration: .01ms !important;

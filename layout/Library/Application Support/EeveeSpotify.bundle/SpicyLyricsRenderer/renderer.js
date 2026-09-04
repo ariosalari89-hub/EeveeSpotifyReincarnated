@@ -944,6 +944,7 @@
     }
   }, { passive: true });
 
+  let seekPointerId = null;
   dom.seek.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !state.session?.canSeek) return;
     const position = positionNow();
@@ -953,6 +954,7 @@
     state.seekPreview = null;
     state.draggingSeek = true;
     state.dragPositionMs = position;
+    seekPointerId = event.pointerId;
     state.followLyrics = true;
     updateFollowButton();
     dom.seek.setPointerCapture(event.pointerId);
@@ -978,6 +980,7 @@
     startSeek(target, dom.seek);
   });
   const cancelSeekDrag = () => {
+    seekPointerId = null;
     if (!state.draggingSeek) return;
     state.draggingSeek = false;
     state.seekPreview = null;
@@ -986,9 +989,14 @@
   dom.seek.addEventListener("pointercancel", cancelSeekDrag);
   // A thumb held without movement produces no input/change. Release its
   // ownership without sending a seek, after the browser's change dispatch.
-  dom.seek.addEventListener("pointerup", () => queueMicrotask(() => {
-    if (state.draggingSeek) cancelSeekDrag();
-  }));
+  dom.seek.addEventListener("pointerup", () => {
+    seekPointerId = null;
+    // change follows the pointerup event's microtask checkpoint in WebKit/
+    // Chromium. A microtask here cancels the drag before it can commit.
+    setTimeout(() => {
+      if (state.draggingSeek && seekPointerId === null) cancelSeekDrag();
+    }, 0);
+  });
   dom.seek.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); cancelSeekDrag(); }
   });
