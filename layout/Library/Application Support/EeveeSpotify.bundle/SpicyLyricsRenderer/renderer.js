@@ -622,20 +622,8 @@
 
   function fitWordGroups() {
     if (state.surface === "inline") {
-      const root = document.documentElement;
-      root.style.setProperty("--inline-fit", "1");
-      const line = dom.lyrics.querySelector(".lyric-line:not(.interlude)");
-      const rowHeight = line ? parseFloat(getComputedStyle(line).lineHeight) : 0;
-      const available = dom.scroller.clientHeight;
-      if (rowHeight > 0 && available > 0) {
-        const fit = Math.min(1, available / rowHeight);
-        root.style.setProperty("--inline-fit", String(fit));
-      }
-      // This native surface is a single-line caption, not a second scrolling
-      // lyric pane. Keep all tokens in one text flow so an oversized timed
-      // phrase is ellipsized instead of becoming a clipped multi-row box.
-      dom.lyrics.querySelectorAll(".word-group.breakable").forEach(
-        (group) => group.classList.remove("breakable"));
+      state.lines.forEach(line => { delete line.captionLayout; });
+      updateLyrics(positionNow());
       return;
     }
     // Keep ordinary joined syllables together. Only an over-wide group may
@@ -647,6 +635,58 @@
       group.offsetWidth > group.parentElement.clientWidth - 1
     ));
     oversized.forEach((group) => group.classList.add("breakable"));
+  }
+
+  function layoutCaption(line, position) {
+    const text = line?.element?.querySelector(".line-text");
+    if (!text) return;
+    const available = Math.max(1, dom.scroller.clientHeight - 6);
+    const key = `${dom.scroller.clientWidth}:${available}:${state.preferences.fontSize}`;
+    if (line.captionLayout?.key !== key) {
+      const groups = [...text.querySelectorAll(".word-group")];
+      line.element.style.setProperty("--inline-fit", "1");
+      groups.forEach(g => { g.hidden = false; });
+      const pages = [];
+      // Keep full phrases when they fit; otherwise use word-boundary pages,
+      // selected by the provider's actual token time, never an invented timer.
+      if (text.offsetHeight > available && groups.length > 1) {
+        groups.forEach(g => { g.hidden = true; });
+        let page = [];
+        for (const group of groups) {
+          group.hidden = false;
+          if (page.length && text.offsetHeight > available) {
+            group.hidden = true;
+            pages.push(page);
+            page.forEach(g => { g.hidden = true; });
+            page = [];
+            group.hidden = false;
+          }
+          page.push(group);
+        }
+        if (page.length) pages.push(page);
+      } else pages.push(groups);
+      line.captionLayout = { key, pages, page: -1 };
+    }
+    const layout = line.captionLayout;
+    const token = line.tokens.find(t => position < t.end) || line.tokens.at(-1);
+    const group = token?.element?.parentElement;
+    const pageIndex = Math.max(0, layout.pages.findIndex(page => page.includes(group)));
+    if (layout.page === pageIndex) return;
+    layout.page = pageIndex;
+    const current = layout.pages[pageIndex];
+    text.querySelectorAll(".word-group").forEach(g => { g.hidden = !current.includes(g); });
+    // A line-timed lyric (or one very long provider token) has no finer timing.
+    // Fit the complete text, without ellipsis or fabricated syllable timing.
+    line.element.style.setProperty("--inline-fit", "1");
+    let low = .1, high = 1;
+    if (text.offsetHeight > available) {
+      for (let i = 0; i < 9; i++) {
+        const mid = (low + high) / 2;
+        line.element.style.setProperty("--inline-fit", String(mid));
+        if (text.offsetHeight <= available) low = mid; else high = mid;
+      }
+      line.element.style.setProperty("--inline-fit", String(low));
+    }
   }
 
   function updateLyrics(rawPosition, forceScroll = false) {
@@ -667,6 +707,8 @@
         else line.element.removeAttribute("aria-current");
       }
     });
+
+    if (state.surface === "inline") layoutCaption(state.lines[inlineIndex], position);
 
     if (activeIndex !== state.activeLine) {
       state.activeLine = activeIndex;
@@ -703,7 +745,8 @@
     if (state.surface === "inline") return;
     const element = state.lines[index]?.element;
     if (!element) return;
-    const target = element.offsetTop
+    const target = dom.scroller.scrollTop + element.getBoundingClientRect().top
+      - dom.scroller.getBoundingClientRect().top
       - dom.scroller.clientHeight * (state.surface === "card" ? .28 : .42)
       + element.offsetHeight * .5;
     const immediate = reduceMotion() || state.draggingSeek || Boolean(state.seekPreview);
@@ -869,6 +912,7 @@
 
   let scrollPointerStart = null;
   dom.scroller.addEventListener("pointerdown", (event) => {
+    if (state.surface !== "fullscreen") return;
     scrollPointerStart = { y: event.clientY, scrollTop: dom.scroller.scrollTop };
   }, { passive: true });
   dom.scroller.addEventListener("pointermove", (event) => {
@@ -884,9 +928,35 @@
   dom.scroller.addEventListener("pointerup", clearScrollPointer, { passive: true });
   dom.scroller.addEventListener("pointercancel", clearScrollPointer, { passive: true });
   dom.scroller.addEventListener("wheel", () => {
+    if (state.surface !== "fullscreen") return;
     state.followLyrics = false;
     updateFollowButton();
   }, { passive: true });
+
+  // Compact previews are followers, not a second manually browsable lyric
+  // screen. Native parent scrolling must never disable their hidden follow UI.
+  dom.scroller.addEventListener("scroll", () => {
+    if (state.surface === "card" && state.activeLine >= 0) {
+      const active = state.lines[state.activeLine]?.element;
+      const rect = active?.getBoundingClientRect();
+      const bounds = dom.scroller.getBoundingClientRect();
+      if (rect && (rect.bottom < bounds.top || rect.top > bounds.bottom)) scrollToLine(state.activeLine);
+    }
+  }, { passive: true });
+
+  dom.seek.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !state.session?.canSeek) return;
+    const position = positionNow();
+    [...state.pendingCommands.entries()].forEach(([id, pending]) => {
+      if (pending.type === "seek") settleCommand(id);
+    });
+    state.seekPreview = null;
+    state.draggingSeek = true;
+    state.dragPositionMs = position;
+    state.followLyrics = true;
+    updateFollowButton();
+    dom.seek.setPointerCapture(event.pointerId);
+  });
 
   dom.seek.addEventListener("input", () => {
     state.draggingSeek = true;
@@ -914,6 +984,11 @@
     updateLyrics(positionNow(), true);
   };
   dom.seek.addEventListener("pointercancel", cancelSeekDrag);
+  // A thumb held without movement produces no input/change. Release its
+  // ownership without sending a seek, after the browser's change dispatch.
+  dom.seek.addEventListener("pointerup", () => queueMicrotask(() => {
+    if (state.draggingSeek) cancelSeekDrag();
+  }));
   dom.seek.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); cancelSeekDrag(); }
   });

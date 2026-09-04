@@ -5,8 +5,8 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $rendererPath = Join-Path $repoRoot "layout\Library\Application Support\EeveeSpotify.bundle\SpicyLyricsRenderer\index.html"
 $rendererUrl = ([Uri](Resolve-Path $rendererPath).Path).AbsoluteUri
 $fixturePath = Join-Path $PSScriptRoot "browser-fixture.js"
-$artifactDirectory = Join-Path $repoRoot "artifacts\spicy-v5.3-qa\automated"
-$session = "spicy-v5.3-automated-$PID"
+$artifactDirectory = Join-Path $repoRoot "artifacts\spicy-v5.4-qa\automated"
+$session = "spicy-v5.4-automated-$PID"
 
 New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
 

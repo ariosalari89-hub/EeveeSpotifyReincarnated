@@ -5,6 +5,14 @@ import WebKit
 final class QACardContentView: UIView {}
 @objc(_TtC17Canvas_CommonImpl26CanvasNowPlayingLyricsView)
 final class QAInlineLyricsView: UIView {}
+@objc(_TtC22Lyrics_NPVContainerKit19LyricsContainerView)
+final class QAStillLyricsView: UIView {}
+@objc(_TtC28NowPlaying_ContentLayersImpl25LegacyLyricsContainerView)
+final class QALegacyLyricsView: UIView {}
+@objc(_TtC22Lyrics_CardElementImpl14CardHeaderView)
+final class QACardHeaderView: UIView {
+    lazy var expandButtonContainerView: UIView = UIView()
+}
 
 // Only Spotify and its network service are simulated. The full-screen owner,
 // WebKit host, renderer and UIKit lifecycle below are the shipping sources.
@@ -131,9 +139,19 @@ struct QAFailure: Error { let message: String }
         let original = UILabel(frame: card.bounds)
         original.text = "ORIGINAL NATIVE LYRICS MUST NOT FLASH"
         card.addSubview(original)
-        let header = UILabel(frame: CGRect(x: 16, y: 180, width: width, height: 40))
-        header.text = "Lyrics · native header/share/expand"
-        header.textColor = .white
+        let header = QACardHeaderView(frame: CGRect(x: 16, y: 180, width: width, height: 40))
+        let heading = UILabel(frame: CGRect(x: 8, y: 0, width: 220, height: 40))
+        heading.text = "Lyrics · native share"
+        heading.textColor = .white
+        header.addSubview(heading)
+        header.expandButtonContainerView.frame = CGRect(x: width - 44, y: 0, width: 44, height: 40)
+        let nativeExpand = UIButton(type: .system)
+        nativeExpand.frame = header.expandButtonContainerView.bounds
+        nativeExpand.setTitle("↗", for: .normal)
+        var nativeExpandCount = 0
+        nativeExpand.addAction(UIAction { _ in nativeExpandCount += 1 }, for: .touchUpInside)
+        header.expandButtonContainerView.addSubview(nativeExpand)
+        header.addSubview(header.expandButtonContainerView)
         root.view.addSubview(header)
         root.view.addSubview(card)
         let inline = QAInlineLyricsView(frame: CGRect(x: 24, y: 120, width: width - 16, height: 52))
@@ -160,10 +178,20 @@ struct QAFailure: Error { let message: String }
             throw QAFailure(message: "embedded lyric generations did not converge")
         }
         try await waitForBoth("track-3")
+        header.setNeedsLayout(); header.layoutIfNeeded()
         guard original.alpha == 0, originalInline.alpha == 0, header.alpha == 1,
               card.bounds.height == 320, inline.bounds.height == 52 else {
             throw QAFailure(message: "replacement must preserve native surrounding controls and intrinsic bounds")
         }
+        originalInline.alpha = 1 // native fade-in runs AFTER replacement layout
+        let lateNativeChild = UILabel(frame: inline.bounds)
+        lateNativeChild.text = "A LATE ORIGINAL MUST NOT OVERLAP"
+        inline.addSubview(lateNativeChild)
+        lateNativeChild.alpha = 1
+        guard originalInline.layer.mask != nil, lateNativeChild.layer.mask != nil else {
+            throw QAFailure(message: "native redraw or child insertion can draw above the replacement")
+        }
+        checks.append("native alpha redraw and late child insertion stay suppressed without collapsing layout")
         for (mode, web) in [("card", cardWeb), ("inline", inlineWeb)] {
             let js = """
             (() => document.documentElement.dataset.surface === '\(mode)'
@@ -178,15 +206,16 @@ struct QAFailure: Error { let message: String }
             if mode == "inline" {
                 let captionIsOneRow = try await web.evaluateJavaScript("""
                 (() => { const text=document.querySelector('.inline-visible .line-text');
-                  const rects=[...text.querySelectorAll('.token')].map(e => e.getBoundingClientRect());
-                  return getComputedStyle(text).textOverflow === 'ellipsis'
+                  const range=document.createRange(); range.selectNodeContents(text);
+                  const rects=[...range.getClientRects()];
+                  return getComputedStyle(text).textOverflow !== 'ellipsis'
                     && rects.length > 0 && rects.every(r => r.top >= -1
-                      && r.bottom <= innerHeight + 1 && Math.abs(r.top - rects[0].top) < 1); })()
+                      && r.bottom <= innerHeight + 1 && r.left >= -1 && r.right <= innerWidth + 1); })()
                 """)
                 guard captionIsOneRow as? Bool == true else {
                     throw QAFailure(message: "timed caption token wraps below the visible native slot")
                 }
-                checks.append("long timed tokens remain one complete caption row with ellipsis")
+                checks.append("caption glyphs fit the native slot without ellipsis or clipped rows")
             }
             let image = try await web.takeSnapshot(configuration: nil)
             let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -209,6 +238,16 @@ struct QAFailure: Error { let message: String }
         """)
         guard captionFits as? Bool == true else { throw QAFailure(message: "enlarged native caption clips glyph rows") }
         checks.append("enlarged caption fits a short native lyric slot without clipped glyph rows")
+        // Both non-video paths must attach, not just the Canvas test double.
+        for view in [QAStillLyricsView(), QALegacyLyricsView()] as [UIView] {
+            view.frame = inline.frame
+            root.view.addSubview(view)
+            view.setNeedsLayout(); view.layoutIfNeeded()
+            guard findWeb(view) != nil else { throw QAFailure(message: "non-Canvas caption did not attach") }
+            view.removeFromSuperview()
+            guard findWeb(view) == nil else { throw QAFailure(message: "non-Canvas caption leaked its renderer") }
+        }
+        checks.append("still-artwork and legacy caption hooks attach and detach")
         SpicyLyricsPlaybackBridge.shared.onSkip = nil
         _ = SpicyLyricsPlaybackBridge.shared.perform(command: "next")
         try await waitForBoth("track-4")
@@ -218,11 +257,24 @@ struct QAFailure: Error { let message: String }
         SpicyLyricsFullscreenCoordinator.shared.close()
         try await Task.sleep(nanoseconds: 500_000_000)
         guard card.window != nil else { throw QAFailure(message: "closing compact entry dismissed Now Playing") }
+        guard let expand = header.expandButtonContainerView.subviews.compactMap({ $0 as? UIButton })
+            .first(where: { $0.accessibilityIdentifier == "spicy-preview-expand" }),
+              header.expandButtonContainerView.hitTest(CGPoint(x: 22, y: 20), with: nil) === expand else {
+            throw QAFailure(message: "native expand target was not replaced before its zoom action")
+        }
+        expand.sendActions(for: .touchUpInside)
+        try await waitFor("native header expand enters Spicy directly", "document.querySelector('#lyrics').textContent.includes('track-4')")
+        guard nativeExpandCount == 0 else { throw QAFailure(message: "native zoom action fired") }
+        SpicyLyricsFullscreenCoordinator.shared.close()
+        try await Task.sleep(nanoseconds: 500_000_000)
         enabled = false
         card.setNeedsLayout(); card.layoutIfNeeded()
         inline.setNeedsLayout(); inline.layoutIfNeeded()
+        header.setNeedsLayout(); header.layoutIfNeeded()
         guard findWeb(card) == nil, findWeb(inline) == nil, original.alpha == 1,
-              originalInline.alpha == 1, !original.accessibilityElementsHidden else {
+              originalInline.alpha == 1, !original.accessibilityElementsHidden,
+              originalInline.layer.mask == nil, lateNativeChild.layer.mask == nil,
+              !header.expandButtonContainerView.subviews.contains(where: { $0.accessibilityIdentifier == "spicy-preview-expand" }) else {
             throw QAFailure(message: "embedded detach did not restore native content and clean up WebKit")
         }
         card.removeFromSuperview(); inline.removeFromSuperview(); header.removeFromSuperview()
@@ -288,9 +340,10 @@ struct QAFailure: Error { let message: String }
               .every(e => { const r=e.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth+1
                 && r.top >= -1 && r.bottom <= innerHeight+1; }))()
             """)
-            try await waitFor("landscape title has room beside the lyrics", """
+            try await waitFor("landscape metadata appears only in the bottom player", """
             (() => { const title=document.querySelector('#title');
-              return title.textContent==='Track 3' && title.scrollWidth <= title.clientWidth; })()
+              return !title.getClientRects().length && document.querySelector('#mini-title').textContent==='Track 3'
+                && document.querySelector('.mini-track').getBoundingClientRect().height > 0; })()
             """)
             try await snapshot("qa-landscape")
             let overlay = scene.windows.first(where: { $0.isKeyWindow })

@@ -3,8 +3,8 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $page = Join-Path $repo 'layout\Library\Application Support\EeveeSpotify.bundle\SpicyLyricsRenderer\index.html'
 $url = ([Uri](Resolve-Path $page).Path).AbsoluteUri
-$artifacts = Join-Path $repo 'artifacts\spicy-v5.3-qa\continuity'
-$session = "spicy-v53-continuity-$PID"
+$artifacts = Join-Path $repo 'artifacts\spicy-v5.4-qa\continuity'
+$session = "spicy-v54-continuity-$PID"
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 function Eval-Qa([string]$script) {
     $raw = $script | & agent-browser --session $session eval --stdin
@@ -109,7 +109,7 @@ try {
 })()
 '@)
     & agent-browser --session $session set viewport 280 48
-    Require-Qa 'a long timed token stays on one complete caption row' (Eval-Qa @'
+    Require-Qa 'long caption shows the timed phrase without ellipsis or cut glyphs' (Eval-Qa @'
 (async () => {
   SpicyQA.send('bootstrap',{surface:'inline',preferences:{fontSize:126}});
   SpicyQA.lyrics.karaoke.Content=[{Type:'Vocal',Lead:{StartTime:0,EndTime:30,Syllables:[
@@ -120,9 +120,11 @@ try {
   await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
   const text=document.querySelector('.inline-visible .line-text');
   const row=parseFloat(getComputedStyle(text).lineHeight);
-  const rects=[...text.querySelectorAll('.token')].map(e=>e.getBoundingClientRect());
-  return JSON.stringify({pass:rects.length===2&&rects.every(r=>r.top>=-1&&r.bottom<=innerHeight+1&&Math.abs(r.top-rects[0].top)<1)
-    &&getComputedStyle(text).textOverflow==='ellipsis',row,rects:rects.map(r=>({top:r.top,bottom:r.bottom,height:r.height}))});
+  const range=document.createRange(); range.selectNodeContents(text);
+  const rects=[...range.getClientRects()].filter(r=>r.height>0&&r.width>0);
+  const active=[...text.querySelectorAll('.token')].find(e=>e.textContent.includes('A long lyric'));
+  return JSON.stringify({pass:active.getClientRects().length>0&&rects.every(r=>r.top>=-1&&r.bottom<=innerHeight+1&&r.left>=-1&&r.right<=innerWidth+1)
+    &&getComputedStyle(text).textOverflow!=='ellipsis',row,rects:rects.map(r=>({top:r.top,bottom:r.bottom,height:r.height}))});
 })()
 '@)
     & agent-browser --session $session screenshot (Join-Path $artifacts 'above-title-long-token.png')

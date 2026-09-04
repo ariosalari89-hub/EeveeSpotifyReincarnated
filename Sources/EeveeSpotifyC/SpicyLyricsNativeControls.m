@@ -57,6 +57,12 @@ static id currentActions(void) {
     @synchronized(captureLock) { return playbackActions; }
 }
 
+static id shuffleContext(id state) {
+    // SPTPlayerState uses contextURI. contextURL exists on other app objects,
+    // but asking only for that makes this adapter silently fall back to binary shuffle.
+    return readObject(state, @"contextURI") ?: readObject(state, @"contextURL");
+}
+
 static void capture(id candidate) {
     if (![candidate respondsToSelector:NSSelectorFromString(@"playPause")]
         || ![candidate respondsToSelector:NSSelectorFromString(@"toggleRepeat")]) return;
@@ -114,7 +120,7 @@ NSDictionary<NSString *, id> *EeveeSpicyReadControls(id state) {
             if (value) result[key] = value;
         }
         id smart = readObject(actions, @"smartShuffleHandler");
-        id context = readObject(state, @"contextURL");
+        id context = shuffleContext(state);
         NSNumber *enabled = context ? readBool(smart, @"checkIsEntitySmartShuffled:", context, YES) : nil;
         NSNumber *supported = readBool(actions, @"isSmartShuffleSupported", nil, NO);
         if (enabled) result[@"smartShuffleEnabled"] = enabled;
@@ -133,7 +139,7 @@ NSDictionary<NSString *, id> *EeveeSpicyReadControls(id state) {
 // and disabling Smart Shuffle. Never emulate that work with a boolean option.
 static BOOL cycleShuffle(id actions, id state) {
     id smart = readObject(actions, @"smartShuffleHandler");
-    id context = readObject(state, @"contextURL");
+    id context = shuffleContext(state);
     if (!context) return NO;
     NSInvocation *read = invocation(smart, NSSelectorFromString(@"shuffleStateWithEntityURL:"), 1);
     if (!read || strcmp(unqualified(read.methodSignature.methodReturnType), "Q") != 0

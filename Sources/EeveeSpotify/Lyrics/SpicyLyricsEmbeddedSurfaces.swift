@@ -16,7 +16,11 @@ enum SpicyLyricsEmbeddedSurfaces {
             ("Lyrics_CardElementImpl.CardContentView", .card),
             ("_TtC22Lyrics_CardElementImpl15CardContentView", .card),
             ("Canvas_CommonImpl.CanvasNowPlayingLyricsView", .inline),
-            ("_TtC17Canvas_CommonImpl26CanvasNowPlayingLyricsView", .inline)
+            ("_TtC17Canvas_CommonImpl26CanvasNowPlayingLyricsView", .inline),
+            ("Lyrics_NPVContainerKit.LyricsContainerView", .inline),
+            ("_TtC22Lyrics_NPVContainerKit19LyricsContainerView", .inline),
+            ("NowPlaying_ContentLayersImpl.LegacyLyricsContainerView", .inline),
+            ("_TtC28NowPlaying_ContentLayersImpl25LegacyLyricsContainerView", .inline)
         ]
         var seen = Set<ObjectIdentifier>()
         for (name, surface) in targets {
@@ -38,8 +42,38 @@ enum SpicyLyricsEmbeddedSurfaces {
                     method_setImplementation(method, replacement)
                 }
             }
+            let added = #selector(UIView.didAddSubview(_:))
+            if let method = class_getInstanceMethod(cls, added), method_getNumberOfArguments(method) == 3 {
+                typealias Original = @convention(c) (UIView, Selector, UIView) -> Void
+                let original = unsafeBitCast(method_getImplementation(method), to: Original.self)
+                let block: @convention(block) (UIView, UIView) -> Void = { view, child in
+                    original(view, added, child)
+                    update(view, surface: surface)
+                }
+                let replacement = imp_implementationWithBlock(block)
+                if !class_addMethod(cls, added, replacement, method_getTypeEncoding(method)) {
+                    method_setImplementation(method, replacement)
+                }
+            }
+            // The native caption's ancestor recognizer can fire for a WebKit
+            // tap as well. Route that exact action before any native zoom.
+            let tapped = NSSelectorFromString("lyricsTapped")
+            if let method = class_getInstanceMethod(cls, tapped), method_getNumberOfArguments(method) == 2 {
+                typealias Original = @convention(c) (UIView, Selector) -> Void
+                let original = unsafeBitCast(method_getImplementation(method), to: Original.self)
+                let block: @convention(block) (UIView) -> Void = { view in
+                    if enabled(), let host = objc_getAssociatedObject(view, &association) as? SpicyLyricsEmbeddedHost,
+                       host.open() { return }
+                    original(view, tapped)
+                }
+                let replacement = imp_implementationWithBlock(block)
+                if !class_addMethod(cls, tapped, replacement, method_getTypeEncoding(method)) {
+                    method_setImplementation(method, replacement)
+                }
+            }
             writeDebugLog("[SpicyEmbedded] installed \(surface.rawValue) in \(name)")
         }
+        SpicyLyricsPreviewEntry.install(isEnabled: isEnabled)
     }
 
     private static func update(_ view: UIView, surface: SpicyLyricsSurface) {
@@ -48,6 +82,15 @@ enum SpicyLyricsEmbeddedSurfaces {
             current?.detach()
             objc_setAssociatedObject(view, &association, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             return
+        }
+        var parent = view.superview
+        while let ancestor = parent {
+            if objc_getAssociatedObject(ancestor, &association) is SpicyLyricsEmbeddedHost {
+                current?.detach()
+                objc_setAssociatedObject(view, &association, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                return
+            }
+            parent = ancestor.superview
         }
         if let current { current.layout(); return }
         let host = SpicyLyricsEmbeddedHost(container: view, surface: surface)
@@ -62,14 +105,25 @@ private final class SpicyLyricsEmbeddedHost {
         weak var view: UIView?
         let alpha: CGFloat
         let accessibilityHidden: Bool
+        let mask: CALayer?
+        let suppression = CALayer()
         init(_ view: UIView) {
             self.view = view
             alpha = view.alpha
             accessibilityHidden = view.accessibilityElementsHidden
+            mask = view.layer.mask
         }
         func restore() {
             view?.alpha = alpha
             view?.accessibilityElementsHidden = accessibilityHidden
+            if view?.layer.mask === suppression { view?.layer.mask = mask }
+        }
+        func suppress() {
+            view?.alpha = 0
+            view?.accessibilityElementsHidden = true
+            // Transparent mask remains effective when a native lyric animator
+            // sets alpha back to one between layouts. No intrinsic-size change.
+            view?.layer.mask = suppression
         }
     }
 
@@ -99,11 +153,7 @@ private final class SpicyLyricsEmbeddedHost {
         let host = SpicyLyricsFullscreenHost(controller: controller, surface: surface,
             onClose: { [weak self] in self?.fallBack() },
             onReveal: { renderer in renderer.alpha = 1 },
-            onOpen: { [weak self] in
-                guard let self, let container = self.container,
-                      let owner = self.owningController(container) else { return }
-                SpicyLyricsFullscreenCoordinator.shared.open(from: owner)
-            })
+            onOpen: { [weak self] in _ = self?.open() })
         renderer = host
         if !host.attach() { fallBack(); return }
         layout()
@@ -118,13 +168,19 @@ private final class SpicyLyricsEmbeddedHost {
             // collapse the original layout and shrink the replacement to zero.
             for child in container.subviews where child !== controller.view {
                 if !originals.contains(where: { $0.view === child }) { originals.append(NativeView(child)) }
-                child.alpha = 0
-                child.accessibilityElementsHidden = true
+                originals.first(where: { $0.view === child })?.suppress()
             }
             originals.removeAll { $0.view == nil }
             controller.view.frame = container.bounds
             container.bringSubviewToFront(controller.view)
         }
+    }
+
+    @discardableResult
+    func open() -> Bool {
+        guard !failed, let container, let owner = owningController(container) else { return false }
+        SpicyLyricsFullscreenCoordinator.shared.open(from: owner)
+        return true
     }
 
     private func owningController(_ view: UIView) -> UIViewController? {

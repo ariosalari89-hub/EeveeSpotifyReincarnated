@@ -69,3 +69,13 @@ prove every private runtime layout or account capability on the user's phone.
 Primary references consulted: Apple's object_getIvar and WKWebView.scrollView
 documentation, plus supplied Spotify binary metadata/disassembly. Runtime API docs
 establish mechanics, not private Spotify semantics; those require the binary/phone.
+
+### Reproduction evidence (v5.3 before repair)
+
+Preview: 360×320, 30 line-timed lines, pause at 1s; wheel down 360px over
+the actual card, then observe playback at 45s. Active line 22 is at y=503.8px,
+outside the 320px viewport, while the Follow control has zero height. Screenshots:
+`artifacts/spicy-v5.4-qa/preview-before-r2.png` and `preview-stuck-r2.png`.
+This is an actual browser wheel gesture, not a dispatched DOM wheel event.
+Video recording was unavailable because the browser CLI could not find ffmpeg;
+discard the earlier blank fixture capture, retain the numbered r2 screenshots.

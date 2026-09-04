@@ -10,6 +10,7 @@ xcrun swiftc -swift-version 5 -target "$ARCH-apple-ios17.0-simulator" -sdk "$SDK
   Sources/EeveeSpotify/Lyrics/SpicyLyricsFullscreenHost.swift \
   Sources/EeveeSpotify/Lyrics/SpicyLyricsFullscreenCoordinator.swift \
   Sources/EeveeSpotify/Lyrics/SpicyLyricsEmbeddedSurfaces.swift \
+  Sources/EeveeSpotify/Lyrics/SpicyLyricsPreviewEntry.swift \
   Tests/SpicyLyricsIOS/main.swift -o "$QA_APP/SpicyLyricsQA"
 cp -R "layout/Library/Application Support/EeveeSpotify.bundle/SpicyLyricsRenderer" "$QA_APP/"
 python3 - "$QA_APP/Info.plist" <<'PY'
