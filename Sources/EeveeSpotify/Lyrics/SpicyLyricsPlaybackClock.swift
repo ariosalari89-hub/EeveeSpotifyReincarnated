@@ -130,6 +130,7 @@ struct SpicyLyricsPlaybackClock {
     private var restrictions = SpicyLyricsPlaybackRestrictions()
     private var lastSourceTimestampSeconds: TimeInterval?
     private var lastObservedAtUptimeSeconds = -Double.greatestFiniteMagnitude
+    private var lifecycleHidden = false
     private var isSuspended = false
     private var requiresFreshObservation = true
 
@@ -189,8 +190,8 @@ struct SpicyLyricsPlaybackClock {
                 lastSourceTimestampSeconds ?? sourceTimestamp
             )
         }
-        isSuspended = false
-        requiresFreshObservation = false
+        isSuspended = lifecycleHidden
+        requiresFreshObservation = lifecycleHidden
         incrementSequence()
         return true
     }
@@ -202,6 +203,7 @@ struct SpicyLyricsPlaybackClock {
             anchorPositionSeconds = snapshot(at: uptimeSeconds).positionSeconds
             anchorUptimeSeconds = uptimeSeconds
         }
+        lifecycleHidden = true
         isSuspended = true
         requiresFreshObservation = true
         incrementSequence()
@@ -212,6 +214,7 @@ struct SpicyLyricsPlaybackClock {
     mutating func resumeAwaitingObservation(at uptimeSeconds: TimeInterval) {
         guard uptimeSeconds.isFinite else { return }
         if identity != nil { anchorUptimeSeconds = uptimeSeconds }
+        lifecycleHidden = false
         isSuspended = true
         requiresFreshObservation = true
         incrementSequence()
@@ -265,7 +268,7 @@ struct SpicyLyricsPlaybackClock {
         restrictions = SpicyLyricsPlaybackRestrictions()
         lastSourceTimestampSeconds = nil
         lastObservedAtUptimeSeconds = -Double.greatestFiniteMagnitude
-        isSuspended = false
+        isSuspended = lifecycleHidden
         requiresFreshObservation = true
     }
 

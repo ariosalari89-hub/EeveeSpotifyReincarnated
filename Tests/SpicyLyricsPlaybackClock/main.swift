@@ -125,8 +125,11 @@ require(lifecycleClock.submit(observation(position: 40, observedAt: 0)), "lifecy
 lifecycleClock.suspend(at: 2)
 requireNear(lifecycleClock.snapshot(at: 100).positionSeconds, 42, "hidden clock advanced")
 require(lifecycleClock.snapshot(at: 100).requiresFreshObservation, "hidden state did not require resync")
+require(lifecycleClock.submit(observation(position: 60, observedAt: 80)), "hidden observation rejected")
+requireNear(lifecycleClock.snapshot(at: 99).positionSeconds, 60, "hidden observation was extrapolated")
+require(lifecycleClock.snapshot(at: 99).requiresFreshObservation, "hidden observation released gate")
 lifecycleClock.resumeAwaitingObservation(at: 100)
-requireNear(lifecycleClock.snapshot(at: 110).positionSeconds, 42, "foreground guessed hidden progress")
+requireNear(lifecycleClock.snapshot(at: 110).positionSeconds, 60, "foreground guessed hidden progress")
 require(lifecycleClock.submit(observation(position: 75, observedAt: 100.1)), "fresh foreground state rejected")
 requireNear(lifecycleClock.snapshot(at: 101.1).positionSeconds, 76, "fresh foreground state did not resume")
 

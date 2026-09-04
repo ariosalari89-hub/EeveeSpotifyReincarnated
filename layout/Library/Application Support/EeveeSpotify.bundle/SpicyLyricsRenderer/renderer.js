@@ -61,6 +61,7 @@
     draggingSeek: false,
     dragPositionMs: 0,
     seekPreview: null,
+    lifecyclePhase: "visible",
     lifecycleFrozen: true,
     frozenPositionMs: 0,
     nativeReduceMotion: false,
@@ -453,10 +454,14 @@
     }
     applyTrack(incoming.track);
     applyControls();
-    if (!document.hidden && !incoming.requiresFreshObservation) {
+    if (state.lifecyclePhase === "visible"
+        && !document.hidden
+        && !incoming.requiresFreshObservation) {
       state.lifecycleFrozen = false;
+      state.frozenPositionMs = incoming.positionMs;
+    } else if (!state.lifecycleFrozen) {
+      state.frozenPositionMs = incoming.positionMs;
     }
-    state.frozenPositionMs = incoming.positionMs;
     reconcileCommands();
   }
 
@@ -715,12 +720,16 @@
       case "lifecycle":
         if (payload.state === "hidden" || payload.state === "resuming") {
           state.frozenPositionMs = positionNow();
+          state.lifecyclePhase = payload.state;
           state.lifecycleFrozen = true;
         } else if (payload.state === "visible"
             && state.session
             && !state.session.requiresFreshObservation) {
+          state.lifecyclePhase = "visible";
           state.frozenPositionMs = state.session.positionMs;
           state.lifecycleFrozen = false;
+        } else if (payload.state === "visible") {
+          state.lifecyclePhase = "visible";
         }
         break;
       case "commandResult":
@@ -834,9 +843,11 @@
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       state.frozenPositionMs = positionNow();
+      state.lifecyclePhase = "hidden";
       state.lifecycleFrozen = true;
     } else {
       state.frozenPositionMs = positionNow();
+      state.lifecyclePhase = "resuming";
       state.lifecycleFrozen = true;
       post("resync");
     }

@@ -261,7 +261,6 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private func rendererDidBecomeReady() {
         guard !isReady, !isDetached else { return }
         isReady = true
-        webContentRestartCount = 0
         readyWatchdog?.invalidate()
         readyWatchdog = nil
         writeDebugLog("[SpicyRenderer] ready protocol=5")
