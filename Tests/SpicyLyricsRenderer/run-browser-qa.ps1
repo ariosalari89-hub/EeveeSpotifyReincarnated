@@ -30,6 +30,20 @@ function Require-Qa {
     Write-Host "PASS $Name $($Result | ConvertTo-Json -Compress -Depth 12)"
 }
 
+function Test-QaAccessibility {
+    param([Parameter(Mandatory)][string]$State)
+    $raw = & agent-browser --session $session a11y --json
+    if ($LASTEXITCODE -ne 0) { throw "Accessibility audit failed: $raw" }
+    $audit = $raw | ConvertFrom-Json
+    if (-not $audit.success -or $audit.data.violations.Count -gt 0) {
+        throw "$State accessibility violations: $raw"
+    }
+    if (@($audit.data.incomplete | Where-Object { $_.id -eq 'aria-prohibited-attr' }).Count -gt 0) {
+        throw "$State has unsupported ARIA: $raw"
+    }
+    Write-Host "PASS $State automated accessibility (gradient contrast requires separate review)"
+}
+
 try {
     # Do not capture the first command's stdout: on Windows the freshly spawned
     # browser daemon inherits that pipe and keeps it open after `open` exits.
@@ -325,6 +339,30 @@ try {
 })()
 '@
     Require-Qa "Panini long joined lyrics at enlarged text" $longLyrics
+    $contrast = Invoke-QaEval @'
+(() => {
+  const veil = getComputedStyle(document.querySelector('.contrast-veil'));
+  const alpha = Number(veil.backgroundColor.match(/[\d.]+/g)[3]);
+  const topShade = Number(veil.backgroundImage.match(/linear-gradient\([^;]*?rgba\(0, 0, 0, ([\d.]+)\)/)?.[1]);
+  const maximumBackground = Math.ceil(255 * (1-alpha) * (1-topShade));
+  const luminance = rgb => rgb.map(c => c/255).map(c => c<=0.04045 ? c/12.92 : ((c+0.055)/1.055)**2.4)
+    .reduce((sum,c,i) => sum+c*[0.2126,0.7152,0.0722][i],0);
+  const background = [maximumBackground,maximumBackground,maximumBackground];
+  const contrast = selector => {
+    const color = getComputedStyle(document.querySelector(selector)).color.match(/[\d.]+/g).map(Number);
+    const opacity = color[3] ?? 1;
+    const foreground = color.slice(0,3).map(c=>c*opacity+maximumBackground*(1-opacity));
+    return (luminance(foreground)+0.05)/(luminance(background)+0.05);
+  };
+  const ratios = {inactive:contrast('.token'),artist:contrast('#artist'),timeline:contrast('.timeline')};
+  const opaqueLines = [...document.querySelectorAll('.lyric-line')].every(e=>getComputedStyle(e).opacity==='1');
+  return JSON.stringify({pass:alpha>=0.62 && topShade>=0.16 && opaqueLines
+    && ratios.inactive>=3.5 && ratios.artist>=5 && ratios.timeline>=5,
+    maximumBackground,ratios,opaqueLines});
+})()
+'@
+    Require-Qa "lyric and metadata contrast against worst-case white artwork" $contrast
+    Test-QaAccessibility "portrait karaoke"
 
     $portraitOutput = & agent-browser --session $session screenshot (Join-Path $artifactDirectory "portrait-karaoke.png")
     $portraitOutput | Write-Host
@@ -361,6 +399,7 @@ try {
 })()
 '@
     Require-Qa "landscape, enlarged text, and modal geometry" $layout
+    Test-QaAccessibility "landscape settings"
     $landscapeScreenshotOutput = & agent-browser --session $session screenshot (Join-Path $artifactDirectory "landscape-settings.png")
     $landscapeScreenshotOutput | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Could not capture landscape baseline" }

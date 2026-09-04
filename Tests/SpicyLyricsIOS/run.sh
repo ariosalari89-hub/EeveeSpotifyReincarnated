@@ -36,6 +36,9 @@ CONTAINER=$(xcrun simctl get_app_container "$DEVICE" local.spicylyrics.qa data)
 for iteration in {1..90}; do
   if [ -f "$CONTAINER/Documents/qa-result.txt" ]; then
     cp "$CONTAINER/Documents/qa-result.txt" "$RUNNER_TEMP/spicy-ios-qa-result.txt"
+    for image in "$CONTAINER/Documents/qa-"*.png; do
+      [ ! -f "$image" ] || cp "$image" "$RUNNER_TEMP/$(basename "$image")"
+    done
     cat "$RUNNER_TEMP/spicy-ios-qa-result.txt"
     grep -q '^PASS$' "$RUNNER_TEMP/spicy-ios-qa-result.txt"
     exit

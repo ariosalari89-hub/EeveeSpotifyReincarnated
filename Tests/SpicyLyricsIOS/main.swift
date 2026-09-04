@@ -103,6 +103,14 @@ struct QAFailure: Error { let message: String }
         }
         throw QAFailure(message: label)
     }
+    func snapshot(_ name: String) async throws {
+        guard let web = webView() else { throw QAFailure(message: "snapshot has no renderer") }
+        let image = try await web.takeSnapshot(configuration: nil)
+        guard let png = image.pngData() else { throw QAFailure(message: "snapshot encoding failed") }
+        let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(name + ".png")
+        try png.write(to: path)
+    }
     func run() async {
         do {
             SpicyLyricsFullscreenCoordinator.shared.attach(to: source)
@@ -134,6 +142,15 @@ struct QAFailure: Error { let message: String }
                 && document.querySelectorAll('.word-group.breakable').length > 0;
             })()
             """)
+            try await snapshot("qa-portrait")
+            scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
+            try await waitFor("rotation keeps all transport controls on screen", """
+            (() => innerWidth > innerHeight && [...document.querySelectorAll('.transport button,.timeline,#settings-button')]
+              .every(e => { const r=e.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth+1
+                && r.top >= -1 && r.bottom <= innerHeight+1; }))()
+            """)
+            try await snapshot("qa-landscape")
             let overlay = scene.windows.first(where: { $0.isKeyWindow })
             _ = try await evaluate("document.querySelector('#close-button').click()")
             try await Task.sleep(nanoseconds: 300_000_000)

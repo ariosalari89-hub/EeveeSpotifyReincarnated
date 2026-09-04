@@ -151,6 +151,8 @@ assert "scheduleLyricsUpgrade" in host
 assert "showLoading: false" in host
 
 # Accessibility/adaptive layout invariants.
+assert "user-scalable=no" not in index
+assert 'class="transport" role="group"' in index
 assert 'aria-label="Turn shuffle on"' in index
 assert 'aria-label="Turn repeat on"' in index
 assert 'class="repeat-one"' in index
