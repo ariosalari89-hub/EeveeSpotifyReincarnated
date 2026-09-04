@@ -34,7 +34,8 @@ static void require(BOOL condition, NSString *message) {
 @end
 
 @interface FakeState : NSObject
-@property NSURL *contextURL;
+// Actual SPTPlayerState surface, not the similarly named contextURL elsewhere.
+@property NSURL *contextURI;
 @end
 @implementation FakeState
 @end
@@ -83,7 +84,7 @@ int main(void) {
         objc_registerClassPair(cls);
         EeveeSpicyInstallPlaybackControls();
         FakeState *state = [FakeState new];
-        state.contextURL = [NSURL URLWithString:@"spotify:playlist:test"];
+        state.contextURI = [NSURL URLWithString:@"spotify:playlist:test"];
         require(EeveeSpicyPerformControl(@"pause", state) == -1, @"missing native handler must be unavailable");
         FakeActions *actions = [cls new];
         actions.allowed = YES;
