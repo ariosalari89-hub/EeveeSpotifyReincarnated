@@ -5,6 +5,8 @@ import WebKit
 final class QACardContentView: UIView {}
 @objc(_TtC17Canvas_CommonImpl26CanvasNowPlayingLyricsView)
 final class QAInlineLyricsView: UIView {}
+@objc(_TtC17Canvas_CommonImpl33CanvasNowPlayingLyricsElementView)
+final class QAMigratedCanvasLyricsView: UIView {}
 @objc(_TtC22Lyrics_NPVContainerKit19LyricsContainerView)
 final class QAStillLyricsView: UIView {}
 @objc(_TtC28NowPlaying_ContentLayersImpl25LegacyLyricsContainerView)
@@ -241,7 +243,7 @@ struct QAFailure: Error { let message: String }
         guard captionFits as? Bool == true else { throw QAFailure(message: "enlarged native caption clips glyph rows") }
         checks.append("enlarged caption fits a short native lyric slot without clipped glyph rows")
         // Both non-video paths must attach, not just the Canvas test double.
-        for view in [QAStillLyricsView(), QALegacyLyricsView()] as [UIView] {
+        for view in [QAStillLyricsView(), QALegacyLyricsView(), QAMigratedCanvasLyricsView()] as [UIView] {
             view.frame = inline.frame
             root.view.addSubview(view)
             view.setNeedsLayout(); view.layoutIfNeeded()
@@ -249,7 +251,7 @@ struct QAFailure: Error { let message: String }
             view.removeFromSuperview()
             guard findWeb(view) == nil else { throw QAFailure(message: "non-Canvas caption leaked its renderer") }
         }
-        checks.append("still-artwork and legacy caption hooks attach and detach")
+        checks.append("still-artwork, legacy and migrated Canvas caption hooks attach and detach")
         SpicyLyricsPlaybackBridge.shared.onSkip = nil
         _ = SpicyLyricsPlaybackBridge.shared.perform(command: "next")
         try await waitForBoth("track-4")

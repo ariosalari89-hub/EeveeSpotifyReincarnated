@@ -35,6 +35,9 @@ The user has authorized implementation without another approval round.
   Lyrics_NPVContainerKit.LyricsContainerView and
   NowPlaying_ContentLayersImpl.LegacyLyricsContainerView, both with lyricsTapped.
   Scope attachment to those classes, avoid nested renderers, and intercept their tap.
+  CanvasNowPlayingLyricsElementView is the separately verified migrated-video variant
+  and is included too. Scoped native tap recognizers are restored on detach; no global
+  gesture recognizer or view behavior is changed.
 - v5.3 hides native child alpha only during layout. A later native alpha animation can
   draw it again. Add a reversible transparent layer mask that preserves intrinsic size,
   and mask newly added children immediately. Do not mutate global UIView behavior.
@@ -50,11 +53,11 @@ The user has authorized implementation without another approval round.
 
 ## Execution and verification
 
-- [ ] Add native `contextURI`-only regression before the fix; verify real binary ABI.
-- [ ] Record preview/seek browser gesture failures, then retest actual pointer gestures.
-- [ ] Add native redraw/mask/child insertion and non-Canvas hook integration regressions.
-- [ ] Add header expand routing test with a native action counter (must stay zero).
-- [ ] Add caption segment/dot bounds and landscape duplicate-visibility tests.
+- [x] Add native `contextURI`-only regression before the fix; verify real binary ABI.
+- [x] Record preview/seek browser gesture failures, then retest actual pointer gestures.
+- [x] Add native redraw/mask/child insertion and non-Canvas hook integration regressions.
+- [x] Add header expand routing test with a native action counter (must stay zero).
+- [x] Add caption segment/dot bounds and landscape duplicate-visibility tests.
 - [ ] Run all model, bundle, browser, clock, C control, and UIKit/WK host tests.
 - [ ] Inspect portrait/landscape/card/inline screenshots, errors and interactions.
 - [ ] Full native build; package against preserved corrected base; archive/payload/hash
@@ -69,6 +72,13 @@ prove every private runtime layout or account capability on the user's phone.
 Primary references consulted: Apple's object_getIvar and WKWebView.scrollView
 documentation, plus supplied Spotify binary metadata/disassembly. Runtime API docs
 establish mechanics, not private Spotify semantics; those require the binary/phone.
+
+- [Apple object_getIvar](https://developer.apple.com/documentation/objectivec/object_getivar(_:_:))
+- [Apple WKWebView.scrollView](https://developer.apple.com/documentation/webkit/wkwebview/scrollview)
+
+The compact preview intentionally always follows, matching its preview role; manual
+reading is available by expanding it. Untimed text also expands on tap/Enter, with no
+fake current line or seek. Full-screen manual scrolling/Follow control is unchanged.
 
 ### Reproduction evidence (v5.3 before repair)
 

@@ -911,6 +911,17 @@
   });
 
   let scrollPointerStart = null;
+  dom.scroller.addEventListener("click", (event) => {
+    // Timed lyric buttons handle themselves. Untimed text, empty preview
+    // space and interludes must still open the readable full-screen surface.
+    if (state.surface !== "fullscreen" && !event.target.closest("button")) post("openFullscreen");
+  });
+  dom.scroller.addEventListener("keydown", (event) => {
+    if (state.surface !== "fullscreen" && event.target === dom.scroller && event.key === "Enter") {
+      event.preventDefault();
+      post("openFullscreen");
+    }
+  });
   dom.scroller.addEventListener("pointerdown", (event) => {
     if (state.surface !== "fullscreen") return;
     scrollPointerStart = { y: event.clientY, scrollTop: dom.scroller.scrollTop };

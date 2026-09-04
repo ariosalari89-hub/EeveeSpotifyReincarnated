@@ -76,6 +76,15 @@ try {
 })()
 '@)
     & agent-browser --session $session screenshot (Join-Path $artifacts 'preview-follow.png')
+    Require-Qa 'untimed preview remains readable and opens without inventing timing' (Eval-Qa @'
+(async () => {
+  SpicyQA.scenario('static',{positionMs:4000,isPlaying:false,isPaused:true,isAdvancing:false});
+  await new Promise(requestAnimationFrame); SpicyQA.clearMessages();
+  document.querySelector('.lyric-line.static').click();
+  return JSON.stringify({pass:SpicyQA.messages.filter(m=>m.type==='openFullscreen').length===1
+    &&!SpicyQA.messages.some(m=>m.type==='seek')&&!document.querySelector('.active')});
+})()
+'@)
     & agent-browser --session $session set viewport 340 52
     Require-Qa 'word-boundary caption pages follow timed words and dots are inset' (Eval-Qa @'
 (async () => {

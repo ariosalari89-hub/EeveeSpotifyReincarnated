@@ -17,6 +17,8 @@ enum SpicyLyricsEmbeddedSurfaces {
             ("_TtC22Lyrics_CardElementImpl15CardContentView", .card),
             ("Canvas_CommonImpl.CanvasNowPlayingLyricsView", .inline),
             ("_TtC17Canvas_CommonImpl26CanvasNowPlayingLyricsView", .inline),
+            ("Canvas_CommonImpl.CanvasNowPlayingLyricsElementView", .inline),
+            ("_TtC17Canvas_CommonImpl33CanvasNowPlayingLyricsElementView", .inline),
             ("Lyrics_NPVContainerKit.LyricsContainerView", .inline),
             ("_TtC22Lyrics_NPVContainerKit19LyricsContainerView", .inline),
             ("NowPlaying_ContentLayersImpl.LegacyLyricsContainerView", .inline),
@@ -176,12 +178,12 @@ private final class SpicyLyricsEmbeddedHost {
         UIView.performWithoutAnimation {
             // Card taps belong to the replacement. A native ancestor tap
             // must not also start Spotify's zoom behind the new window.
-            if surface == .card {
+            if surface == .card || surface == .inline {
                 var ancestor: UIView? = container
                 while let view = ancestor {
                     let name = NSStringFromClass(type(of: view))
-                    if view === container || name == "Lyrics_CardElementImpl.CardView"
-                        || name == "_TtC22Lyrics_CardElementImpl8CardView" {
+                    if view === container || (surface == .card && (name == "Lyrics_CardElementImpl.CardView"
+                        || name == "_TtC22Lyrics_CardElementImpl8CardView")) {
                         for tap in (view.gestureRecognizers ?? []).compactMap({ $0 as? UITapGestureRecognizer }) {
                             if !nativeTaps.contains(where: { $0.recognizer === tap }) { nativeTaps.append(NativeTap(tap)) }
                             tap.isEnabled = false
