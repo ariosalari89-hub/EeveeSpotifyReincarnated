@@ -447,10 +447,11 @@ final class SpicyLyricsPlaybackBridge {
         }
         lastDiagnosticGeneration = snapshot.generation
         lastDiagnosticUptime = now
+        let formattedPosition = String(format: "%.3f", snapshot.positionSeconds)
         writeDebugLog(
             "[SpicyRenderer] state generation=\(snapshot.generation) "
             + "sequence=\(snapshot.sequence) track=\(observation.identity.trackIdentifier) "
-            + "position=\(String(format: \"%.3f\", snapshot.positionSeconds)) "
+            + "position=\(formattedPosition) "
             + "playing=\(snapshot.isPlaying) paused=\(snapshot.isPaused) "
             + "buffering=\(snapshot.isBuffering)"
         )
@@ -544,11 +545,12 @@ final class SpicyLyricsPlaybackBridge {
             "cover_url",
             "image_uri"
         ]
-        guard let raw = keys.lazy.compactMap({ nonEmpty(metadata[$0]) }).first else {
+        guard let raw = keys.lazy.compactMap({ self.nonEmpty(metadata[$0]) }).first else {
             return nil
         }
         if raw.hasPrefix("spotify:image:") {
-            return "https://i.scdn.co/image/\(raw.replacingOccurrences(of: \"spotify:image:\", with: \"\"))"
+            let imageIdentifier = raw.replacingOccurrences(of: "spotify:image:", with: "")
+            return "https://i.scdn.co/image/\(imageIdentifier)"
         }
         return raw
     }
