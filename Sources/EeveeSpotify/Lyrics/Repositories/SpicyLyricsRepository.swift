@@ -199,12 +199,13 @@ class SpicyLyricsRepository: LyricsRepository {
         let envelope: SpicyLyricsRendererCacheEnvelope
         if let existing,
            existing.status == 200,
-           incoming.status == 200,
-           isHigherQuality(existing, than: incoming) {
+           (incoming.status == 404
+            || (incoming.status == 200 && isHigherQuality(existing, than: incoming))) {
             envelope = existing
             writeDebugLog(
                 "[SpicyLyrics] Kept higher-quality \(existing.lyricsType ?? "unknown") cache "
-                + "instead of \(incoming.lyricsType ?? "unknown") for \(trackId)"
+                + "instead of status=\(incoming.status) "
+                + "type=\(incoming.lyricsType ?? "unknown") for \(trackId)"
             )
         } else {
             envelope = incoming
@@ -676,8 +677,15 @@ class SpicyLyricsRepository: LyricsRepository {
         forceRefresh: Bool,
         shouldContinue: () -> Bool
     ) throws -> SpicyLyricsResolvedPayload {
+        var preservedPayload: SpicyLyricsResolvedPayload?
         if forceRefresh {
-            removeRendererCache(for: trackId)
+            // A manual retry asks the network for a better answer; it does not
+            // authorize a transient 404/Static response to destroy a working
+            // Line/Syllable payload. Keep the last decodable response until a
+            // successful fetch has passed the same fidelity comparator.
+            if let cached = try? cachedRendererPayload(for: trackId) {
+                preservedPayload = try? decodeRendererPayload(cached, trackId: trackId)
+            }
         } else if let cached = try cachedRendererPayload(for: trackId) {
             do {
                 let payload = try decodeRendererPayload(cached, trackId: trackId)
@@ -736,6 +744,18 @@ class SpicyLyricsRepository: LyricsRepository {
             finishInFlight(request, trackId: trackId, payload: selected, error: nil)
             return selected
         } catch {
+            if let preservedPayload {
+                writeDebugLog(
+                    "[SpicyLyrics] Refresh failed; retained \(preservedPayload.type) for \(trackId)"
+                )
+                finishInFlight(
+                    request,
+                    trackId: trackId,
+                    payload: preservedPayload,
+                    error: nil
+                )
+                return preservedPayload
+            }
             if let lyricsError = error as? LyricsError,
                case .noSuchSong = lyricsError {
                 cacheMissingLyrics(for: trackId)

@@ -10,37 +10,87 @@ index = (BUNDLE / "index.html").read_text(encoding="utf-8")
 model = (BUNDLE / "renderer-model.js").read_text(encoding="utf-8")
 renderer = (BUNDLE / "renderer.js").read_text(encoding="utf-8")
 styles = (BUNDLE / "styles.css").read_text(encoding="utf-8")
-bridge = (
-    ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackBridge.swift"
-).read_text(encoding="utf-8")
-clock = (
-    ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackClock.swift"
-).read_text(encoding="utf-8")
-host = (
-    ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsFullscreenHost.swift"
-).read_text(encoding="utf-8")
+bridge = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackBridge.swift").read_text(encoding="utf-8")
+clock = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackClock.swift").read_text(encoding="utf-8")
+host = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsFullscreenHost.swift").read_text(encoding="utf-8")
 repository = (
     ROOT / "Sources/EeveeSpotify/Lyrics/Repositories/SpicyLyricsRepository.swift"
 ).read_text(encoding="utf-8")
-c_header = (
-    ROOT / "Sources/EeveeSpotifyC/include/Tweak.h"
-).read_text(encoding="utf-8")
+c_header = (ROOT / "Sources/EeveeSpotifyC/include/Tweak.h").read_text(encoding="utf-8")
 
-# The native host and both renderer assets must use one explicit contract.
-assert 'src="renderer-model.js?v=4"' in index
-assert 'src="renderer.js?v=4"' in index
-assert 'href="styles.css?v=4"' in index
-assert "const RENDERER_PROTOCOL_VERSION = 4" in renderer
-assert "private static let rendererProtocolVersion = 4" in host
+# One explicit v5 contract and cache key must cover every shipping asset.
+assert 'src="renderer-model.js?v=5"' in index
+assert 'src="renderer.js?v=5"' in index
+assert 'href="styles.css?v=5"' in index
+assert "const RENDERER_PROTOCOL_VERSION = 5" in renderer
+assert "private static let rendererProtocolVersion = 5" in host
 assert 'post("ready", { rendererProtocolVersion: RENDERER_PROTOCOL_VERSION })' in renderer
 
-# No preview-only content may ship in the production bundle.
+# Preview-only content and debug credentials may not ship.
 assert "preview-fixture" not in index
 assert "SPICY_PREVIEW_LYRICS" not in renderer
+assert "spotifyAccessToken" not in renderer
 assert not (BUNDLE / "preview-fixture.js").exists()
 assert not (BUNDLE / "preview-cover.svg").exists()
 
-# Full-screen transport order and semantics are stable and accessible.
+# The renderer receives a single atomic session; the split v4 track/playback
+# protocol is gone. Stale generations and sequences are rejected in pure code.
+assert 'emit(type: "session", payload: payload)' in host
+assert 'case "session"' in renderer
+assert 'case "track"' not in renderer
+assert 'case "playback"' not in renderer
+assert "shouldAcceptSession" in model and "shouldAcceptSession" in renderer
+assert "compareOrdinal" in model
+assert "activeGeneration == generation" in host
+assert "lyricsRequestID == requestID" in host
+assert "shouldAcceptLyrics" in model and "shouldAcceptLyrics" in renderer
+
+# There is exactly one native playback truth: SPTPlayerState. Commands never
+# optimistically mutate the clock or use MPNowPlayingInfo as position fallback.
+assert 'NSSelectorFromString("state")' in bridge
+assert "stateObject(from: player)" in bridge
+assert 'safeDouble(state, key: "position")' in bridge
+assert 'safeDouble(state, key: "duration")' in bridge
+assert "MPNowPlayingInfoPropertyElapsedPlaybackTime" not in bridge
+assert "perceptualLead" not in bridge
+assert "pendingSeekTarget" not in clock
+assert "requestedPlaybackState" not in bridge
+assert "Commands never change this state" in clock
+assert "projectedPosition" in model
+assert "requiresFreshObservation" in clock and "requiresFreshObservation" in model
+
+# Spotify 9.1.76's verified ABI is encoded exactly. Seek is a Double in
+# seconds; transport uses nil object options; shuffle/repeat use NSNumber.
+for selector in (
+    '"pause:"',
+    '"resume:"',
+    '"seekTo:"',
+    '"skipToNextTrackWithOptions:"',
+    '"skipToPreviousTrackWithOptions:"',
+    '"setShufflingContext:"',
+    '"setRepeatingContext:"',
+    '"setRepeatingTrack:"',
+):
+    assert selector in bridge
+assert "invokeDouble" in bridge and "EeveeSBInvokeSeekDouble" in bridge
+assert "NSNumber(value: !current)" in bridge
+assert "EeveeInvokeObjectArg" in bridge and "EeveeInvokeObjectArg" in c_header
+assert "selector cascade" in bridge
+assert "scheduleObservationBurst" in bridge
+
+# Requested commands remain pending until an observed session proves their
+# effect. Seek sends only on change and maintains one bounded local preview.
+assert "commandObserved" in model and "commandObserved" in renderer
+assert "acknowledgeCommand" in renderer and "reconcileCommands" in renderer
+assert 'dom.seek.addEventListener("input"' in renderer
+assert 'dom.seek.addEventListener("change"' in renderer
+seek_input = renderer[renderer.index('dom.seek.addEventListener("input"'):
+                      renderer.index('dom.seek.addEventListener("change"')]
+assert 'post("seek"' not in seek_input
+assert "beginSeekPreview" in model and "reconcileSeekPreview" in model
+assert "deadlineAt" in model
+
+# Full transport stays in the lyrics page and reflects only observed state.
 transport_ids = [
     'id="shuffle-button"',
     'id="previous-button"',
@@ -50,110 +100,63 @@ transport_ids = [
 ]
 positions = [index.index(item) for item in transport_ids]
 assert positions == sorted(positions)
+assert "session.shuffleEnabled" in renderer
+assert "session.repeatMode" in renderer
+assert "session.canGoPrevious" in renderer and "session.canGoNext" in renderer
+assert 'case "togglePlay", "play", "pause", "next", "previous", "toggleShuffle", "cycleRepeat"' in host
+assert 'case "next"' in bridge and 'case "previous"' in bridge
+
+# Karaoke, line, and static payloads stay semantically distinct. Word joins,
+# punctuation, RTL, translations, backgrounds, and duet alignment are retained.
+assert "normalizeSyllable" in model
+assert "normalizeLine" in model
+assert "normalizeStatic" in model
+assert "previousRaw?.IsPartOfWord === true" in model
+assert "startsWithClosingPunctuation" in model
+assert "translationFrom" in model
+assert 'kind: "background"' in model
+assert "OppositeAligned" in model
+assert "isRTL" in model
+assert "groupTokens" in model and "groupTokens" in renderer
+assert "tokenProgress" in model and "tokenProgress" in renderer
+assert 'element.classList.add("line-timed")' in renderer
+assert ".lyric-line.line-timed.active > .line-text" in styles
+assert ".lyric-line.static" in styles
+assert "white-space: nowrap" in styles
+
+# Lifecycle and WebKit failures cannot run a hidden clock forever.
+assert "suspendPlaybackClock" in host
+assert "resumeAwaitingObservation" in host
+assert "recoverOrFallBack" in host
+assert "maximumWebContentRestarts" in host
+assert "webViewWebContentProcessDidTerminate" in host
+assert 'payload.state === "hidden" || payload.state === "resuming"' in renderer
+
+# Accessibility/adaptive layout invariants.
 assert 'aria-label="Turn shuffle on"' in index
 assert 'aria-label="Turn repeat on"' in index
 assert 'class="repeat-one"' in index
-assert "min-height: 44px" in styles or "width: 44px; height: 44px" in styles
+assert "height: 44px" in styles
 assert "button:focus-visible" in styles
-assert "toggleShuffle" in renderer and "cycleRepeat" in renderer
-assert 'case "toggleShuffle"' in bridge and 'case "cycleRepeat"' in bridge
-assert 'case "togglePlay", "play", "pause", "toggleShuffle", "cycleRepeat"' in host
+assert "prefers-reduced-motion" in styles and "native-reduce-motion" in styles
+assert "prefers-contrast: more" in styles
+assert "safe-area-inset" in styles
+assert "max-height: 520px" in styles
 
-# One generation/sequence contract protects rapid skips and stale lyric fetches.
-assert 'generation: state.generation' in renderer
-assert "model.shouldAcceptPlayback" in renderer
-assert "state.lyricsGeneration" in renderer
-assert "payload.generation !== state.generation" in renderer
-assert "activeGeneration" in host
-assert "self.activeGeneration == requestedGeneration" in host
-assert '"generation": requestedGeneration' in host
-assert '"generation": String(snapshot.generation)' in bridge
-assert '"sequence": String(snapshot.sequence)' in bridge
-
-# Playback truth comes from the synchronous stateful player position getter.
-assert 'safeDoubleGetter($0, key: "position")' in bridge
-assert "source: .statefulPlayer" in bridge
-assert "source: .nowPlayingFallback" in bridge
-assert "higherAuthorityFreshnessSeconds" in bridge
-assert "SpicyLyricsPlaybackSampleSource" in clock
-assert "sample.source == .statefulPlayer" in clock
-assert "sample.source.rawValue" in clock
-assert "sample.generation == generation" in clock
-assert "requestSeek(" in clock
-assert "pendingSeekTargetSeconds" in clock
-assert "requestedPlaybackState" not in bridge
-assert "reconcilePlaybackState" not in bridge
-assert "setLocalPlaying" not in renderer
-assert "state.playback.positionMs = state.dragPosition" not in renderer
-assert "model.interpolatedPosition" in renderer
-assert 'case "resuming"' not in renderer  # lifecycle uses explicit comparisons, not a switch branch
-assert 'payload.state === "resuming"' in renderer
-assert "suspendPlaybackClock" in host
-assert "resumeAwaitingFreshSample" in bridge
-
-# Player commands use ABI-checked selectors and never imply observed success.
-assert 'NSSelectorFromString("setIsPaused:")' in bridge
-assert "func performSkip(command:" in bridge
-assert '"skipToNextTrackWithOptions:"' in bridge
-assert '"skipToPreviousTrackWithOptions:"' in bridge
-assert "verifyTransportEffect" in bridge
-assert 'let names = ["seekTo:", "scrubTo:", "seekToPosition:"]' in bridge
-assert "EeveeInvokeBoolArg" in bridge and "EeveeInvokeBoolArg" in c_header
-assert "acknowledgeCommand" in renderer
-assert "reconcileCommands" in renderer
-
-# Desktop-style lyric behavior keeps timing types distinct and words intact.
-assert 'dom.lyrics.dataset.timing' in renderer
-assert "tokens: []" in renderer
-assert 'element.classList.add("line-timed")' in renderer
-assert ".lyric-line.line-timed.active > .line-text" in styles
-assert ".lyric-line.not-sung" in styles
-assert ".lyric-line.sung" in styles
-assert ".word-group" in styles and "white-space: nowrap" in styles
-assert "model.groupTokens(line.tokens)" in renderer
-assert "joinsNext: syllable?.IsPartOfWord === true" in renderer
-assert "model.lyricLineState" in renderer
-assert "function lyricTimeScale(data)" in renderer
-time_scale = renderer[
-    renderer.index("function lyricTimeScale(data)"):
-    renderer.index("const toMilliseconds")
-]
-assert "state.playback.durationMs" not in time_scale
-assert "data?.TimeUnit" in time_scale
-assert "return 1000;" in time_scale
-assert "position -= state.preferences.playbackOffset" in renderer
-
-# The resolver must retain the best timed payload and prevent Static from
-# replacing Line/Syllable in memory or on disk.
-assert "rendererCacheLifetime: TimeInterval = 3 * 24 * 60 * 60" in repository
-assert "staticRendererCacheLifetime: TimeInterval = 30" in repository
+# Cache refresh and racing responses can upgrade fidelity, never downgrade it.
 assert "Joined in-flight request" in repository
 assert "fetchBestRemotePayload" in repository
 assert "isHigherQuality(existing, than: incoming)" in repository
-assert r"Upgraded \(trackId) from \(best.type)" in repository
+assert "incoming.status == 404" in repository
+assert "preservedPayload" in repository
+assert "Refresh failed; retained" in repository
 assert "SpicyLyricsServiceError.queued" in repository
 assert "2 * pow(1.5, Double(queuedAttempt))" in repository
-assert "forceRefresh: Bool = false" in repository
-assert "shouldContinue: () -> Bool" in repository
-
-# Native always publishes the current clock before starting the async lyric
-# request for that generation.
-publish = host[
-    host.index("private func publishPlaybackAndTrack"):
-    host.index("private func requestLyrics")
-]
-assert publish.index('emit(type: "playback"') < publish.index("requestLyrics(for:")
 
 node = shutil.which("node")
-assert node, "Node.js is required for renderer model regression tests"
-subprocess.run(
-    [node, "--check", str(BUNDLE / "renderer-model.js")],
-    check=True,
-)
-subprocess.run(
-    [node, "--check", str(BUNDLE / "renderer.js")],
-    check=True,
-)
+assert node, "Node.js is required for renderer regression tests"
+subprocess.run([node, "--check", str(BUNDLE / "renderer-model.js")], check=True)
+subprocess.run([node, "--check", str(BUNDLE / "renderer.js")], check=True)
 subprocess.run(
     [node, str(ROOT / "Tests/SpicyLyricsRenderer/model.test.js")],
     check=True,

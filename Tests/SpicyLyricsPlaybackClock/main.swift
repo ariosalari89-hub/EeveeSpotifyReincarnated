@@ -13,228 +13,151 @@ private func requireNear(
     require(abs(value - expected) <= tolerance, "\(message): expected \(expected), got \(value)")
 }
 
-var secondsUnits = SpicyLyricsPlaybackUnitNormalizer()
-let secondsDuration = secondsUnits.durationSeconds(193_000)
-requireNear(secondsDuration, 193, "millisecond duration was not normalized")
-requireNear(
-    secondsUnits.positionSeconds(2, durationSeconds: secondsDuration, referenceSeconds: 2),
-    2,
-    "seconds position was divided because duration used milliseconds"
-)
-
-var millisecondsUnits = SpicyLyricsPlaybackUnitNormalizer()
-let millisecondsDuration = millisecondsUnits.durationSeconds(193_000)
-requireNear(
-    millisecondsUnits.positionSeconds(100, durationSeconds: millisecondsDuration, referenceSeconds: 0.1),
-    0.1,
-    "early millisecond position did not use the system clock reference"
-)
-requireNear(
-    millisecondsUnits.positionSeconds(2_000, durationSeconds: millisecondsDuration, referenceSeconds: 2),
-    2,
-    "learned millisecond position scale was not retained"
-)
-
-requireNear(
-    SpicyLyricsPlaybackTimestampProjector.positionSeconds(
-        anchorPositionSeconds: 12,
-        fallbackPositionSeconds: 12,
-        sourceTimestamp: 100,
-        callbackTimestamp: 102.5,
-        playbackRate: 1,
-        isPlaying: true
-    ),
-    14.5,
-    "late fallback callback was not projected forward"
-)
-
-private func sample(
-    _ clock: inout SpicyLyricsPlaybackClock,
-    position: Double,
-    sampledAt: Double,
-    receivedAt: Double? = nil,
-    playing: Bool = true,
+private func observation(
     track: String = "track-a",
+    playback: String? = "playback-a",
+    session: String? = "session-a",
+    position: Double,
     duration: Double = 180,
-    source: SpicyLyricsPlaybackSampleSource = .statefulPlayer,
-    generation: UInt64? = nil
-) -> Bool {
-    let currentGeneration: UInt64
-    if clock.generation == 0 {
-        currentGeneration = clock.transition(to: track, at: sampledAt)
-    } else {
-        currentGeneration = generation ?? clock.generation
-    }
-    return clock.submit(
-        SpicyLyricsPlaybackSample(
-            generation: generation ?? currentGeneration,
-            positionSeconds: position,
-            durationSeconds: duration,
-            playbackRate: 1,
-            isPlaying: playing,
+    rate: Double = 1,
+    playing: Bool = true,
+    paused: Bool = false,
+    loading: Bool = false,
+    buffering: Bool = false,
+    shuffle: Bool = false,
+    repeatMode: SpicyLyricsRepeatMode = .off,
+    sourceTimestamp: Double? = nil,
+    observedAt: Double
+) -> SpicyLyricsPlaybackObservation {
+    SpicyLyricsPlaybackObservation(
+        identity: SpicyLyricsPlaybackIdentity(
             trackIdentifier: track,
-            source: source,
-            sampledAtUptimeSeconds: sampledAt,
-            receivedAtUptimeSeconds: receivedAt ?? sampledAt
-        )
+            playbackIdentifier: playback,
+            sessionIdentifier: session
+        ),
+        positionSeconds: position,
+        durationSeconds: duration,
+        playbackRate: rate,
+        isPlaying: playing,
+        isPaused: paused,
+        isLoading: loading,
+        isBuffering: buffering,
+        shuffleEnabled: shuffle,
+        repeatMode: repeatMode,
+        restrictions: SpicyLyricsPlaybackRestrictions(),
+        sourceTimestampSeconds: sourceTimestamp,
+        observedAtUptimeSeconds: observedAt
     )
 }
 
-// A stateful-player sample is the single normal writer and projects smoothly
-// from the represented sample instant.
-var liveClock = SpicyLyricsPlaybackClock()
-require(sample(&liveClock, position: 10, sampledAt: 1, receivedAt: 1.04), "live sample rejected")
-requireNear(liveClock.snapshot(at: 2).positionSeconds, 11, "live clock did not interpolate")
-require(liveClock.snapshot(at: 2).sequence == 1, "accepted sample did not increment sequence")
-require(liveClock.snapshot(at: 2).source == .statefulPlayer, "source was not retained")
+// Initial observation creates one generation and advances from its exact
+// receipt time with no artificial lead.
+var clock = SpicyLyricsPlaybackClock()
+require(clock.submit(observation(position: 10, sourceTimestamp: 100, observedAt: 1)), "initial state rejected")
+require(clock.generation == 1, "initial generation missing")
+requireNear(clock.snapshot(at: 2).positionSeconds, 11, "playing position did not advance")
 
-// Older samples can never rewind a newer observation.
-require(sample(&liveClock, position: 12, sampledAt: 3), "newer sample rejected")
-require(
-    !sample(&liveClock, position: 7, sampledAt: 2.5, receivedAt: 3.1),
-    "older sample was accepted"
-)
-requireNear(liveClock.snapshot(at: 3).positionSeconds, 12, "older sample rewound clock")
+// Equal source timestamps are valid because SPTPlayerState.position is a live
+// computed getter. An older callback inside the same playback is rejected.
+require(clock.submit(observation(position: 11.2, sourceTimestamp: 100, observedAt: 2.2)), "equal timestamp poll rejected")
+require(!clock.submit(observation(position: 9, sourceTimestamp: 99, observedAt: 2.3)), "older state rewound playback")
+requireNear(clock.snapshot(at: 2.3).positionSeconds, 11.3, "stale callback changed anchor")
 
-// A fresh high-authority stateful-player sample cannot be overwritten by the
-// observer or Now Playing. Once it is stale, observer recovery is allowed.
-var authorityClock = SpicyLyricsPlaybackClock()
-require(sample(&authorityClock, position: 20, sampledAt: 0), "authority seed rejected")
-require(
-    !sample(
-        &authorityClock,
-        position: 15,
-        sampledAt: 0.2,
-        source: .nowPlayingFallback
-    ),
-    "fresh live sample was overwritten by Now Playing"
-)
-require(
-    !sample(&authorityClock, position: 16, sampledAt: 1, source: .observer),
-    "fresh live sample was overwritten by observer"
-)
-require(
-    sample(&authorityClock, position: 23, sampledAt: 2.1, source: .observer),
-    "stale live clock did not permit bounded observer recovery"
-)
-requireNear(authorityClock.snapshot(at: 2.1).positionSeconds, 23, "observer recovery position missing")
+// A new track/session is an atomic boundary even if its timestamp is lower.
+require(clock.submit(observation(
+    track: "track-b",
+    playback: "playback-b",
+    session: "session-b",
+    position: 0.4,
+    sourceTimestamp: 2,
+    observedAt: 3
+)), "new playback with reset timestamp rejected")
+require(clock.generation == 2, "track transition did not increment generation")
+require(clock.snapshot(at: 3).identity?.trackIdentifier == "track-b", "track identity did not swap")
+requireNear(clock.snapshot(at: 3).positionSeconds, 0.4, "new track retained old position")
 
-// A real pause observation freezes forever; resume continues from the exact
-// observed position. Repeating this cycle must not accumulate command latency.
+// Missing optional IDs on a callback do not manufacture another generation.
+let stableGeneration = clock.generation
+require(clock.submit(observation(
+    track: "track-b",
+    playback: nil,
+    session: nil,
+    position: 1,
+    sourceTimestamp: 3,
+    observedAt: 3.6
+)), "partial identity observation rejected")
+require(clock.generation == stableGeneration, "partial identity split one playback")
+
+// Pause/resume is observation-only and never accumulates command latency.
 var pauseClock = SpicyLyricsPlaybackClock()
-require(sample(&pauseClock, position: 30, sampledAt: 0), "pause seed rejected")
-for cycle in 0 ..< 5 {
+for cycle in 0 ..< 100 {
     let base = Double(cycle) * 10
-    let pausePosition = 31 + Double(cycle)
-    require(
-        sample(&pauseClock, position: pausePosition, sampledAt: base + 1, playing: false),
-        "pause sample rejected"
-    )
-    requireNear(
-        pauseClock.snapshot(at: base + 5).positionSeconds,
-        pausePosition,
-        "paused clock advanced"
-    )
-    require(
-        sample(&pauseClock, position: pausePosition, sampledAt: base + 5, playing: true),
-        "resume sample rejected"
-    )
-    requireNear(
-        pauseClock.snapshot(at: base + 6).positionSeconds,
-        pausePosition + 1,
-        "resume did not continue from observed pause"
-    )
+    let position = 20 + Double(cycle)
+    require(pauseClock.submit(observation(
+        position: position,
+        playing: false,
+        paused: true,
+        sourceTimestamp: base + 1,
+        observedAt: base + 1
+    )), "pause observation rejected")
+    requireNear(pauseClock.snapshot(at: base + 8).positionSeconds, position, "pause drifted")
+    require(pauseClock.submit(observation(
+        position: position,
+        playing: true,
+        paused: false,
+        sourceTimestamp: base + 8,
+        observedAt: base + 8
+    )), "resume observation rejected")
+    requireNear(pauseClock.snapshot(at: base + 9).positionSeconds, position + 1, "resume anchor was offset")
 }
 
-// A command request alone changes no playback truth.
-var commandClock = SpicyLyricsPlaybackClock()
-require(sample(&commandClock, position: 40, sampledAt: 0), "command seed rejected")
-requireNear(commandClock.snapshot(at: 1).positionSeconds, 41, "pre-command position wrong")
-require(commandClock.snapshot(at: 1).isPlaying, "pre-command state wrong")
-// No optimistic pause API exists; only a player sample may freeze the clock.
-requireNear(commandClock.snapshot(at: 2).positionSeconds, 42, "clock stopped without an observation")
+// Buffering/loading freeze the clock until the next authoritative observation.
+var stallClock = SpicyLyricsPlaybackClock()
+require(stallClock.submit(observation(position: 30, buffering: true, observedAt: 0)), "buffer state rejected")
+requireNear(stallClock.snapshot(at: 50).positionSeconds, 30, "buffering clock advanced")
+require(stallClock.submit(observation(position: 30.5, loading: true, observedAt: 50)), "loading state rejected")
+requireNear(stallClock.snapshot(at: 90).positionSeconds, 30.5, "loading clock advanced")
 
-// A requested seek leaves the truthful old clock visible, rejects pre-seek
-// samples, then accepts only a sample near the requested target.
-var seekClock = SpicyLyricsPlaybackClock()
-require(sample(&seekClock, position: 15, sampledAt: 0), "seek seed rejected")
-let seekGeneration = seekClock.generation
-require(seekClock.requestSeek(to: 70, generation: seekGeneration, at: 1), "seek request rejected")
-requireNear(seekClock.snapshot(at: 1).positionSeconds, 16, "seek request changed observed position")
-require(
-    !sample(&seekClock, position: 16.1, sampledAt: 1.1),
-    "pre-seek sample replaced the clock"
-)
-requireNear(seekClock.snapshot(at: 1.2).positionSeconds, 16.2, "pre-seek rejection stopped truthful clock")
-require(sample(&seekClock, position: 70.05, sampledAt: 1.25), "seek confirmation rejected")
-requireNear(seekClock.snapshot(at: 1.25).positionSeconds, 70.05, "seek confirmation missing")
-require(seekClock.snapshot(at: 1.25).pendingSeekTargetSeconds == nil, "confirmed seek remained pending")
-
-// If Spotify refuses a seek, the bounded deadline eventually permits its real
-// position to win again.
-var refusedSeekClock = SpicyLyricsPlaybackClock()
-require(sample(&refusedSeekClock, position: 10, sampledAt: 0), "refused-seek seed rejected")
-require(refusedSeekClock.requestSeek(to: 90, generation: refusedSeekClock.generation, at: 1), "refused seek request rejected")
-require(
-    sample(&refusedSeekClock, position: 13.1, sampledAt: 3.1),
-    "post-timeout actual position was rejected"
-)
-requireNear(refusedSeekClock.snapshot(at: 3.1).positionSeconds, 13.1, "post-timeout position missing")
-
-// A track transition is an atomic generation boundary. Any response created
-// for the previous generation is rejected even if it arrives later.
-var trackClock = SpicyLyricsPlaybackClock()
-require(sample(&trackClock, position: 80, sampledAt: 0), "track-a seed rejected")
-let oldGeneration = trackClock.generation
-let newGeneration = trackClock.transition(to: "track-b", at: 1)
-require(newGeneration != oldGeneration, "track change did not increment generation")
-requireNear(trackClock.snapshot(at: 1).positionSeconds, 0, "track change retained old timeline")
-require(
-    !sample(
-        &trackClock,
-        position: 81,
-        sampledAt: 1.1,
-        track: "track-a",
-        generation: oldGeneration
-    ),
-    "prior-generation sample was accepted"
-)
-require(
-    sample(&trackClock, position: 0.4, sampledAt: 1.2, track: "track-b"),
-    "new-generation sample rejected"
-)
-requireNear(trackClock.snapshot(at: 1.2).positionSeconds, 0.4, "new track position missing")
-
-// Returning to a previously seen track still starts a fresh generation.
-let trackBGeneration = trackClock.generation
-let returningGeneration = trackClock.transition(to: "track-a", at: 2)
-require(returningGeneration != trackBGeneration, "returning track reused an old generation")
-
-// Backgrounding freezes the last real position. Foregrounding cannot advance
-// until a fresh stateful-player sample arrives; fallback data may not wake it.
+// Lifecycle never estimates hidden time. Only a new player observation clears
+// the foreground freshness gate.
 var lifecycleClock = SpicyLyricsPlaybackClock()
-require(sample(&lifecycleClock, position: 20, sampledAt: 0), "lifecycle seed rejected")
+require(lifecycleClock.submit(observation(position: 40, observedAt: 0)), "lifecycle seed rejected")
 lifecycleClock.suspend(at: 2)
-requireNear(lifecycleClock.snapshot(at: 30).positionSeconds, 22, "background clock advanced")
-lifecycleClock.resumeAwaitingFreshSample(at: 30)
-require(
-    sample(
-        &lifecycleClock,
-        position: 46,
-        sampledAt: 30.1,
-        source: .nowPlayingFallback
-    ),
-    "foreground fallback observation rejected"
+requireNear(lifecycleClock.snapshot(at: 100).positionSeconds, 42, "hidden clock advanced")
+require(lifecycleClock.snapshot(at: 100).requiresFreshObservation, "hidden state did not require resync")
+lifecycleClock.resumeAwaitingObservation(at: 100)
+requireNear(lifecycleClock.snapshot(at: 110).positionSeconds, 42, "foreground guessed hidden progress")
+require(lifecycleClock.submit(observation(position: 75, observedAt: 100.1)), "fresh foreground state rejected")
+requireNear(lifecycleClock.snapshot(at: 101.1).positionSeconds, 76, "fresh foreground state did not resume")
+
+// Shuffle/repeat/restrictions are part of the same immutable snapshot.
+var optionClock = SpicyLyricsPlaybackClock()
+var restrictions = SpicyLyricsPlaybackRestrictions()
+restrictions.disallowSeeking = true
+let optionObservation = SpicyLyricsPlaybackObservation(
+    identity: SpicyLyricsPlaybackIdentity(trackIdentifier: "options"),
+    positionSeconds: 5,
+    durationSeconds: 60,
+    playbackRate: 1,
+    isPlaying: true,
+    isPaused: false,
+    isLoading: false,
+    isBuffering: false,
+    shuffleEnabled: true,
+    repeatMode: .track,
+    restrictions: restrictions,
+    sourceTimestampSeconds: nil,
+    observedAtUptimeSeconds: 0
 )
-requireNear(lifecycleClock.snapshot(at: 35).positionSeconds, 46, "fallback woke suspended clock")
-require(lifecycleClock.snapshot(at: 35).requiresFreshSample, "fallback cleared live-sample requirement")
-require(sample(&lifecycleClock, position: 47, sampledAt: 35.1), "fresh foreground sample rejected")
-requireNear(lifecycleClock.snapshot(at: 36.1).positionSeconds, 48, "fresh foreground sample did not resume")
-require(!lifecycleClock.snapshot(at: 36.1).requiresFreshSample, "fresh requirement remained set")
+require(optionClock.submit(optionObservation), "option observation rejected")
+let optionSnapshot = optionClock.snapshot(at: 0)
+require(optionSnapshot.shuffleEnabled, "shuffle state missing")
+require(optionSnapshot.repeatMode == .track, "repeat state missing")
+require(optionSnapshot.restrictions.disallowSeeking, "restrictions missing")
 
 // Position is always clamped to the observed duration.
 var endClock = SpicyLyricsPlaybackClock()
-require(sample(&endClock, position: 179, sampledAt: 0, duration: 180), "end seed rejected")
-requireNear(endClock.snapshot(at: 10).positionSeconds, 180, "clock ran beyond duration")
+require(endClock.submit(observation(position: 179, duration: 180, observedAt: 0)), "end seed rejected")
+requireNear(endClock.snapshot(at: 20).positionSeconds, 180, "clock advanced beyond duration")
 
-print("Spicy Lyrics authoritative playback clock tests passed")
+print("Spicy Lyrics deterministic playback clock tests passed")

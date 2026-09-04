@@ -42,22 +42,30 @@ final class SpicyLyricsFullscreenCoordinator {
     }
 }
 
+/// Owns one full-screen renderer and the complete native/WebKit protocol.
+/// Track metadata and playback are deliberately sent as one `session` message;
+/// a WebKit run-loop turn can therefore never combine one song's artwork or
+/// lyrics generation with another song's clock.
 final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-    private static let rendererProtocolVersion = 4
+    private static let rendererProtocolVersion = 5
+    private static let heartbeatInterval: TimeInterval = 0.25
+    private static let maximumWebContentRestarts = 2
 
     private weak var controller: UIViewController?
+    private var rendererURL: URL?
     private var webView: WKWebView?
-    private var playbackTimer: Timer?
+    private var heartbeatTimer: Timer?
     private var readyWatchdog: Timer?
     private var revealWatchdog: Timer?
-    private var foregroundResyncTimer: Timer?
-    private var lifecycleObservers = [NSObjectProtocol]()
+    private var foregroundTimers = [Timer]()
+    private var observers = [NSObjectProtocol]()
     private var isReady = false
     private var isDetached = false
     private var activeTrackID = ""
     private var activeGeneration = ""
     private var lyricsRequestID = UUID()
     private var lyricsCancellation: SpicyLyricsRequestCancellation?
+    private var webContentRestartCount = 0
 
     init(controller: UIViewController) {
         self.controller = controller
@@ -66,60 +74,49 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
 
     @discardableResult
     func attach() -> Bool {
-        guard let controller,
-              let pageURL = BundleHelper.shared.resourceURL(
-                "index",
-                withExtension: "html",
-                subdirectory: "SpicyLyricsRenderer"
-              ) else {
+        guard let pageURL = BundleHelper.shared.resourceURL(
+            "index",
+            withExtension: "html",
+            subdirectory: "SpicyLyricsRenderer"
+        ) else {
             writeDebugLog("[SpicyRenderer] renderer bundle is missing; keeping native lyrics")
             return false
         }
 
-        let contentController = WKUserContentController()
-        contentController.add(self, name: "eevee")
+        rendererURL = pageURL
+        registerObservers()
+        installRenderer(pageURL: pageURL)
+        writeDebugLog("[SpicyRenderer] attached protocol=5")
+        return true
+    }
 
-        let configuration = WKWebViewConfiguration()
-        configuration.userContentController = contentController
-        configuration.websiteDataStore = .nonPersistent()
-        configuration.allowsInlineMediaPlayback = true
+    func detach() {
+        guard !isDetached else { return }
+        isDetached = true
+        invalidateTimers()
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers.removeAll()
+        cancelLyricsRequest()
+        destroyWebView()
+    }
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = self
-        webView.translatesAutoresizingMaskIntoConstraints = false
-        webView.isOpaque = false
-        webView.backgroundColor = .black
-        webView.scrollView.backgroundColor = .black
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.scrollView.isScrollEnabled = false
-        webView.allowsLinkPreview = false
-        webView.accessibilityLabel = "Spicy Lyrics"
-        // Load before the lyrics controller is presented. Keeping the native
-        // view visible until WebKit is ready avoids the late full-screen pop
-        // that occurred when the overlay was attached from viewDidAppear.
-        webView.alpha = 0
-
-        controller.view.addSubview(webView)
-        NSLayoutConstraint.activate([
-            webView.leadingAnchor.constraint(equalTo: controller.view.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: controller.view.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: controller.view.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: controller.view.bottomAnchor)
-        ])
-        controller.view.bringSubviewToFront(webView)
-        self.webView = webView
-
-        let directory = pageURL.deletingLastPathComponent()
-        webView.loadFileURL(pageURL, allowingReadAccessTo: directory)
-
-        lifecycleObservers = [
+    private func registerObservers() {
+        observers = [
+            NotificationCenter.default.addObserver(
+                forName: .spicyLyricsPlaybackStateDidChange,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.publishSession(reason: "observer")
+            },
             NotificationCenter.default.addObserver(
                 forName: UIApplication.willResignActiveNotification,
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
+                guard let self, !self.isDetached else { return }
                 SpicyLyricsPlaybackBridge.shared.suspendPlaybackClock()
-                self?.emit(type: "lifecycle", payload: ["state": "hidden"])
+                self.emit(type: "lifecycle", payload: ["state": "hidden"])
             },
             NotificationCenter.default.addObserver(
                 forName: UIApplication.didBecomeActiveNotification,
@@ -129,39 +126,80 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
                 self?.resynchronizeAfterForeground()
             }
         ]
-
-        readyWatchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
-            guard let self, !self.isReady else { return }
-            self.fallBackToNative(reason: "renderer did not become ready")
-        }
-        writeDebugLog("[SpicyRenderer] attached to full-screen lyrics")
-        return true
     }
 
-    func detach() {
-        guard !isDetached else { return }
-        isDetached = true
-        playbackTimer?.invalidate()
-        playbackTimer = nil
+    private func installRenderer(pageURL: URL) {
+        guard let controller, !isDetached else { return }
+        destroyWebView()
+        isReady = false
+
+        let contentController = WKUserContentController()
+        contentController.add(self, name: "eevee")
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController = contentController
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.allowsInlineMediaPlayback = true
+
+        let renderer = WKWebView(frame: .zero, configuration: configuration)
+        renderer.navigationDelegate = self
+        renderer.translatesAutoresizingMaskIntoConstraints = false
+        renderer.isOpaque = false
+        renderer.backgroundColor = .black
+        renderer.scrollView.backgroundColor = .black
+        renderer.scrollView.contentInsetAdjustmentBehavior = .never
+        renderer.scrollView.isScrollEnabled = false
+        renderer.allowsLinkPreview = false
+        renderer.accessibilityLabel = "Spicy Lyrics"
+        renderer.alpha = 0
+
+        controller.view.addSubview(renderer)
+        NSLayoutConstraint.activate([
+            renderer.leadingAnchor.constraint(equalTo: controller.view.leadingAnchor),
+            renderer.trailingAnchor.constraint(equalTo: controller.view.trailingAnchor),
+            renderer.topAnchor.constraint(equalTo: controller.view.topAnchor),
+            renderer.bottomAnchor.constraint(equalTo: controller.view.bottomAnchor)
+        ])
+        controller.view.bringSubviewToFront(renderer)
+        webView = renderer
+        renderer.loadFileURL(pageURL, allowingReadAccessTo: pageURL.deletingLastPathComponent())
+
+        readyWatchdog?.invalidate()
+        readyWatchdog = Timer.scheduledTimer(withTimeInterval: 6, repeats: false) { [weak self] _ in
+            guard let self, !self.isReady else { return }
+            self.recoverOrFallBack(reason: "renderer did not become ready")
+        }
+    }
+
+    private func destroyWebView() {
+        guard let webView else { return }
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "eevee")
+        webView.navigationDelegate = nil
+        webView.stopLoading()
+        webView.removeFromSuperview()
+        self.webView = nil
+    }
+
+    private func invalidateTimers() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
         readyWatchdog?.invalidate()
         readyWatchdog = nil
         revealWatchdog?.invalidate()
         revealWatchdog = nil
-        foregroundResyncTimer?.invalidate()
-        foregroundResyncTimer = nil
-        lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
-        lifecycleObservers.removeAll()
+        foregroundTimers.forEach { $0.invalidate() }
+        foregroundTimers.removeAll()
+    }
+
+    private func cancelLyricsRequest() {
         lyricsCancellation?.cancel()
         lyricsCancellation = nil
         lyricsRequestID = UUID()
-        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "eevee")
-        webView?.navigationDelegate = nil
-        webView?.stopLoading()
-        webView?.removeFromSuperview()
-        webView = nil
     }
 
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
         guard message.name == "eevee", !isDetached,
               let body = message.body as? [String: Any],
               let type = body["type"] as? String else { return }
@@ -169,143 +207,121 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         let requestID = body["requestId"] as? String ?? ""
         switch type {
         case "ready":
-            let protocolVersion = (body["rendererProtocolVersion"] as? NSNumber)?.intValue ?? -1
-            guard protocolVersion == Self.rendererProtocolVersion else {
-                fallBackToNative(reason: "renderer protocol mismatch: \(protocolVersion)")
+            let version = (body["rendererProtocolVersion"] as? NSNumber)?.intValue ?? -1
+            guard version == Self.rendererProtocolVersion else {
+                fallBackToNative(reason: "renderer protocol mismatch: \(version)")
                 return
             }
-            writeDebugLog("[SpicyRenderer] ready protocol=\(protocolVersion)")
             rendererDidBecomeReady()
         case "close":
-            sendCommandResult(requestID: requestID, accepted: true)
+            sendCommandResult(requestID: requestID, command: type, accepted: true)
             close()
         case "seek":
-            guard commandMatchesActiveGeneration(body) else {
-                sendCommandResult(requestID: requestID, accepted: false)
+            guard commandMatchesActiveGeneration(body),
+                  let number = body["positionMs"] as? NSNumber,
+                  number.doubleValue.isFinite else {
+                sendCommandResult(requestID: requestID, command: type, accepted: false)
                 return
             }
-            let milliseconds = (body["positionMs"] as? NSNumber)?.doubleValue ?? 0
-            let accepted = SpicyLyricsPlaybackBridge.shared.perform(command: "seek", value: milliseconds / 1000)
-            sendCommandResult(requestID: requestID, accepted: accepted)
-        case "next", "previous":
+            let accepted = SpicyLyricsPlaybackBridge.shared.perform(
+                command: type,
+                value: max(0, number.doubleValue / 1000)
+            )
+            sendCommandResult(requestID: requestID, command: type, accepted: accepted)
+            publishSession(reason: "seek-command")
+        case "togglePlay", "play", "pause", "next", "previous", "toggleShuffle", "cycleRepeat":
             guard commandMatchesActiveGeneration(body) else {
-                sendCommandResult(requestID: requestID, accepted: false)
-                return
-            }
-            SpicyLyricsPlaybackBridge.shared.performSkip(command: type) { [weak self] accepted in
-                DispatchQueue.main.async {
-                    guard let self, !self.isDetached else { return }
-                    self.sendCommandResult(requestID: requestID, accepted: accepted)
-                    if accepted {
-                        self.publishPlaybackAndTrack(forceTrack: true)
-                    }
-                }
-            }
-        case "togglePlay", "play", "pause", "toggleShuffle", "cycleRepeat":
-            guard commandMatchesActiveGeneration(body) else {
-                sendCommandResult(requestID: requestID, accepted: false)
+                sendCommandResult(requestID: requestID, command: type, accepted: false)
                 return
             }
             let accepted = SpicyLyricsPlaybackBridge.shared.perform(command: type)
-            sendCommandResult(requestID: requestID, accepted: accepted)
+            sendCommandResult(requestID: requestID, command: type, accepted: accepted)
+            publishSession(reason: "\(type)-command")
         case "resync":
             resynchronizeAfterForeground()
-            sendCommandResult(requestID: requestID, accepted: true)
+            sendCommandResult(requestID: requestID, command: type, accepted: true)
         case "retryLyrics":
-            requestLyrics(for: activeTrackID, force: true)
+            guard !activeTrackID.isEmpty else {
+                sendCommandResult(requestID: requestID, command: type, accepted: false)
+                return
+            }
+            requestLyrics(for: activeTrackID, generation: activeGeneration, force: true)
+            sendCommandResult(requestID: requestID, command: type, accepted: true)
         case "setPreference":
             let key = body["key"] as? String ?? ""
             let accepted = persistPreference(key: key, value: body["value"])
-            sendCommandResult(requestID: requestID, accepted: accepted)
+            sendCommandResult(requestID: requestID, command: type, accepted: accepted)
         case "diagnostic":
-            let kind = body["kind"] as? String ?? "unknown"
-            let trackID = body["trackId"] as? String ?? ""
-            let lyricsType = body["lyricsType"] as? String ?? "unknown"
-            let lineCount = (body["lineCount"] as? NSNumber)?.intValue ?? -1
-            let timedLineCount = (body["timedLineCount"] as? NSNumber)?.intValue ?? -1
-            let firstStart = (body["firstStartMs"] as? NSNumber)?.doubleValue ?? -1
-            let lastEnd = (body["lastEndMs"] as? NSNumber)?.doubleValue ?? -1
-            let scale = (body["timeScale"] as? NSNumber)?.doubleValue ?? -1
-            writeDebugLog(
-                "[SpicyRenderer] \(kind) track=\(trackID) type=\(lyricsType) "
-                + "lines=\(lineCount)/\(timedLineCount) range=\(firstStart)..\(lastEnd) scale=\(scale)"
-            )
+            recordDiagnostic(body)
         default:
-            sendCommandResult(requestID: requestID, accepted: false)
+            sendCommandResult(requestID: requestID, command: type, accepted: false)
         }
     }
 
     private func rendererDidBecomeReady() {
-        guard !isReady else { return }
+        guard !isReady, !isDetached else { return }
         isReady = true
+        webContentRestartCount = 0
         readyWatchdog?.invalidate()
         readyWatchdog = nil
+        writeDebugLog("[SpicyRenderer] ready protocol=5")
 
         emit(type: "bootstrap", payload: [
             "platform": "ios",
             "reduceMotion": UIAccessibility.isReduceMotionEnabled,
             "boldText": UIAccessibility.isBoldTextEnabled,
-            "safeFallback": true,
             "preferences": rendererPreferences()
         ])
+        publishSession(reason: "ready", forceLyrics: true)
 
-        publishPlaybackAndTrack(forceTrack: true)
-        // Keep Spotify's already-present native surface in place until either
-        // real lyrics arrive or a short watchdog decides a loading state is
-        // preferable. This removes the empty/stale one-frame transition.
+        revealWatchdog?.invalidate()
         revealWatchdog = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
             self?.revealRenderer()
         }
-        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            self?.publishPlaybackAndTrack(forceTrack: false)
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.heartbeatInterval,
+            repeats: true
+        ) { [weak self] _ in
+            self?.publishSession(reason: "heartbeat")
         }
-        RunLoop.main.add(playbackTimer!, forMode: .common)
+        if let heartbeatTimer { RunLoop.main.add(heartbeatTimer, forMode: .common) }
     }
 
-    private func publishPlaybackAndTrack(forceTrack: Bool, requiresFreshSample: Bool = false) {
-        guard isReady, !isDetached else { return }
-        let liveID = SpicyLyricsPlaybackBridge.shared.currentTrackID() ?? ""
-        let playback = requiresFreshSample
-            ? SpicyLyricsPlaybackBridge.shared.foregroundPayload()
-            : SpicyLyricsPlaybackBridge.shared.playbackPayload()
+    @discardableResult
+    private func publishSession(reason: String, forceLyrics: Bool = false) -> Bool {
+        guard isReady, !isDetached,
+              let payload = SpicyLyricsPlaybackBridge.shared.sessionPayload(),
+              let trackID = payload["trackId"] as? String,
+              !trackID.isEmpty else { return false }
 
-        let bridgeID = playback["trackId"] as? String ?? ""
-        let currentID = liveID.isEmpty ? bridgeID : liveID
-        let generation = playback["generation"] as? String ?? ""
-        guard !currentID.isEmpty else { return }
-
-        let changedTrack = currentID != activeTrackID
+        let generation = payload["generation"] as? String ?? ""
+        let changed = trackID != activeTrackID
             || (!generation.isEmpty && generation != activeGeneration)
-        if forceTrack || changedTrack {
-            activeTrackID = currentID
-            activeGeneration = generation
-            var track = SpicyLyricsPlaybackBridge.shared.trackPayload()
-            track["generation"] = generation
-            emit(type: "track", payload: track)
+        activeTrackID = trackID
+        activeGeneration = generation
+        emit(type: "session", payload: payload)
+
+        if changed || forceLyrics {
+            requestLyrics(for: trackID, generation: generation, force: false)
+            writeDebugLog(
+                "[SpicyRenderer] session reason=\(reason) generation=\(generation) track=\(trackID)"
+            )
         }
-        // Desktop Spicy Lyrics has one canonical millisecond player clock. Give
-        // the renderer that clock before an asynchronously fetched lyric can be
-        // delivered. The renderer no longer depends on this ordering for unit
-        // conversion, but preserving it prevents a loading/ready transition
-        // from briefly painting against a stale duration or position.
-        emit(type: "playback", payload: playback)
-        if changedTrack {
-            requestLyrics(for: currentID, generation: generation, force: false)
-        }
+        return true
     }
 
-    private func requestLyrics(for trackID: String, generation: String? = nil, force: Bool) {
-        guard !trackID.isEmpty else { return }
-        let requestedGeneration = generation ?? activeGeneration
+    private func requestLyrics(for trackID: String, generation: String, force: Bool) {
+        guard !trackID.isEmpty, !generation.isEmpty else { return }
         let requestID = UUID()
-        lyricsCancellation?.cancel()
+        cancelLyricsRequest()
         let cancellation = SpicyLyricsRequestCancellation()
         lyricsCancellation = cancellation
         lyricsRequestID = requestID
         emit(type: "lyrics", payload: [
             "state": "loading",
             "trackId": trackID,
-            "generation": requestedGeneration,
+            "generation": generation,
             "force": force
         ])
 
@@ -316,22 +332,19 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
                     forceRefresh: force,
                     shouldContinue: { !cancellation.isCancelled }
                 )
-                let payload = try JSONSerialization.jsonObject(with: data, options: [])
+                let lyrics = try JSONSerialization.jsonObject(with: data, options: [])
                 DispatchQueue.main.async {
                     guard let self,
                           !self.isDetached,
                           self.lyricsRequestID == requestID,
                           self.activeTrackID == trackID,
-                          self.activeGeneration == requestedGeneration else { return }
-                    // Lyrics can finish several seconds after the view opened.
-                    // Re-anchor immediately before painting them so the first
-                    // active word/line never uses the clock from the loading frame.
-                    self.publishPlaybackAndTrack(forceTrack: false)
+                          self.activeGeneration == generation else { return }
+                    self.publishSession(reason: "lyrics-ready")
                     self.emit(type: "lyrics", payload: [
                         "state": "ready",
                         "trackId": trackID,
-                        "generation": requestedGeneration,
-                        "data": payload
+                        "generation": generation,
+                        "data": lyrics
                     ])
                     self.revealWatchdog?.invalidate()
                     self.revealWatchdog = nil
@@ -343,17 +356,17 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
                           !self.isDetached,
                           self.lyricsRequestID == requestID,
                           self.activeTrackID == trackID,
-                          self.activeGeneration == requestedGeneration else { return }
+                          self.activeGeneration == generation else { return }
                     self.emit(type: "lyrics", payload: [
                         "state": "failed",
                         "trackId": trackID,
-                        "generation": requestedGeneration,
+                        "generation": generation,
                         "message": "Lyrics are temporarily unavailable."
                     ])
                     self.revealWatchdog?.invalidate()
                     self.revealWatchdog = nil
                     self.revealRenderer()
-                    writeDebugLog("[SpicyRenderer] lyrics failed for \(trackID): \(error)")
+                    writeDebugLog("[SpicyRenderer] lyrics failed track=\(trackID) error=\(error)")
                 }
             }
         }
@@ -363,17 +376,21 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         guard let webView, !isDetached else { return }
         let envelope: [String: Any] = ["type": type, "payload": payload]
         guard JSONSerialization.isValidJSONObject(envelope),
-              let data = try? JSONSerialization.data(withJSONObject: envelope, options: []),
+              let data = try? JSONSerialization.data(withJSONObject: envelope),
               let json = String(data: data, encoding: .utf8) else { return }
-        webView.evaluateJavaScript("window.SpicyNative && window.SpicyNative.receive(\(json));") { _, error in
-            if let error { writeDebugLog("[SpicyRenderer] JavaScript event failed: \(error)") }
+        webView.evaluateJavaScript("window.SpicyNative && window.SpicyNative.receive(\(json));") {
+            _, error in
+            if let error {
+                writeDebugLog("[SpicyRenderer] JavaScript event failed type=\(type): \(error)")
+            }
         }
     }
 
-    private func sendCommandResult(requestID: String, accepted: Bool) {
+    private func sendCommandResult(requestID: String, command: String, accepted: Bool) {
         guard !requestID.isEmpty else { return }
         emit(type: "commandResult", payload: [
             "requestId": requestID,
+            "command": command,
             "generation": activeGeneration,
             "accepted": accepted
         ])
@@ -381,26 +398,30 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
 
     private func resynchronizeAfterForeground() {
         guard isReady, !isDetached else { return }
+        foregroundTimers.forEach { $0.invalidate() }
+        foregroundTimers.removeAll()
+        SpicyLyricsPlaybackBridge.shared.resumeAwaitingObservation()
         emit(type: "lifecycle", payload: ["state": "resuming"])
-        foregroundResyncTimer?.invalidate()
-        // The synchronous stateful-player getter is safe to sample immediately.
-        // A short second sample covers Spotify completing its own activation
-        // transition without ever advancing a hidden JavaScript clock.
-        publishPlaybackAndTrack(forceTrack: true, requiresFreshSample: true)
-        emit(type: "lifecycle", payload: ["state": "visible"])
-        foregroundResyncTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: false) { [weak self] _ in
-            guard let self, !self.isDetached else { return }
-            self.foregroundResyncTimer = nil
-            self.publishPlaybackAndTrack(forceTrack: true)
+
+        if publishSession(reason: "foreground-immediate") {
+            emit(type: "lifecycle", payload: ["state": "visible"])
+        }
+        for delay in [0.12, 0.45] {
+            let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] timer in
+                guard let self, !self.isDetached else { return }
+                _ = self.publishSession(reason: "foreground-followup")
+                self.emit(type: "lifecycle", payload: ["state": "visible"])
+                self.foregroundTimers.removeAll { $0 === timer }
+            }
+            foregroundTimers.append(timer)
+            RunLoop.main.add(timer, forMode: .common)
         }
     }
 
     private func commandMatchesActiveGeneration(_ body: [String: Any]) -> Bool {
-        guard let requestedGeneration = body["generation"] as? String,
-              !requestedGeneration.isEmpty else {
-            return true
-        }
-        return requestedGeneration == activeGeneration
+        guard let generation = body["generation"] as? String,
+              !generation.isEmpty else { return false }
+        return generation == activeGeneration
     }
 
     private func rendererPreferences() -> [String: Any] {
@@ -410,7 +431,11 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
             "romanized": defaults.object(forKey: prefix + "romanized") as? Bool ?? false,
             "translations": defaults.object(forKey: prefix + "translations") as? Bool ?? true,
             "dynamicBackground": defaults.object(forKey: prefix + "dynamicBackground") as? Bool ?? true,
-            "fontSize": min(126, max(82, defaults.object(forKey: prefix + "fontSize") as? Int ?? 100))
+            "fontSize": min(126, max(82, defaults.object(forKey: prefix + "fontSize") as? Int ?? 100)),
+            "playbackOffset": min(
+                5000,
+                max(-5000, defaults.object(forKey: prefix + "playbackOffset") as? Int ?? 0)
+            )
         ]
     }
 
@@ -424,10 +449,29 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         case "fontSize":
             guard let value = value as? NSNumber else { return false }
             defaults.set(min(126, max(82, value.intValue)), forKey: prefix + key)
+        case "playbackOffset":
+            guard let value = value as? NSNumber else { return false }
+            defaults.set(min(5000, max(-5000, value.intValue)), forKey: prefix + key)
         default:
             return false
         }
         return true
+    }
+
+    private func recordDiagnostic(_ body: [String: Any]) {
+        let kind = body["kind"] as? String ?? "unknown"
+        let trackID = body["trackId"] as? String ?? ""
+        let lyricsType = body["lyricsType"] as? String ?? "unknown"
+        let generation = body["generation"] as? String ?? ""
+        let lineCount = (body["lineCount"] as? NSNumber)?.intValue ?? -1
+        let timedLineCount = (body["timedLineCount"] as? NSNumber)?.intValue ?? -1
+        let firstStart = (body["firstStartMs"] as? NSNumber)?.doubleValue ?? -1
+        let lastEnd = (body["lastEndMs"] as? NSNumber)?.doubleValue ?? -1
+        writeDebugLog(
+            "[SpicyRenderer] diagnostic=\(kind) generation=\(generation) track=\(trackID) "
+            + "type=\(lyricsType) lines=\(lineCount)/\(timedLineCount) "
+            + "range=\(firstStart)..\(lastEnd)"
+        )
     }
 
     private func close() {
@@ -444,21 +488,36 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private func revealRenderer() {
         guard let controller, let webView, webView.alpha < 1 else { return }
         controller.view.bringSubviewToFront(webView)
-
-        // If presentation has not started, make the renderer part of the
-        // controller's normal transition. If it became ready unusually late,
-        // use a very short continuity fade over the still-live native view.
         guard controller.viewIfLoaded?.window != nil,
               !UIAccessibility.isReduceMotionEnabled else {
             webView.alpha = 1
             return
         }
         UIView.animate(
-            withDuration: 0.16,
+            withDuration: 0.14,
             delay: 0,
             options: [.beginFromCurrentState, .curveEaseOut, .allowUserInteraction],
             animations: { webView.alpha = 1 }
         )
+    }
+
+    private func recoverOrFallBack(reason: String) {
+        guard webContentRestartCount < Self.maximumWebContentRestarts,
+              let rendererURL,
+              !isDetached else {
+            fallBackToNative(reason: reason)
+            return
+        }
+        webContentRestartCount += 1
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+        cancelLyricsRequest()
+        writeDebugLog(
+            "[SpicyRenderer] recreating WebKit attempt=\(webContentRestartCount) reason=\(reason)"
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            self?.installRenderer(pageURL: rendererURL)
+        }
     }
 
     private func fallBackToNative(reason: String) {
@@ -467,14 +526,18 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        fallBackToNative(reason: "navigation failed: \(error.localizedDescription)")
+        recoverOrFallBack(reason: "navigation failed: \(error.localizedDescription)")
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        fallBackToNative(reason: "provisional navigation failed: \(error.localizedDescription)")
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        recoverOrFallBack(reason: "provisional navigation failed: \(error.localizedDescription)")
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        fallBackToNative(reason: "web content process terminated")
+        recoverOrFallBack(reason: "web content process terminated")
     }
 }
