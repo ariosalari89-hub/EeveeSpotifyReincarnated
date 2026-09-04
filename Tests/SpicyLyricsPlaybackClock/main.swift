@@ -35,10 +35,10 @@ for tick in 1 ... 5 {
 }
 requireNear(duplicateClock.snapshot(at: 1).positionSeconds, 11, "duplicate callbacks rewound playback")
 
-// A normal rounded player update may catch up, but must never make time move
-// backward between updates.
+// A genuinely newer report can correct a small amount of clock lead. Refusing
+// every negative correction made callback jitter accumulate after pauses.
 sample(&duplicateClock, position: 11, at: 1.05)
-require(duplicateClock.snapshot(at: 1.05).positionSeconds >= 11, "clock moved backward on a normal update")
+requireNear(duplicateClock.snapshot(at: 1.05).positionSeconds, 11, "fresh report did not correct clock lead")
 
 // Pause freezes at the observed instant and resume continues from there.
 var pauseClock = SpicyLyricsPlaybackClock()
@@ -53,15 +53,44 @@ requireNear(pauseClock.snapshot(at: 5).positionSeconds, pausedAt + 1, "resumed c
 // while Spotify's observer catches up with the requested state.
 var requestedPlaybackClock = SpicyLyricsPlaybackClock()
 sample(&requestedPlaybackClock, position: 40, at: 0)
-requestedPlaybackClock.reconcilePlaybackState(isPlaying: false, playbackRate: 1, at: 1)
+requestedPlaybackClock.requestedPlaybackState(isPlaying: false, playbackRate: 1, at: 1)
 requireNear(requestedPlaybackClock.snapshot(at: 3).positionSeconds, 41, "requested pause did not freeze immediately")
-requestedPlaybackClock.reconcilePlaybackState(isPlaying: true, playbackRate: 1, at: 3)
+requestedPlaybackClock.requestedPlaybackState(isPlaying: true, playbackRate: 1, at: 3)
 requireNear(requestedPlaybackClock.snapshot(at: 4).positionSeconds, 42, "requested resume did not restart immediately")
 
-var stalePauseClock = SpicyLyricsPlaybackClock()
-sample(&stalePauseClock, position: 30, at: 0)
-sample(&stalePauseClock, position: 30, at: 2, playing: false)
-requireNear(stalePauseClock.snapshot(at: 4).positionSeconds, 32, "stale pause callback rewound the clock")
+// The old playing snapshot emitted after a local pause must not restart the
+// visual clock. A matching pause snapshot confirms the command and may correct
+// the final frozen position.
+var requestedPauseClock = SpicyLyricsPlaybackClock()
+sample(&requestedPauseClock, position: 30, at: 0)
+requestedPauseClock.requestedPlaybackState(isPlaying: false, playbackRate: 1, at: 1)
+sample(&requestedPauseClock, position: 31.2, at: 1.1, playing: true)
+requireNear(requestedPauseClock.snapshot(at: 1.5).positionSeconds, 31, "stale callback advanced requested pause")
+sample(&requestedPauseClock, position: 31.05, at: 1.6, playing: false)
+requireNear(requestedPauseClock.snapshot(at: 4).positionSeconds, 31.05, "pause confirmation did not freeze at player position")
+
+// The inverse race happens on resume: a late paused snapshot must not stop the
+// optimistic running clock before the matching playing snapshot arrives.
+var requestedResumeClock = SpicyLyricsPlaybackClock()
+sample(&requestedResumeClock, position: 50, at: 0, playing: false)
+requestedResumeClock.requestedPlaybackState(isPlaying: true, playbackRate: 1, at: 1)
+sample(&requestedResumeClock, position: 50, at: 1.1, playing: false)
+requireNear(requestedResumeClock.snapshot(at: 1.5).positionSeconds, 50.5, "stale callback stopped requested resume")
+sample(&requestedResumeClock, position: 50.55, at: 1.6, playing: true)
+requireNear(requestedResumeClock.snapshot(at: 2.6).positionSeconds, 51.55, "resume confirmation was not accepted")
+
+var rapidToggleClock = SpicyLyricsPlaybackClock()
+sample(&rapidToggleClock, position: 5, at: 0)
+rapidToggleClock.requestedPlaybackState(isPlaying: false, playbackRate: 1, at: 1)
+rapidToggleClock.requestedPlaybackState(isPlaying: true, playbackRate: 1, at: 1.2)
+requireNear(rapidToggleClock.snapshot(at: 2.2).positionSeconds, 7, "rapid pause/resume retained the old request")
+
+// An external pause has no optimistic request, so the first paused position is
+// authoritative and removes any extrapolation lead immediately.
+var externalPauseClock = SpicyLyricsPlaybackClock()
+sample(&externalPauseClock, position: 30, at: 0)
+sample(&externalPauseClock, position: 31.4, at: 2, playing: false)
+requireNear(externalPauseClock.snapshot(at: 4).positionSeconds, 31.4, "external pause retained extrapolation lead")
 
 // Real external seeks in both directions are discontinuities and must win.
 var discontinuityClock = SpicyLyricsPlaybackClock()

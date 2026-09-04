@@ -154,10 +154,16 @@ final class SpicyLyricsPlaybackBridge {
         switch command {
         case "togglePlay":
             let shouldPlay: Bool
-            if let paused = safeBool(statefulCandidate, key: "isPaused") {
+            let bridgePlaying: Bool? = queue.sync {
+                guard self.clock.hasAnchor else { return nil }
+                return self.clock.snapshot(at: self.uptimeSeconds()).isPlaying
+            }
+            if let bridgePlaying {
+                shouldPlay = !bridgePlaying
+            } else if let paused = safeBool(statefulCandidate, key: "isPaused") {
                 shouldPlay = paused
             } else {
-                shouldPlay = !queue.sync { self.clock.snapshot(at: self.uptimeSeconds()).isPlaying }
+                shouldPlay = true
             }
             return setPlaying(shouldPlay, candidates: candidates)
         case "play":
@@ -271,7 +277,7 @@ final class SpicyLyricsPlaybackBridge {
         let stamp = uptimeSeconds()
         queue.async {
             let rate = self.clock.snapshot(at: stamp).playbackRate
-            self.clock.reconcilePlaybackState(
+            self.clock.requestedPlaybackState(
                 isPlaying: isPlaying,
                 playbackRate: rate,
                 at: stamp

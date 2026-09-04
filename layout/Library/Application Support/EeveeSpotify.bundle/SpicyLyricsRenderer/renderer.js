@@ -32,7 +32,9 @@
     translations: $("#translation-toggle"),
     background: $("#background-toggle"),
     fontSize: $("#font-size"),
-    fontOutput: $("#font-output")
+    fontOutput: $("#font-output"),
+    playbackOffset: $("#playback-offset"),
+    offsetOutput: $("#offset-output")
   };
 
   const storedPreferences = (() => {
@@ -61,7 +63,8 @@
       romanized: Boolean(storedPreferences.romanized),
       translations: storedPreferences.translations !== false,
       dynamicBackground: storedPreferences.dynamicBackground !== false,
-      fontSize: Number(storedPreferences.fontSize) || 100
+      fontSize: Number(storedPreferences.fontSize) || 100,
+      playbackOffset: Math.min(5000, Math.max(-5000, Number(storedPreferences.playbackOffset) || 0))
     },
     pendingCommands: new Map()
   };
@@ -476,6 +479,9 @@
 
   function updateLyrics(position, forceScroll = false) {
     if (!state.lines.length) return;
+    // Match desktop Spicy Lyrics: a positive playback offset delays the lyric
+    // timeline, while transport time and seek targets remain true song time.
+    position -= state.preferences.playbackOffset;
     const activeIndex = findActiveLine(position);
     state.lines.forEach((line, index) => {
       const isBackgroundActive = line.kind === "background" && position >= line.start && position <= line.end;
@@ -593,6 +599,18 @@
     ambient.setPlaying(state.playback.isPlaying);
   }
 
+  function setLocalPlaying(isPlaying) {
+    // Freeze or resume from the exact frame the user touched. The native
+    // bridge applies the same optimistic state and protects it from Spotify's
+    // delayed pre-command callbacks; the next payload then reconciles both.
+    state.playback.positionMs = positionNow();
+    state.playback.receivedAt = performance.now();
+    state.playback.isPlaying = isPlaying;
+    dom.play.classList.toggle("is-playing", isPlaying);
+    dom.play.setAttribute("aria-label", isPlaying ? "Pause" : "Play");
+    ambient.setPlaying(isPlaying);
+  }
+
   function animationFrame() {
     const position = positionNow();
     const duration = Math.max(1, state.playback.durationMs);
@@ -617,6 +635,10 @@
     dom.background.checked = state.preferences.dynamicBackground;
     dom.fontSize.value = String(state.preferences.fontSize);
     dom.fontOutput.value = `${state.preferences.fontSize}%`;
+    dom.playbackOffset.value = String(state.preferences.playbackOffset);
+    dom.offsetOutput.value = state.preferences.playbackOffset === 0
+      ? "0 ms"
+      : `${state.preferences.playbackOffset > 0 ? "+" : ""}${state.preferences.playbackOffset} ms`;
     document.documentElement.style.setProperty("--lyric-scale", String(state.preferences.fontSize / 100));
     ambient.setEnabled(state.preferences.dynamicBackground && !reduceMotion());
     if (rerender && state.rawLyrics) renderLyrics(state.rawLyrics);
@@ -662,7 +684,10 @@
   };
 
   dom.close.addEventListener("click", () => post("close", {}, dom.close));
-  dom.play.addEventListener("click", () => post("togglePlay", {}, dom.play));
+  dom.play.addEventListener("click", () => {
+    setLocalPlaying(!state.playback.isPlaying);
+    post("togglePlay", {}, dom.play);
+  });
   dom.previous.addEventListener("click", () => post("previous", {}, dom.previous));
   dom.next.addEventListener("click", () => post("next", {}, dom.next));
   dom.settings.addEventListener("click", () => setSettingsOpen(true));
@@ -712,6 +737,11 @@
     state.preferences.fontSize = clamp(finite(dom.fontSize.value, 100), 82, 126);
     applyPreferences();
     post("setPreference", { key: "fontSize", value: state.preferences.fontSize });
+  });
+  dom.playbackOffset.addEventListener("input", () => {
+    state.preferences.playbackOffset = clamp(finite(dom.playbackOffset.value), -5000, 5000);
+    applyPreferences();
+    updateLyrics(positionNow(), true);
   });
   addEventListener("keydown", (event) => { if (event.key === "Escape") setSettingsOpen(false); });
   let resizeFollowFrame = 0;

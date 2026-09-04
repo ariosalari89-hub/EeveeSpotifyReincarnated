@@ -185,6 +185,7 @@ button.pending { opacity: .55; pointer-events: none; }
 .setting-range { display: block; padding: 17px 0 12px; border-top: 1px solid rgba(255,255,255,.09); }
 .setting-range span { display: flex; justify-content: space-between; margin-bottom: 9px; }
 .setting-range output { color: var(--muted); font-size: 12px; }
+.setting-range small { display: block; margin: -3px 0 10px; color: var(--muted); font-size: 11px; line-height: 1.3; }
 .setting-range input { width: 100%; accent-color: #fff; }
 .provider-note { margin: 14px 0 2px; color: rgba(255,255,255,.42); font-size: 11px; }
 @keyframes fade-in { from { opacity: 0; } }

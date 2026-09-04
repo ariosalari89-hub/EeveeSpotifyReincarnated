@@ -30,6 +30,8 @@ struct SpicyLyricsPlaybackClock {
     private var lastReportUptimeSeconds: Double = 0
     private var pendingSeekTargetSeconds: Double?
     private var pendingSeekDeadlineSeconds: Double = 0
+    private var pendingPlaybackState: Bool?
+    private var pendingPlaybackDeadlineSeconds: Double = 0
 
     mutating func observe(
         positionSeconds rawPosition: Double,
@@ -68,6 +70,25 @@ struct SpicyLyricsPlaybackClock {
         if let incomingTrack { trackIdentifier = incomingTrack }
         if duration > 0 { durationSeconds = duration }
 
+        // A transport command updates the renderer immediately. Spotify can
+        // publish one or more snapshots containing the old playing state
+        // before the command reaches its player core, so those stale snapshots
+        // must not restart a just-paused lyric clock (or stop a just-resumed
+        // one). The first matching snapshot confirms the request.
+        if let requestedPlaying = pendingPlaybackState,
+           uptimeSeconds <= pendingPlaybackDeadlineSeconds {
+            guard reportedPlaying == requestedPlaying else {
+                playbackRate = rate
+                isPlaying = requestedPlaying
+                return
+            }
+            pendingPlaybackState = nil
+            pendingPlaybackDeadlineSeconds = 0
+        } else {
+            pendingPlaybackState = nil
+            pendingPlaybackDeadlineSeconds = 0
+        }
+
         let nextPlaying = reportedPlaying ?? isPlaying
         let predictedPosition = snapshot(at: uptimeSeconds).positionSeconds
 
@@ -98,22 +119,24 @@ struct SpicyLyricsPlaybackClock {
         let isDiscontinuity = reportedDelta < -0.75
             || reportedDelta > plausibleForwardAdvance
 
+        let repeatedReport = lastReportedPositionSeconds != nil
+            && abs(reportedDelta) < 0.001
+
         if isDiscontinuity {
             // A real forward/backward seek must be accepted immediately.
             anchorPositionSeconds = position
         } else if nextPlaying {
-            // Never let a duplicate state callback rewind a running clock.
-            // A newer position that is ahead still corrects drift immediately.
-            anchorPositionSeconds = max(predictedPosition, position)
+            // Duplicate callbacks carry the position at which their state
+            // object was created, so keep interpolating through them. A fresh
+            // moving report is authoritative in both directions; accepting a
+            // small negative correction prevents pause/callback jitter from
+            // accumulating into lyrics that run ahead of the audio.
+            anchorPositionSeconds = repeatedReport ? predictedPosition : position
         } else {
-            // Pausing can arrive with a slightly old rounded position. Preserve
-            // at most the current prediction to prevent a visible back-jump.
-            let lag = predictedPosition - position
-            let repeatedStalePosition = lastReportedPositionSeconds != nil
-                && abs(reportedDelta) < 0.001
-            anchorPositionSeconds = repeatedStalePosition || (lag > 0 && lag < 1.25)
-                ? predictedPosition
-                : position
+            // Once Spotify confirms a pause, its frozen position is the source
+            // of truth. Keeping the prediction here made every delayed pause
+            // permanently add that delay to the lyrics clock.
+            anchorPositionSeconds = position
         }
 
         anchorUptimeSeconds = uptimeSeconds
@@ -133,12 +156,40 @@ struct SpicyLyricsPlaybackClock {
         pendingSeekDeadlineSeconds = uptimeSeconds + 2
     }
 
+    mutating func requestedPlaybackState(
+        isPlaying: Bool,
+        playbackRate rawRate: Double,
+        at uptimeSeconds: Double
+    ) {
+        guard uptimeSeconds.isFinite, rawRate.isFinite else { return }
+        pendingPlaybackState = nil
+        pendingPlaybackDeadlineSeconds = 0
+        reconcilePlaybackState(
+            isPlaying: isPlaying,
+            playbackRate: rawRate,
+            at: uptimeSeconds
+        )
+        pendingPlaybackState = isPlaying
+        pendingPlaybackDeadlineSeconds = uptimeSeconds + 2
+    }
+
     mutating func reconcilePlaybackState(
         isPlaying: Bool,
         playbackRate rawRate: Double,
         at uptimeSeconds: Double
     ) {
         guard uptimeSeconds.isFinite, rawRate.isFinite else { return }
+
+        if let requestedPlaying = pendingPlaybackState,
+           uptimeSeconds <= pendingPlaybackDeadlineSeconds {
+            guard isPlaying == requestedPlaying else { return }
+            pendingPlaybackState = nil
+            pendingPlaybackDeadlineSeconds = 0
+        } else if pendingPlaybackState != nil {
+            pendingPlaybackState = nil
+            pendingPlaybackDeadlineSeconds = 0
+        }
+
         let currentPosition = snapshot(at: uptimeSeconds).positionSeconds
         anchorPositionSeconds = currentPosition
         anchorUptimeSeconds = uptimeSeconds
@@ -178,6 +229,8 @@ struct SpicyLyricsPlaybackClock {
         lastReportUptimeSeconds = uptimeSeconds
         pendingSeekTargetSeconds = nil
         pendingSeekDeadlineSeconds = 0
+        pendingPlaybackState = nil
+        pendingPlaybackDeadlineSeconds = 0
     }
 
     private func bounded(_ position: Double) -> Double {

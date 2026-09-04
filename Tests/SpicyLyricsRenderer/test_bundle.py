@@ -11,6 +11,7 @@ bridge = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackBridge.swift").
 c_header = (ROOT / "Sources/EeveeSpotifyC/include/Tweak.h").read_text(encoding="utf-8")
 
 assert 'src="renderer.js"' in index
+assert 'id="playback-offset"' in index
 assert "preview-fixture" not in index
 assert "SPICY_PREVIEW_LYRICS" not in renderer
 assert not (BUNDLE / "preview-fixture.js").exists()
@@ -25,5 +26,8 @@ assert '["skipToPreviousTrack", "skipToPrevious"]' in bridge
 assert 'let names = ["seekTo:", "scrubTo:", "seekToPosition:"]' in bridge
 assert "EeveeInvokeBoolArg" in bridge and "EeveeInvokeBoolArg" in c_header
 assert "capturedPlayer ?? statefulCandidate" not in bridge
+assert "requestedPlaybackState" in bridge
+assert "setLocalPlaying(!state.playback.isPlaying)" in renderer
+assert "position -= state.preferences.playbackOffset" in renderer
 
 print("Spicy Lyrics renderer bundle policy tests passed")
