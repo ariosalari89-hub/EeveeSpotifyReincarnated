@@ -761,7 +761,11 @@
       updateFollowButton();
       showLoading();
       state.pendingCommands.forEach((pending, requestId) => {
-        if (pending.type === "next" || pending.type === "previous") settleCommand(requestId);
+        if (pending.baseline.generation !== incomingGeneration
+            || pending.type === "next"
+            || pending.type === "previous") {
+          settleCommand(requestId);
+        }
       });
     }
     const title = track?.title || "Unknown track";

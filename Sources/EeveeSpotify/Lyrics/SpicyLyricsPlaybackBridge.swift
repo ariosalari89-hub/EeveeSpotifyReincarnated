@@ -200,9 +200,7 @@ final class SpicyLyricsPlaybackBridge {
 
             let snapshot = self.clock.snapshot(at: now)
             let visualPosition = snapshot.positionSeconds
-                + (snapshot.isPlaying && !snapshot.requiresFreshSample
-                    ? Self.perceptualLeadSeconds
-                    : 0)
+                + (snapshot.source == nil ? 0 : Self.perceptualLeadSeconds)
             let boundedVisualPosition = snapshot.durationSeconds > 0
                 ? min(snapshot.durationSeconds, visualPosition)
                 : visualPosition
