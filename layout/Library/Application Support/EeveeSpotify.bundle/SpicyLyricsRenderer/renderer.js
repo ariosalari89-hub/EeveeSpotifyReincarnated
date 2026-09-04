@@ -397,6 +397,7 @@
         });
       }
       element.className = `lyric-line ${line.kind}`;
+      if (timed && line.kind === "lead" && !line.tokens?.length) element.classList.add("line-timed");
       if (line.opposite) element.classList.add("opposite");
       if (isRTL(line.text)) element.classList.add("rtl");
       element.dataset.index = String(index);

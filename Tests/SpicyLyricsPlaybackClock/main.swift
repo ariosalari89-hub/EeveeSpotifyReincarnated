@@ -49,6 +49,15 @@ requireNear(pauseClock.snapshot(at: 4).positionSeconds, pausedAt, "paused clock 
 sample(&pauseClock, position: pausedAt, at: 4, playing: true)
 requireNear(pauseClock.snapshot(at: 5).positionSeconds, pausedAt + 1, "resumed clock did not advance")
 
+// A command accepted by the native transport updates the renderer immediately
+// while Spotify's observer catches up with the requested state.
+var requestedPlaybackClock = SpicyLyricsPlaybackClock()
+sample(&requestedPlaybackClock, position: 40, at: 0)
+requestedPlaybackClock.reconcilePlaybackState(isPlaying: false, playbackRate: 1, at: 1)
+requireNear(requestedPlaybackClock.snapshot(at: 3).positionSeconds, 41, "requested pause did not freeze immediately")
+requestedPlaybackClock.reconcilePlaybackState(isPlaying: true, playbackRate: 1, at: 3)
+requireNear(requestedPlaybackClock.snapshot(at: 4).positionSeconds, 42, "requested resume did not restart immediately")
+
 var stalePauseClock = SpicyLyricsPlaybackClock()
 sample(&stalePauseClock, position: 30, at: 0)
 sample(&stalePauseClock, position: 30, at: 2, playing: false)

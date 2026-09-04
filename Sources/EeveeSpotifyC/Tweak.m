@@ -31,6 +31,20 @@ void EeveeInvokeVoidNoArg(id target, SEL selector) {
     fn(target, selector);
 }
 
+void EeveeInvokeBoolArg(id target, SEL selector, BOOL argument) {
+    if (!target || !selector) return;
+    typedef void (*BoolFn)(id, SEL, BOOL);
+    BoolFn fn = (BoolFn)objc_msgSend;
+    fn(target, selector, argument);
+}
+
+void EeveeInvokeObjectArg(id target, SEL selector, id argument) {
+    if (!target || !selector) return;
+    typedef id (*ObjectFn)(id, SEL, id);
+    ObjectFn fn = (ObjectFn)objc_msgSend;
+    (void)fn(target, selector, argument);
+}
+
 static void writeDebugLog(NSString *message) {
     NSString *logPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"eeveespotify_debug.log"];
     NSString *timestamp = [[NSDate date] description];

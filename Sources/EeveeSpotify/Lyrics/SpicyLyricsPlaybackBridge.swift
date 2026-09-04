@@ -140,53 +140,160 @@ final class SpicyLyricsPlaybackBridge {
     func perform(command: String, value: Double? = nil) -> Bool {
         let capturedPlayer = queue.sync(execute: { self.player })
         let statefulCandidate: AnyObject? = statefulPlayer.map { $0 as AnyObject }
-        guard let player = capturedPlayer ?? statefulCandidate else {
+        let corePlayer = safeRead(statefulCandidate, key: "player") as AnyObject?
+        let candidates = uniqueCandidates([statefulCandidate, corePlayer, capturedPlayer])
+        guard !candidates.isEmpty else {
             writeDebugLog("[SpicyRenderer] command \(command) rejected: no player")
             return false
         }
 
         if command == "seek", let seconds = value {
-            return seek(player: player, seconds: max(0, seconds))
+            return seek(players: candidates, seconds: max(0, seconds))
         }
 
-        let names: [String]
         switch command {
-        case "togglePlay": names = ["togglePlay", "togglePlayPause"]
-        case "play": names = ["play"]
-        case "pause": names = ["pause"]
-        case "next": names = ["skipToNext", "skipToNextTrack"]
-        case "previous": names = ["skipToPrevious", "skipToPreviousTrack", "back"]
-        default: return false
-        }
-
-        guard let selector = names.lazy.map(NSSelectorFromString).first(where: { player.responds(to: $0) }) else {
-            writeDebugLog("[SpicyRenderer] command \(command) unavailable on \(type(of: player))")
+        case "togglePlay":
+            let shouldPlay: Bool
+            if let paused = safeBool(statefulCandidate, key: "isPaused") {
+                shouldPlay = paused
+            } else {
+                shouldPlay = !queue.sync { self.clock.snapshot(at: self.uptimeSeconds()).isPlaying }
+            }
+            return setPlaying(shouldPlay, candidates: candidates)
+        case "play":
+            return setPlaying(true, candidates: candidates)
+        case "pause":
+            return setPlaying(false, candidates: candidates)
+        case "next":
+            return invokeVoid(
+                names: ["skipToNextTrack", "skipToNext"],
+                candidates: candidates,
+                command: command
+            )
+        case "previous":
+            return invokeVoid(
+                names: ["skipToPreviousTrack", "skipToPrevious"],
+                candidates: candidates,
+                command: command
+            )
+        default:
             return false
         }
-        DispatchQueue.main.async { EeveeInvokeVoidNoArg(player, selector) }
-        return true
     }
 
-    private func seek(player: AnyObject, seconds: Double) -> Bool {
-        let names = ["seekTo:", "seekToPosition:", "seekToPositionMs:", "seekToMs:"]
-        guard let selector = names.lazy.map(NSSelectorFromString).first(where: { player.responds(to: $0) }),
-              let method = class_getInstanceMethod(object_getClass(player), selector) else {
-            return false
+    private func setPlaying(_ shouldPlay: Bool, candidates: [AnyObject]) -> Bool {
+        // Spotify 9.1.76's StatefulPlayerImplementation implements
+        // SPTStatefulPlayerPlaybackControlsAPI directly. Its public playback
+        // setter is setIsPaused:, not the play/pause selectors used by older
+        // bridge revisions.
+        let pausedSelector = NSSelectorFromString("setIsPaused:")
+        if let target = candidates.first(where: { $0.responds(to: pausedSelector) }) {
+            recordRequestedPlayback(isPlaying: shouldPlay)
+            executeOnMain { EeveeInvokeBoolArg(target, pausedSelector, !shouldPlay) }
+            return true
         }
 
-        let argumentType: String = {
-            guard let raw = method_copyArgumentType(method, 2) else { return "?" }
-            defer { free(raw) }
-            return String(cString: raw)
-        }()
-        let argument = argumentType == "d" ? seconds : seconds * 1000
+        // Older SPTPlayer implementations expose pause:/resume: and accept a
+        // nil options object. Keep this as a narrow compatibility fallback.
+        let optionSelector = NSSelectorFromString(shouldPlay ? "resume:" : "pause:")
+        if let target = candidates.first(where: { $0.responds(to: optionSelector) }) {
+            recordRequestedPlayback(isPlaying: shouldPlay)
+            executeOnMain { EeveeInvokeObjectArg(target, optionSelector, nil) }
+            return true
+        }
+
+        let zeroArgumentNames = shouldPlay
+            ? ["play", "resume", "togglePlayPause"]
+            : ["pause", "togglePlayPause"]
+        return invokeVoid(
+            names: zeroArgumentNames,
+            candidates: candidates,
+            command: shouldPlay ? "play" : "pause",
+            requestedPlaying: shouldPlay
+        )
+    }
+
+    private func invokeVoid(
+        names: [String],
+        candidates: [AnyObject],
+        command: String,
+        requestedPlaying: Bool? = nil
+    ) -> Bool {
+        for target in candidates {
+            guard let selector = names.lazy
+                .map(NSSelectorFromString)
+                .first(where: { target.responds(to: $0) }) else { continue }
+            if let requestedPlaying { recordRequestedPlayback(isPlaying: requestedPlaying) }
+            executeOnMain { EeveeInvokeVoidNoArg(target, selector) }
+            return true
+        }
+
+        let types = candidates.map { String(describing: type(of: $0)) }.joined(separator: ", ")
+        writeDebugLog("[SpicyRenderer] command \(command) unavailable on [\(types)]")
+        return false
+    }
+
+    private func seek(players: [AnyObject], seconds: Double) -> Bool {
+        // Both SPTStatefulPlayerTrackPositionAPI and SPTPlayer use a Double
+        // argument for seekTo:. Validate the runtime encoding before invoking
+        // it so an integer/millisecond API can never be called with the wrong
+        // ABI.
+        let names = ["seekTo:", "scrubTo:", "seekToPosition:"]
+        for player in players {
+            for name in names {
+                let selector = NSSelectorFromString(name)
+                guard player.responds(to: selector),
+                      let method = class_getInstanceMethod(object_getClass(player), selector) else { continue }
+
+                let argumentType: String = {
+                    guard let raw = method_copyArgumentType(method, 2) else { return "?" }
+                    defer { free(raw) }
+                    return String(cString: raw)
+                }()
+                guard argumentType == "d" else { continue }
+
+                let stamp = uptimeSeconds()
+                queue.async {
+                    self.clock.requestedSeek(to: seconds, at: stamp)
+                    self.sequence &+= 1
+                }
+                executeOnMain { EeveeSBInvokeSeekDouble(player, selector, seconds) }
+                return true
+            }
+        }
+
+        let types = players.map { String(describing: type(of: $0)) }.joined(separator: ", ")
+        writeDebugLog("[SpicyRenderer] seek unavailable on [\(types)]")
+        return false
+    }
+
+    private func recordRequestedPlayback(isPlaying: Bool) {
         let stamp = uptimeSeconds()
         queue.async {
-            self.clock.requestedSeek(to: seconds, at: stamp)
+            let rate = self.clock.snapshot(at: stamp).playbackRate
+            self.clock.reconcilePlaybackState(
+                isPlaying: isPlaying,
+                playbackRate: rate,
+                at: stamp
+            )
+            self.lastObserverReportedPlaying = isPlaying
             self.sequence &+= 1
         }
-        DispatchQueue.main.async { EeveeSBInvokeSeekDouble(player, selector, argument) }
-        return true
+    }
+
+    private func uniqueCandidates(_ values: [AnyObject?]) -> [AnyObject] {
+        var identifiers = Set<ObjectIdentifier>()
+        return values.compactMap { value in
+            guard let value else { return nil }
+            let identifier = ObjectIdentifier(value)
+            guard identifiers.insert(identifier).inserted else { return nil }
+            return value
+        }
+    }
+
+    private func executeOnMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread { work() }
+        else { DispatchQueue.main.async(execute: work) }
     }
 
     private func artworkDataURL(from artwork: MPMediaItemArtwork?) -> String? {
