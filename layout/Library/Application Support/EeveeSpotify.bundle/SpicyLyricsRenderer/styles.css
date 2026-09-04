@@ -174,10 +174,12 @@ button { -webkit-tap-highlight-color: transparent; }
 #seek::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.28); }
 .transport { justify-self: end; display: flex; align-items: center; gap: 6px; }
 .transport-button { width: 44px; height: 44px; background: transparent; border-radius: 50%; opacity: .9; }
-.transport-button svg { width: 23px; height: 23px; fill: currentColor; }
+.transport-button svg { width: 26px; height: 26px; fill: currentColor; }
+.transport-button:not(.state-button) svg { width: 30px; height: 30px; }
 .transport-button.state-button { position: relative; color: rgba(255,255,255,.72); }
 .transport-button.state-button.active { color: #1ed760; opacity: 1; }
-.smart-shuffle-mark { display: none; position: absolute; top: 3px; right: 3px; font-size: 13px; line-height: 1; }
+.transport-button.state-button.active::after { content: ""; position: absolute; bottom: 0; left: calc(50% - 2px); width: 4px; height: 4px; background: currentColor; border-radius: 50%; }
+.transport-button svg.smart-shuffle-mark { display: none; position: absolute; top: 0; left: 1px; width: 13px; height: 13px; }
 #shuffle-button[data-mode="smart"] .smart-shuffle-mark { display: block; }
 .transport-button:disabled { opacity: .28; pointer-events: none; }
 .repeat-one { display: none; position: absolute; inset: 0; place-items: center; padding-top: 1px; font-size: 8px; font-weight: 900; color: currentColor; }
@@ -186,7 +188,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .play-button { position: relative; width: 54px; height: 54px; border-radius: 50%; background: #fff; color: #111; box-shadow: 0 7px 22px rgba(0,0,0,.28); }
 .play-button:active { transform: scale(.93); }
 .play-button:disabled { opacity: .42; pointer-events: none; }
-.play-button svg { position: absolute; width: 25px; height: 25px; fill: currentColor; }
+.play-button svg { position: absolute; width: 32px; height: 32px; fill: currentColor; }
 .pause-icon { display: none; }
 .is-playing .play-icon { display: none; }
 .is-playing .pause-icon { display: block; }
@@ -217,7 +219,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
 @keyframes sheet-in { from { opacity: 0; transform: translateY(-8px) scale(.97); } }
 
 @media (max-width: 720px) and (orientation: portrait) {
-  #app { grid-template-rows: calc(54px + var(--safe-top)) minmax(0,1fr) calc(122px + var(--safe-bottom)); }
+  #app { grid-template-rows: calc(54px + var(--safe-top)) minmax(0,1fr) calc(136px + var(--safe-bottom)); }
   .brand { font-size: 14px; }
   .stage { display: block; padding: 0 max(calc(var(--safe-right) + 20px), 22px) 0 max(calc(var(--safe-left) + 20px), 22px); }
   .media-pane { height: 66px; display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 12px; align-items: center; }
@@ -231,11 +233,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
   #lyrics { gap: 22px; }
   .lyric-line { font-size: calc(clamp(31px, 9.2vw, 44px) * var(--lyric-scale)); }
   .lyric-line.background { font-size: calc(clamp(22px, 6.8vw, 32px) * var(--lyric-scale)); }
-  .player-bar { grid-template-columns: 1fr auto; grid-template-rows: 34px 56px; gap: 3px 12px; padding: 4px max(calc(var(--safe-right) + 20px), 22px) max(calc(var(--safe-bottom) + 7px), 10px) max(calc(var(--safe-left) + 20px), 22px); }
+  .player-bar { grid-template-columns: 1fr auto; grid-template-rows: 34px 68px; gap: 3px 12px; padding: 4px max(calc(var(--safe-right) + 20px), 22px) max(calc(var(--safe-bottom) + 7px), 10px) max(calc(var(--safe-left) + 20px), 22px); }
   .mini-track { display: none; }
   .timeline { grid-column: 1 / -1; grid-row: 1; }
-  .transport { grid-column: 1 / -1; grid-row: 2; justify-self: center; gap: clamp(5px, 2.5vw, 12px); }
-  .play-button { width: 52px; height: 52px; }
+  .transport { grid-column: 1 / -1; grid-row: 2; justify-self: center; justify-content: space-between; width: 100%; max-width: 400px; gap: 8px; }
+  .play-button { width: 64px; height: 64px; box-shadow: none; }
   .settings-sheet { top: auto; right: 0; bottom: 0; width: 100%; max-height: calc(100vh - var(--safe-top) - 12px); border-radius: 24px 24px 0 0; padding-left: max(20px, var(--safe-left)); padding-right: max(20px, var(--safe-right)); }
   .sheet-handle { display: block; }
 }
@@ -276,6 +278,41 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
 .native-reduce-motion .lyric-line,
 .native-reduce-motion .lyric-line.active,
 .native-reduce-motion .token { transform: none; }
+
+/* The native card and Canvas container keep their backgrounds, title, share
+   and expand controls. These modes replace only the lyric-content bounds. */
+html[data-surface="card"], html[data-surface="inline"],
+html[data-surface="card"] body, html[data-surface="inline"] body { background: transparent; }
+html:not([data-surface="fullscreen"]) #ambient-canvas,
+html:not([data-surface="fullscreen"]) #artwork-backdrop,
+html:not([data-surface="fullscreen"]) .contrast-veil,
+html:not([data-surface="fullscreen"]) .topbar,
+html:not([data-surface="fullscreen"]) .media-pane,
+html:not([data-surface="fullscreen"]) .player-bar,
+html:not([data-surface="fullscreen"]) #resume-scroll { display: none !important; }
+html:not([data-surface="fullscreen"]) #app { display: block; }
+html:not([data-surface="fullscreen"]) .stage { display: block; height: 100%; padding: 0; }
+html:not([data-surface="fullscreen"]) .lyrics-pane { height: 100%; margin: 0; }
+html:not([data-surface="fullscreen"]) .lyric-line { transform: none; filter: none; letter-spacing: -.025em; }
+html:not([data-surface="fullscreen"]) .token { transform: none; }
+html:not([data-surface="fullscreen"]) .token::after { text-shadow: none; }
+html[data-surface="card"] { --dim: rgba(0,0,0,.78); }
+html[data-surface="card"] #lyrics-scroller { padding: 28% 16px 60%; }
+html[data-surface="card"] #lyrics { gap: 20px; }
+html[data-surface="card"] .lyric-line { font-size: calc(clamp(20px, 7vw, 27px) * var(--lyric-scale)); line-height: 1.18; }
+html[data-surface="card"] .lyric-line.sung, html[data-surface="card"] .lyric-line.sung .token { color: rgba(255,255,255,.75); }
+html[data-surface="card"] .lyric-line.background { font-size: calc(18px * var(--lyric-scale)); }
+html[data-surface="inline"] { --dim: rgba(255,255,255,.62); }
+html[data-surface="inline"] .lyrics-pane { mask-image: none; -webkit-mask-image: none; }
+html[data-surface="inline"] #lyrics-scroller { padding: 0; overflow: hidden; }
+html[data-surface="inline"] #lyrics { height: 100%; gap: 0; justify-content: center; }
+html[data-surface="inline"] .lyric-line { display: none; font-size: calc(clamp(17px, 5.3vw, 21px) * var(--lyric-scale)); line-height: 1.18; min-height: 0; padding: 0 1px; }
+html[data-surface="inline"] .lyric-line.inline-visible { display: block; }
+html[data-surface="inline"] .lyric-line.interlude.inline-visible { display: flex; }
+html[data-surface="inline"] .line-translation { display: none; }
+html[data-surface="inline"] .lyrics-state { font-size: 14px; gap: 2px; }
+html[data-surface="inline"] .lyrics-state .loader { display: none; }
+html[data-surface="inline"] .lyrics-state p { margin: 0; }
 
 @media (prefers-contrast: more) {
   :root { --muted: rgba(255,255,255,.9); --dim: #ccc; }

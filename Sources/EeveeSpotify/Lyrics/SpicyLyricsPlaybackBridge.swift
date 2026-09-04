@@ -38,6 +38,7 @@ final class SpicyLyricsPlaybackBridge {
     private var lastDiagnosticUptime = 0.0
     private var lastDiagnosticGeneration: UInt64 = 0
     private var loggedABIFailure = false
+    private var lifecycleSuspended = false
 
     private init() {}
 
@@ -97,6 +98,9 @@ final class SpicyLyricsPlaybackBridge {
         let track = trackMetadata(for: identity.trackIdentifier, duration: snapshot.durationSeconds)
         let restrictions = snapshot.restrictions
         var payload: [String: Any] = [
+            // Same-device epoch bridges native uptime to WebKit's monotonic
+            // time origin. Include serialization/delivery age, not an audio offset.
+            "sampledAtEpochMs": (Date().timeIntervalSince1970 - (uptimeSeconds() - observedAt)) * 1000,
             "generation": String(snapshot.generation),
             "sequence": String(snapshot.sequence),
             "trackId": identity.trackIdentifier,
@@ -131,12 +135,16 @@ final class SpicyLyricsPlaybackBridge {
     }
 
     func suspendPlaybackClock() {
+        guard !lifecycleSuspended else { return }
+        lifecycleSuspended = true
         let now = uptimeSeconds()
         queue.sync { clock.suspend(at: now) }
         writeDebugLog("[SpicyRenderer] lifecycle suspended")
     }
 
     func resumeAwaitingObservation() {
+        guard lifecycleSuspended else { return }
+        lifecycleSuspended = false
         let now = uptimeSeconds()
         queue.sync { clock.resumeAwaitingObservation(at: now) }
         writeDebugLog("[SpicyRenderer] lifecycle awaiting authoritative state")

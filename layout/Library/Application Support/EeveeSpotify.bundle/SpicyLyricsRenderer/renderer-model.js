@@ -40,9 +40,19 @@
     return compareOrdinal(incoming.sequence, current.sequence) > 0;
   }
 
-  function normalizeSession(payload, receivedAt) {
+  function normalizeSession(payload, receivedAt, receivedEpochMs = null) {
     const durationMs = Math.max(0, finite(payload?.durationMs));
-    const positionMs = clamp(finite(payload?.positionMs), 0, durationMs || Number.MAX_SAFE_INTEGER);
+    const sampledAt = optionalFinite(payload?.sampledAtEpochMs);
+    const epoch = optionalFinite(receivedEpochMs);
+    const age = sampledAt != null && epoch != null ? epoch - sampledAt : null;
+    // Both processes share the device epoch. Ignore clock jumps; never turn
+    // an old/background message into seconds of invented forward progress.
+    const transportAgeMs = age != null && age >= 0 && age <= 2000 ? age : 0;
+    const advancing = payload?.isAdvancing && payload?.isPlaying && !payload?.isPaused
+      && !payload?.isLoading && !payload?.isBuffering && !payload?.requiresFreshObservation;
+    const rate = Math.max(0.01, finite(payload?.playbackRate, 1));
+    const positionMs = clamp(finite(payload?.positionMs) + (advancing ? transportAgeMs * rate : 0),
+      0, durationMs || Number.MAX_SAFE_INTEGER);
     const repeatMode = ["off", "context", "track"].includes(payload?.repeatMode)
       ? payload.repeatMode
       : "off";
@@ -54,6 +64,8 @@
       playbackId: String(payload?.playbackId || ""),
       sessionId: String(payload?.sessionId || ""),
       positionMs,
+      transportAgeMs,
+      transportExpired: age != null && age > 2000,
       durationMs,
       playbackRate: Math.max(0.01, finite(payload?.playbackRate, 1)),
       isPlaying: Boolean(payload?.isPlaying),
@@ -118,9 +130,18 @@
     if (String(session.generation || "") !== preview.generation) return null;
     const newer = compareOrdinal(session.sequence, preview.baselineSequence) > 0;
     const tolerance = Math.min(1500, Math.max(450, finite(session.durationMs) * 0.0025));
-    if (newer && Math.abs(finite(session.positionMs) - preview.targetMs) <= tolerance) return null;
+    const predicted = previewPosition(preview, session, now);
+    if (newer && Math.min(Math.abs(finite(session.positionMs) - preview.targetMs),
+      Math.abs(finite(session.positionMs) - predicted)) <= tolerance) return null;
     if (finite(now) >= preview.deadlineAt) return null;
     return preview;
+  }
+
+  function previewPosition(preview, session, now) {
+    const elapsed = preview.accepted === true && session?.isAdvancing
+      && !session?.requiresFreshObservation ? Math.max(0, finite(now) - preview.startedAt) : 0;
+    return clamp(preview.targetMs + elapsed * Math.max(.01, finite(session?.playbackRate, 1)),
+      0, finite(session?.durationMs) || Number.MAX_SAFE_INTEGER);
   }
 
   function renderedPosition({
@@ -133,8 +154,8 @@
     seekPreview = null
   }) {
     if (dragging) return Math.max(0, finite(dragPositionMs));
-    if (seekPreview) return Math.max(0, finite(seekPreview.targetMs));
     if (lifecycleFrozen) return Math.max(0, finite(frozenPositionMs));
+    if (seekPreview) return previewPosition(seekPreview, session, now);
     return projectedPosition(session, now);
   }
 

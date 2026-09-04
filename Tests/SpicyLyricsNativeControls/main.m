@@ -9,14 +9,26 @@ static void require(BOOL condition, NSString *message) {
 @interface FakeSmartShuffle : NSObject
 @property NSInteger mode;
 @property BOOL offeredPicker;
+@property BOOL rejectChange;
+@property NSUInteger explicitCalls;
 @end
 @implementation FakeSmartShuffle
 - (BOOL)checkIsEntitySmartShuffled:(NSURL *)url { return self.mode == 2; }
+- (NSUInteger)shuffleStateWithEntityURL:(NSURL *)url { return self.mode; }
+- (void)setShuffleState:(NSUInteger)mode for:(NSURL *)url showConfirmationUI:(BOOL)confirmation
+    completion:(void (^)(NSInteger))completion {
+    require([url.absoluteString isEqualToString:@"spotify:playlist:test"], @"shuffle context lost");
+    self.offeredPicker = confirmation;
+    self.explicitCalls += 1;
+    if (!self.rejectChange) self.mode = mode;
+    completion(self.rejectChange ? 1 : 0);
+}
 - (void)toggleNextShuffleStateForEntityURL:(NSURL *)url showConfirmationUI:(BOOL)confirmation
     showPickerUI:(BOOL)picker parentAbsoluteLocation:(id)location completion:(void (^)(NSInteger))completion {
     require([url.absoluteString isEqualToString:@"spotify:playlist:test"], @"shuffle context lost");
     self.offeredPicker = picker || confirmation;
-    self.mode = (self.mode + 1) % 3;
+    // Native's picker-disabled path does NOT offer Smart Shuffle.
+    self.mode = self.mode == 0 ? 1 : 0;
     completion(0);
 }
 @end
@@ -31,6 +43,7 @@ static void require(BOOL condition, NSString *message) {
 @property BOOL paused;
 @property BOOL allowed;
 @property BOOL pauseStateUnavailable;
+@property BOOL smartUnavailable;
 @property NSInteger trackNumber;
 @property NSInteger repeatMode;
 @property FakeSmartShuffle *smartShuffleHandler;
@@ -47,7 +60,7 @@ static void require(BOOL condition, NSString *message) {
 - (BOOL)isShufflingAllowed { return self.allowed; }
 - (BOOL)isSkippingToNextTrackAllowed { return self.allowed; }
 - (BOOL)isSkippingToPreviousTrackAllowed { return self.allowed; }
-- (BOOL)isSmartShuffleSupported { return YES; }
+- (BOOL)isSmartShuffleSupported { return !self.smartUnavailable; }
 - (void)playPause { self.paused = !self.paused; }
 - (void)skipToNext { self.trackNumber += 1; }
 - (void)skipToPrevious { self.trackNumber -= 1; }
@@ -97,6 +110,15 @@ int main(void) {
             require([controls[@"smartShuffleAvailable"] boolValue], @"native smart shuffle capability missing");
         }
         require(!actions.smartShuffleHandler.offeredPicker, @"lyrics must not open a picker behind its screen");
+        require(actions.smartShuffleHandler.explicitCalls == 3, @"must use explicit native modes, not binary auto-toggle");
+        actions.smartUnavailable = YES;
+        require(EeveeSpicyPerformControl(@"toggleShuffle", state) == 1 && actions.smartShuffleHandler.mode == 1, @"regular shuffle available without smart");
+        require(EeveeSpicyPerformControl(@"toggleShuffle", state) == 1 && actions.smartShuffleHandler.mode == 0, @"unsupported smart must not be selected");
+        actions.smartUnavailable = NO;
+        actions.smartShuffleHandler.rejectChange = YES;
+        require(EeveeSpicyPerformControl(@"toggleShuffle", state) == 1, @"dispatch is distinct from async result");
+        require(![EeveeSpicyReadControls(state)[@"smartShuffleEnabled"] boolValue], @"rejected mode must not be optimistically displayed");
+        actions.smartShuffleHandler.rejectChange = NO;
         actions.allowed = NO;
         require(EeveeSpicyPerformControl(@"play", state) == 0 && actions.paused, @"restriction must reject resume");
         require(EeveeSpicyPerformControl(@"next", state) == 0 && actions.trackNumber == 0, @"restriction must reject skip");

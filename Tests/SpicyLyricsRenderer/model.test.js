@@ -184,4 +184,22 @@ for (let cycle = 0; cycle < 250; cycle++) {
   }, base + 10_000);
 }
 
+// Native-to-WebKit time is measured from a same-device epoch, not guessed.
+for (const age of [0, 20, 175, 350, 900]) {
+  const observed = { ...playing, sampledAtEpochMs: 1_000_000, positionMs: 12_000 };
+  const delivered = model.normalizeSession(observed, 5000, 1_000_000 + age);
+  assert.equal(delivered.positionMs, 12_000 + age);
+  assert.equal(model.projectedPosition(delivered, 5100), 12_100 + age);
+  const stopped = model.normalizeSession({ ...observed, isPaused: true }, 5000, 1_000_000 + age);
+  assert.equal(stopped.positionMs, 12_000, "delivery age never advances paused audio");
+}
+assert.equal(model.normalizeSession({ ...playing, sampledAtEpochMs: 1000 }, 10, 9000).transportExpired, true);
+assert.equal(model.normalizeSession({ ...playing, sampledAtEpochMs: 1000 }, 10, 0).transportAgeMs, 0,
+  "backward device clock jumps must not become negative offsets");
+const flowingPreview = model.acknowledgeSeekPreview(model.beginSeekPreview(70_000, playing, 1000), true);
+assert.equal(model.renderedPosition({ session: playing, now: 1400, seekPreview: flowingPreview }), 70_400,
+  "accepted playing seeks keep the temporary preview moving until observed confirmation");
+assert.equal(model.renderedPosition({ session: paused, now: 1400, seekPreview: flowingPreview }), 70_000);
+assert.equal(model.renderedPosition({ session: playing, now: 1400, seekPreview: flowingPreview,
+  lifecycleFrozen: true, frozenPositionMs: 22_000 }), 22_000, "background freeze outranks pending preview");
 console.log("Spicy Lyrics renderer model tests passed");

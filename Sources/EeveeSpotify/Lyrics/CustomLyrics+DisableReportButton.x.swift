@@ -16,9 +16,8 @@ class LyricsFullscreenViewControllerHook: ClassHook<UIViewController> {
         orig.viewDidLoad()
 
         if EeveeSpotify.hookTarget == .v91 {
-            if UserDefaults.lyricsSource == .spicylyrics {
-                SpicyLyricsFullscreenCoordinator.shared.attach(to: target)
-            }
+            // Loading can be speculative. Entry happens in viewWillAppear,
+            // before the native presentation paints its first lyric frame.
             return
         }
         
@@ -57,12 +56,10 @@ class LyricsFullscreenViewControllerHook: ClassHook<UIViewController> {
     }
 
     func viewWillAppear(_ animated: Bool) {
+        if EeveeSpotify.hookTarget == .v91, UserDefaults.lyricsSource == .spicylyrics {
+            SpicyLyricsFullscreenCoordinator.shared.attach(to: target)
+        }
         orig.viewWillAppear(animated)
-        guard EeveeSpotify.hookTarget == .v91,
-              UserDefaults.lyricsSource == .spicylyrics else { return }
-        // viewDidLoad performs the normal pre-warm. This idempotent call also
-        // covers a reused controller whose previous host was detached.
-        SpicyLyricsFullscreenCoordinator.shared.attach(to: target)
     }
 
     func viewDidAppear(_ animated: Bool) {

@@ -219,7 +219,7 @@ func eeveeEnvFlag(_ name: String) -> Bool {
 
 struct EeveeSpotify: Tweak {
     static let version = "6.6.8"
-    static let buildNumber = "2"
+    static let buildNumber = "3"
     static let repoSlug = GeneratedConfig.repoSlug
     
     static var hookTarget: VersionHookTarget {
@@ -383,6 +383,7 @@ struct EeveeSpotify: Tweak {
             // Lyrics hooks (guarded)
             if lyricsEnabled {
                 EeveeSpicyInstallPlaybackControls()
+                SpicyLyricsEmbeddedSurfaces.install { UserDefaults.lyricsSource == .spicylyrics }
                 let fullscreenOK: Bool = {
                     // For 9.1.x, targetName resolves to Lyrics_FullscreenElementPageImpl.FullscreenElementViewController
                     if let cls = NSClassFromString("Lyrics_FullscreenElementPageImpl.FullscreenElementViewController") {

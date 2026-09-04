@@ -126,34 +126,43 @@ NSDictionary<NSString *, id> *EeveeSpicyReadControls(id state) {
     }
 }
 
-// Let the real handler choose its next mode, without opening a picker behind
-// the independent lyrics window. No guessed enum values or account changes.
+// Spotify 9.1.76's automatic toggle takes a two-state path when picker UI is
+// disabled. Use its explicit state setter instead. The supplied binary's
+// shuffleStateWithEntityURL: and setShuffleState: implementations establish
+// 0 = off, 1 = shuffle, 2 = smart; the native setter owns async recommendations
+// and disabling Smart Shuffle. Never emulate that work with a boolean option.
 static BOOL cycleShuffle(id actions, id state) {
     id smart = readObject(actions, @"smartShuffleHandler");
     id context = readObject(state, @"contextURL");
     if (!context) return NO;
-    SEL selector = NSSelectorFromString(
-        @"toggleNextShuffleStateForEntityURL:showConfirmationUI:showPickerUI:parentAbsoluteLocation:completion:");
-    NSInvocation *call = invocation(smart, selector, 5);
-    if (!call) return NO;
+    NSInvocation *read = invocation(smart, NSSelectorFromString(@"shuffleStateWithEntityURL:"), 1);
+    if (!read || strcmp(unqualified(read.methodSignature.methodReturnType), "Q") != 0
+        || !isObject([read.methodSignature getArgumentTypeAtIndex:2])) return NO;
+    [read setArgument:&context atIndex:2];
+    [read invoke];
+    NSUInteger current = 0;
+    [read getReturnValue:&current];
+    if (current > 2) return NO;
+    BOOL supported = readBool(actions, @"isSmartShuffleSupported", nil, NO).boolValue;
+    NSUInteger next = current == 0 ? 1 : (current == 1 && supported ? 2 : 0);
+    NSInvocation *call = invocation(smart, NSSelectorFromString(
+        @"setShuffleState:for:showConfirmationUI:completion:"), 4);
+    if (!call || strcmp(unqualified(call.methodSignature.methodReturnType), "v") != 0) return NO;
     NSMethodSignature *signature = call.methodSignature;
-    if (!isObject([signature getArgumentTypeAtIndex:2])
-        || !isBool([signature getArgumentTypeAtIndex:3])
+    if (strcmp(unqualified([signature getArgumentTypeAtIndex:2]), "Q") != 0
+        || !isObject([signature getArgumentTypeAtIndex:3])
         || !isBool([signature getArgumentTypeAtIndex:4])
-        || !isObject([signature getArgumentTypeAtIndex:5])
-        || strcmp(unqualified([signature getArgumentTypeAtIndex:6]), "@?") != 0) return NO;
+        || strcmp(unqualified([signature getArgumentTypeAtIndex:5]), "@?") != 0) return NO;
     BOOL showUI = NO;
-    id location = nil;
     // Swift's ObjC-exposed SmartShuffleToggleResult is an integer enum.
     // Completion does not assert success; the next observed state does that.
     void (^completion)(NSInteger) = ^(NSInteger result) {
         NSLog(@"[SpicyControls] shuffle callback=%ld", (long)result);
     };
-    [call setArgument:&context atIndex:2];
-    [call setArgument:&showUI atIndex:3];
+    [call setArgument:&next atIndex:2];
+    [call setArgument:&context atIndex:3];
     [call setArgument:&showUI atIndex:4];
-    [call setArgument:&location atIndex:5];
-    [call setArgument:&completion atIndex:6];
+    [call setArgument:&completion atIndex:5];
     [call retainArguments];
     [call invoke];
     return YES;

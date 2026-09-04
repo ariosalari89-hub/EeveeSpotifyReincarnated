@@ -2,6 +2,8 @@ import Foundation
 import UIKit
 import WebKit
 
+enum SpicyLyricsSurface: String { case fullscreen, card, inline }
+
 private final class SpicyLyricsRequestCancellation {
     private let lock = NSLock()
     private var cancelled = false
@@ -49,14 +51,21 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private var lyricsUpgradeAttempt = 0
     private var webContentRestartCount = 0
     private var isRecoveringRenderer = false
+    private var surfaceVisible = true
+    private let surface: SpicyLyricsSurface
 
     private let onClose: (() -> Void)?
-    private let onReveal: (() -> Void)?
+    private let onReveal: ((UIView) -> Void)?
+    private let onOpen: (() -> Void)?
 
-    init(controller: UIViewController, onClose: (() -> Void)? = nil, onReveal: (() -> Void)? = nil) {
+    init(controller: UIViewController, surface: SpicyLyricsSurface = .fullscreen,
+         onClose: (() -> Void)? = nil, onReveal: ((UIView) -> Void)? = nil,
+         onOpen: (() -> Void)? = nil) {
         self.controller = controller
+        self.surface = surface
         self.onClose = onClose
         self.onReveal = onReveal
+        self.onOpen = onOpen
         super.init()
     }
 
@@ -126,6 +135,10 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         isReady = false
 
         let contentController = WKUserContentController()
+        contentController.addUserScript(WKUserScript(
+            source: "window.SpicySurface = '\(surface.rawValue)';",
+            injectionTime: .atDocumentStart, forMainFrameOnly: true
+        ))
         contentController.add(self, name: "eevee")
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = contentController
@@ -136,8 +149,8 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         renderer.navigationDelegate = self
         renderer.translatesAutoresizingMaskIntoConstraints = false
         renderer.isOpaque = false
-        renderer.backgroundColor = .black
-        renderer.scrollView.backgroundColor = .black
+        renderer.backgroundColor = surface == .fullscreen ? .black : .clear
+        renderer.scrollView.backgroundColor = renderer.backgroundColor
         renderer.scrollView.contentInsetAdjustmentBehavior = .never
         renderer.scrollView.isScrollEnabled = false
         renderer.allowsLinkPreview = false
@@ -206,6 +219,9 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
 
         let requestID = body["requestId"] as? String ?? ""
         switch type {
+        case "openFullscreen":
+            guard surface != .fullscreen else { return }
+            onOpen?()
         case "ready":
             let version = (body["rendererProtocolVersion"] as? NSNumber)?.intValue ?? -1
             guard version == Self.rendererProtocolVersion else {
@@ -283,6 +299,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
 
         emit(type: "bootstrap", payload: [
             "platform": "ios",
+            "surface": surface.rawValue,
             "reduceMotion": UIAccessibility.isReduceMotionEnabled,
             "boldText": UIAccessibility.isBoldTextEnabled,
             "preferences": rendererPreferences()
@@ -305,7 +322,20 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
 
     @discardableResult
     private func publishSession(reason: String, forceLyrics: Bool = false) -> Bool {
-        guard isReady, !isDetached,
+        guard isReady, !isDetached else { return false }
+        if surface != .fullscreen {
+            let visible = isEmbeddedSurfaceVisible()
+            if !visible {
+                if surfaceVisible { emit(type: "lifecycle", payload: ["state": "hidden"]) }
+                surfaceVisible = false
+                return false
+            }
+            if !surfaceVisible {
+                emit(type: "lifecycle", payload: ["state": "resuming"])
+                surfaceVisible = true
+            }
+        }
+        guard
               let payload = SpicyLyricsPlaybackBridge.shared.sessionPayload(),
               let trackID = payload["trackId"] as? String,
               !trackID.isEmpty else { return false }
@@ -317,12 +347,25 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         activeTrackID = trackID
         activeGeneration = generation
         emit(type: "session", payload: payload)
+        if surface != .fullscreen { emit(type: "lifecycle", payload: ["state": "visible"]) }
 
         if changed || forceLyrics {
             requestLyrics(for: trackID, generation: generation, force: false)
             writeDebugLog(
                 "[SpicyRenderer] session reason=\(reason) generation=\(generation) track=\(trackID)"
             )
+        }
+        return true
+    }
+
+    private func isEmbeddedSurfaceVisible() -> Bool {
+        guard let view = controller?.viewIfLoaded, let window = view.window,
+              view.bounds.width > 1, view.bounds.height > 1,
+              view.convert(view.bounds, to: window).intersects(window.bounds) else { return false }
+        var ancestor: UIView? = view
+        while let node = ancestor {
+            if node.isHidden || node.alpha < 0.01 { return false }
+            ancestor = node.superview
         }
         return true
     }
@@ -552,7 +595,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
 
     private func revealRenderer() {
         guard let controller, let webView, webView.alpha < 1 else { return }
-        onReveal?()
+        if let onReveal { onReveal(webView); return }
         controller.view.bringSubviewToFront(webView)
         guard controller.viewIfLoaded?.window != nil,
               !UIAccessibility.isReduceMotionEnabled else {

@@ -65,6 +65,8 @@
     lifecycleFrozen: true,
     frozenPositionMs: 0,
     nativeReduceMotion: false,
+    surface: ["card", "inline"].includes(window.SpicySurface) ? window.SpicySurface : "fullscreen",
+    awaitingTransportResync: false,
     pendingCommands: new Map(),
     preferences: {
       romanized: Boolean(storedPreferences.romanized),
@@ -76,6 +78,7 @@
   };
 
   const prefersReducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  document.documentElement.dataset.surface = state.surface;
   const reduceMotion = () => state.nativeReduceMotion || prefersReducedMotion.matches;
 
   function formatTime(milliseconds) {
@@ -421,7 +424,7 @@
       dom.miniCover.removeAttribute("src");
       dom.backdrop.style.backgroundImage = "none";
     }
-    ambient.setArtwork(artwork, String(track?.dominantColor || ""));
+    if (state.surface === "fullscreen") ambient.setArtwork(artwork, String(track?.dominantColor || ""));
   }
 
   function applyControls() {
@@ -468,7 +471,13 @@
 
   function applySession(payload) {
     const now = performance.now();
-    const incoming = model.normalizeSession(payload, now);
+    const incoming = model.normalizeSession(payload, now, performance.timeOrigin + now);
+    if (incoming.transportExpired) {
+      if (!state.awaitingTransportResync) post("resync");
+      state.awaitingTransportResync = true;
+      return;
+    }
+    state.awaitingTransportResync = false;
     if (!model.shouldAcceptSession(state.session, incoming)) return;
     const changed = !state.session
       || incoming.trackId !== state.session.trackId
@@ -535,8 +544,10 @@
 
       if (element instanceof HTMLButtonElement) {
         element.type = "button";
-        element.setAttribute("aria-label", `Seek to ${formatTime(line.start)}: ${line.text}`);
-        element.addEventListener("click", () => startSeek(line.start, element));
+        element.setAttribute("aria-label", state.surface === "fullscreen"
+          ? `Seek to ${formatTime(line.start)}: ${line.text}` : `Open lyrics: ${line.text}`);
+        element.addEventListener("click", () => state.surface === "fullscreen"
+          ? startSeek(line.start, element) : post("openFullscreen"));
       }
 
       if (line.kind === "interlude") {
@@ -622,12 +633,15 @@
     if (!state.lines.length) return;
     const position = rawPosition - state.preferences.playbackOffset;
     const activeIndex = model.findActiveLine(state.lines, position);
+    const inlineIndex = activeIndex >= 0 ? activeIndex : state.lines.findIndex(
+      (line) => line.kind !== "interlude" && line.kind !== "background");
     state.lines.forEach((line, index) => {
       const visualState = model.lineVisualState(line, index, activeIndex, position);
       const active = visualState === "active";
       line.element?.classList.toggle("active", active);
       line.element?.classList.toggle("sung", visualState === "sung");
       line.element?.classList.toggle("not-sung", visualState === "not-sung");
+      if (state.surface === "inline") line.element?.classList.toggle("inline-visible", index === inlineIndex);
       if (line.kind === "lead" && line.element) {
         if (active) line.element.setAttribute("aria-current", "true");
         else line.element.removeAttribute("aria-current");
@@ -666,14 +680,19 @@
   }
 
   function scrollToLine(index) {
+    if (state.surface === "inline") return;
     const element = state.lines[index]?.element;
     if (!element) return;
     const target = element.offsetTop
-      - dom.scroller.clientHeight * .42
+      - dom.scroller.clientHeight * (state.surface === "card" ? .28 : .42)
       + element.offsetHeight * .5;
+    const immediate = reduceMotion() || state.draggingSeek || Boolean(state.seekPreview);
+    dom.scroller.style.scrollBehavior = immediate ? "auto" : "smooth";
     dom.scroller.scrollTo({
       top: Math.max(0, target),
-      behavior: reduceMotion() ? "auto" : "smooth"
+      // Scrubbing follows the finger immediately. Restarting a smooth scroll
+      // for every changed lyric makes it chase an obsolete target.
+      behavior: immediate ? "auto" : "smooth"
     });
   }
 
@@ -715,7 +734,7 @@
       "--lyric-scale",
       String(state.preferences.fontSize / 100)
     );
-    ambient.setEnabled(state.preferences.dynamicBackground && !reduceMotion());
+    ambient.setEnabled(state.surface === "fullscreen" && state.preferences.dynamicBackground && !reduceMotion());
     if (rerender && state.rawLyrics) {
       renderLyrics(state.rawLyrics, state.lyricsTrackId, state.lyricsGeneration);
     } else if (state.lines.length) {
@@ -755,6 +774,8 @@
       const payload = event.payload || {};
       switch (event.type) {
       case "bootstrap":
+        state.surface = ["card", "inline"].includes(payload.surface) ? payload.surface : "fullscreen";
+        document.documentElement.dataset.surface = state.surface;
         state.nativeReduceMotion = Boolean(payload.reduceMotion);
         if (payload.preferences && typeof payload.preferences === "object") {
           state.preferences.romanized = Boolean(payload.preferences.romanized);
@@ -849,6 +870,8 @@
 
   dom.seek.addEventListener("input", () => {
     state.draggingSeek = true;
+    state.followLyrics = true;
+    updateFollowButton();
     state.dragPositionMs = model.finite(dom.seek.value);
     const maximum = Math.max(1, model.finite(dom.seek.max, 1));
     dom.seek.style.setProperty(
@@ -859,9 +882,20 @@
     updateLyrics(state.dragPositionMs);
   });
   dom.seek.addEventListener("change", () => {
+    if (!state.draggingSeek) return;
     const target = state.dragPositionMs;
     state.draggingSeek = false;
     startSeek(target, dom.seek);
+  });
+  const cancelSeekDrag = () => {
+    if (!state.draggingSeek) return;
+    state.draggingSeek = false;
+    state.seekPreview = null;
+    updateLyrics(positionNow(), true);
+  };
+  dom.seek.addEventListener("pointercancel", cancelSeekDrag);
+  dom.seek.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); cancelSeekDrag(); }
   });
 
   dom.romanized.addEventListener("change", () => {
