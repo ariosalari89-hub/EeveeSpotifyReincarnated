@@ -46,6 +46,10 @@ JavaScript sends typed commands through one message handler:
 - Every user command has a request id. A tap shows a pending state, but the UI
   treats observed playback state—not the tap itself—as authoritative.
 
+Renderer-only preferences are mirrored to native `UserDefaults` so they survive
+closing and reopening the non-persistent web view. No account, token, or lyric
+payload is stored with them.
+
 ### Lyrics data
 
 `SpicyLyricsRepository` continues producing Spotify-compatible line lyrics for

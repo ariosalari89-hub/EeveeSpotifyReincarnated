@@ -303,8 +303,12 @@
         const lead = entry?.Lead || {};
         const tokens = normalizeTokens(lead.Syllables);
         if (!tokens.length && !lead.Text) return;
-        const start = toMilliseconds(lead.StartTime ?? tokens[0]?.start);
-        const end = toMilliseconds(lead.EndTime ?? tokens[tokens.length - 1]?.end);
+        const start = lead.StartTime != null
+          ? toMilliseconds(lead.StartTime)
+          : finite(tokens[0]?.start);
+        const end = lead.EndTime != null
+          ? toMilliseconds(lead.EndTime)
+          : finite(tokens[tokens.length - 1]?.end);
         if (start - previousLeadEnd >= 4200) output.push({ kind: "interlude", start: previousLeadEnd, end: start });
         output.push({
           kind: "lead",
@@ -321,8 +325,12 @@
         (entry.Background || []).forEach((background) => {
           const backgroundTokens = normalizeTokens(background?.Syllables);
           if (!backgroundTokens.length) return;
-          const backgroundStart = toMilliseconds(background.StartTime ?? backgroundTokens[0]?.start);
-          const backgroundEnd = toMilliseconds(background.EndTime ?? backgroundTokens[backgroundTokens.length - 1]?.end);
+          const backgroundStart = background.StartTime != null
+            ? toMilliseconds(background.StartTime)
+            : finite(backgroundTokens[0]?.start);
+          const backgroundEnd = background.EndTime != null
+            ? toMilliseconds(background.EndTime)
+            : finite(backgroundTokens[backgroundTokens.length - 1]?.end);
           output.push({
             kind: "background",
             start: backgroundStart,
@@ -464,14 +472,13 @@
   function updateLyrics(position, forceScroll = false) {
     if (!state.lines.length) return;
     const activeIndex = findActiveLine(position);
+    state.lines.forEach((line, index) => {
+      const isBackgroundActive = line.kind === "background" && position >= line.start && position <= line.end;
+      line.element?.classList.toggle("active", index === activeIndex || isBackgroundActive);
+      line.element?.classList.toggle("past", Number.isFinite(line.end) && position > line.end);
+    });
     if (activeIndex !== state.activeLine) {
       state.activeLine = activeIndex;
-      state.lines.forEach((line, index) => {
-        line.element?.classList.toggle("active", index === activeIndex || (
-          line.kind === "background" && position >= line.start && position <= line.end
-        ));
-        line.element?.classList.toggle("past", Number.isFinite(line.end) && position > line.end);
-      });
       if (state.followLyrics && activeIndex >= 0) scrollToLine(activeIndex);
     } else if (forceScroll && activeIndex >= 0 && state.followLyrics) {
       scrollToLine(activeIndex);
@@ -628,6 +635,12 @@
       switch (event.type) {
       case "bootstrap":
         state.nativeReduceMotion = Boolean(payload.reduceMotion);
+        if (payload.preferences && typeof payload.preferences === "object") {
+          state.preferences.romanized = Boolean(payload.preferences.romanized);
+          state.preferences.translations = payload.preferences.translations !== false;
+          state.preferences.dynamicBackground = payload.preferences.dynamicBackground !== false;
+          state.preferences.fontSize = clamp(finite(payload.preferences.fontSize, 100), 82, 126);
+        }
         document.body.classList.toggle("native-reduce-motion", state.nativeReduceMotion);
         applyPreferences();
         break;
@@ -675,10 +688,26 @@
     state.followLyrics = true;
     updateFollowButton();
   });
-  dom.romanized.addEventListener("change", () => { state.preferences.romanized = dom.romanized.checked; applyPreferences({ rerender: true }); });
-  dom.translations.addEventListener("change", () => { state.preferences.translations = dom.translations.checked; applyPreferences({ rerender: true }); });
-  dom.background.addEventListener("change", () => { state.preferences.dynamicBackground = dom.background.checked; applyPreferences(); });
-  dom.fontSize.addEventListener("input", () => { state.preferences.fontSize = finite(dom.fontSize.value, 100); applyPreferences(); });
+  dom.romanized.addEventListener("change", () => {
+    state.preferences.romanized = dom.romanized.checked;
+    applyPreferences({ rerender: true });
+    post("setPreference", { key: "romanized", value: state.preferences.romanized });
+  });
+  dom.translations.addEventListener("change", () => {
+    state.preferences.translations = dom.translations.checked;
+    applyPreferences({ rerender: true });
+    post("setPreference", { key: "translations", value: state.preferences.translations });
+  });
+  dom.background.addEventListener("change", () => {
+    state.preferences.dynamicBackground = dom.background.checked;
+    applyPreferences();
+    post("setPreference", { key: "dynamicBackground", value: state.preferences.dynamicBackground });
+  });
+  dom.fontSize.addEventListener("input", () => {
+    state.preferences.fontSize = clamp(finite(dom.fontSize.value, 100), 82, 126);
+    applyPreferences();
+    post("setPreference", { key: "fontSize", value: state.preferences.fontSize });
+  });
   addEventListener("keydown", (event) => { if (event.key === "Escape") setSettingsOpen(false); });
   prefersReducedMotion.addEventListener?.("change", () => applyPreferences());
 

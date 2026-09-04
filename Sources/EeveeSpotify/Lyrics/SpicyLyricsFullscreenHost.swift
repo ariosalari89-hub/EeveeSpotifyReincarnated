@@ -129,9 +129,9 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         case "retryLyrics":
             requestLyrics(for: activeTrackID, force: true)
         case "setPreference":
-            // Renderer-only preferences intentionally stay in the ephemeral page
-            // for this first release; no account or token data is persisted.
-            sendCommandResult(requestID: requestID, accepted: true)
+            let key = body["key"] as? String ?? ""
+            let accepted = persistPreference(key: key, value: body["value"])
+            sendCommandResult(requestID: requestID, accepted: accepted)
         default:
             sendCommandResult(requestID: requestID, accepted: false)
         }
@@ -148,7 +148,8 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
             "platform": "ios",
             "reduceMotion": UIAccessibility.isReduceMotionEnabled,
             "boldText": UIAccessibility.isBoldTextEnabled,
-            "safeFallback": true
+            "safeFallback": true,
+            "preferences": rendererPreferences()
         ])
 
         publishPlaybackAndTrack(forceTrack: true)
@@ -229,6 +230,33 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private func sendCommandResult(requestID: String, accepted: Bool) {
         guard !requestID.isEmpty else { return }
         emit(type: "commandResult", payload: ["requestId": requestID, "accepted": accepted])
+    }
+
+    private func rendererPreferences() -> [String: Any] {
+        let defaults = UserDefaults.standard
+        let prefix = "EeveeSpotify.SpicyRenderer."
+        return [
+            "romanized": defaults.object(forKey: prefix + "romanized") as? Bool ?? false,
+            "translations": defaults.object(forKey: prefix + "translations") as? Bool ?? true,
+            "dynamicBackground": defaults.object(forKey: prefix + "dynamicBackground") as? Bool ?? true,
+            "fontSize": min(126, max(82, defaults.object(forKey: prefix + "fontSize") as? Int ?? 100))
+        ]
+    }
+
+    private func persistPreference(key: String, value: Any?) -> Bool {
+        let defaults = UserDefaults.standard
+        let prefix = "EeveeSpotify.SpicyRenderer."
+        switch key {
+        case "romanized", "translations", "dynamicBackground":
+            guard let value = value as? Bool else { return false }
+            defaults.set(value, forKey: prefix + key)
+        case "fontSize":
+            guard let value = value as? NSNumber else { return false }
+            defaults.set(min(126, max(82, value.intValue)), forKey: prefix + key)
+        default:
+            return false
+        }
+        return true
     }
 
     private func close() {
