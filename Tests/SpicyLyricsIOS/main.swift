@@ -180,6 +180,12 @@ struct QAFailure: Error { let message: String }
                 .appendingPathComponent("qa-\(mode).png")
             try image.pngData()?.write(to: path)
         }
+        let contextImage = UIGraphicsImageRenderer(bounds: root.view.bounds).image { _ in
+            root.view.drawHierarchy(in: root.view.bounds, afterScreenUpdates: true)
+        }
+        let contextPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("qa-embedded-context.png")
+        try contextImage.pngData()?.write(to: contextPath)
         SpicyLyricsPlaybackBridge.shared.onSkip = nil
         _ = SpicyLyricsPlaybackBridge.shared.perform(command: "next")
         try await waitForBoth("track-4")
@@ -198,6 +204,17 @@ struct QAFailure: Error { let message: String }
         }
         card.removeFromSuperview(); inline.removeFromSuperview(); header.removeFromSuperview()
         checks.append("embedded detach restores native content and removes WebKit/child controllers")
+        SpicyLyricsFullscreenCoordinator.shared.open(from: root)
+        let preparingWindow = scene.keyWindow
+        SpicyLyricsFullscreenCoordinator.shared.close()
+        try await Task.sleep(nanoseconds: 500_000_000)
+        guard preparingWindow?.isHidden == true, scene.keyWindow?.rootViewController === root else {
+            throw QAFailure(message: "canceling during preparation must restore the player")
+        }
+        SpicyLyricsFullscreenCoordinator.shared.open(from: root)
+        try await waitFor("reopen after interrupted preparation loads current lyrics", "document.querySelector('#lyrics').textContent.includes('track-4')")
+        SpicyLyricsFullscreenCoordinator.shared.close()
+        try await Task.sleep(nanoseconds: 500_000_000)
     }
     func run() async {
         do {
