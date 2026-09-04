@@ -684,16 +684,16 @@ final class SpicyLyricsPlaybackBridge {
 
         let requestStarted = uptimeSeconds()
         guard let position = candidates.lazy.compactMap({
-            safeDoubleGetter($0, key: "position")
+            self.safeDoubleGetter($0, key: "position")
         }).first else { return nil }
         let duration = candidates.lazy.compactMap {
-            safeDoubleGetter($0, key: "duration")
+            self.safeDoubleGetter($0, key: "duration")
         }.first ?? 0
         let rate = candidates.lazy.compactMap {
-            safeDoubleGetter($0, key: "playbackSpeed")
+            self.safeDoubleGetter($0, key: "playbackSpeed")
         }.first ?? 1
         let playing = observedPlayingState(candidates: candidates)
-            ?? ((MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue ?? 0) > 0
+            ?? (((MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue ?? 0) > 0)
         let trackIdentifier = nonEmpty(statefulPlayer?.currentTrack()?.trackIdentifier)
         let shuffle = observedShuffleState(candidates: candidates)
         let repeatMode = observedRepeatMode(candidates: candidates)
@@ -767,7 +767,7 @@ final class SpicyLyricsPlaybackBridge {
         let statefulCandidate: AnyObject? = statefulPlayer.map { $0 as AnyObject }
         let corePlayer = safeRead(statefulCandidate, key: "player") as AnyObject?
         return uniqueCandidates([statefulCandidate, corePlayer]).lazy.compactMap {
-            safeDoubleGetter($0, key: "position")
+            self.safeDoubleGetter($0, key: "position")
         }.first
     }
 
@@ -891,8 +891,8 @@ final class SpicyLyricsPlaybackBridge {
         let selector = NSSelectorFromString(key)
         guard object.responds(to: selector),
               let method = class_getInstanceMethod(object_getClass(object), selector),
-              method_getNumberOfArguments(method) == 2,
-              let rawType = method_copyReturnType(method) else { return nil }
+              method_getNumberOfArguments(method) == 2 else { return nil }
+        let rawType = method_copyReturnType(method)
         defer { free(rawType) }
         let returnType = String(cString: rawType)
         guard returnType == "d" || returnType == "f" || returnType.hasPrefix("@") else {
