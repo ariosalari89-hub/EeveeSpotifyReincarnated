@@ -245,8 +245,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
   .topbar { min-height: 48px; }
   .stage { grid-template-columns: minmax(150px, .58fr) minmax(280px, 1.42fr); gap: 32px; padding-top: 4px; padding-bottom: 4px; }
   .cover-shell { width: min(100%, 30vh); max-width: 160px; }
-  .media-pane { flex-direction: row; align-items: center; gap: 16px; }
-  .media-copy { flex: 1; }
+  .media-pane { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .media-copy { flex: none; width: 100%; }
   .media-copy h1 { font-size: clamp(18px, 2.1vw, 25px); }
   .media-copy p { font-size: 13px; }
   .lyric-line { font-size: calc(clamp(26px, 3.7vw, 42px) * var(--lyric-scale)); }

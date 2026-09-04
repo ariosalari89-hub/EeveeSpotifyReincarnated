@@ -150,6 +150,10 @@ struct QAFailure: Error { let message: String }
               .every(e => { const r=e.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth+1
                 && r.top >= -1 && r.bottom <= innerHeight+1; }))()
             """)
+            try await waitFor("landscape title has room beside the lyrics", """
+            (() => { const title=document.querySelector('#title');
+              return title.textContent==='Track 3' && title.scrollWidth <= title.clientWidth; })()
+            """)
             try await snapshot("qa-landscape")
             let overlay = scene.windows.first(where: { $0.isKeyWindow })
             _ = try await evaluate("document.querySelector('#close-button').click()")
