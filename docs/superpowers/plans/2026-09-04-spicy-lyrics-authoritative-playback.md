@@ -36,10 +36,10 @@ Work:
 
 1. Resolve `SPTStatefulPlayerTrackPositionAPI` dynamically from the captured
    stateful player.
-2. Validate Objective-C method encodings before invoking
-   `getPositionState:onResponse:`.
-3. Timestamp each async request/response with monotonic uptime and submit its
-   midpoint sample to the clock.
+2. Validate Objective-C method encodings before reading the synchronous
+   `position`, `duration`, and `playbackSpeed` getters.
+3. Timestamp each getter sequence with monotonic uptime and submit its midpoint
+   sample to the clock.
 4. Sample at an active visible cadence, immediately on state transitions, and
    slowly while paused.
 5. Restrict observer callbacks to discrete playback state and sampling triggers.

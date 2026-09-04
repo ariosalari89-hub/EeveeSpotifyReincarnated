@@ -13,9 +13,10 @@ lasting offset, returning from the background changes synchronization, and song
 changes sometimes retain the previous song's clock.
 
 The Spotify 9.1.76 binary contains the interfaces needed to remove this
-ambiguity: `SPTStatefulPlayerTrackPositionAPI`,
-`getPositionState:onResponse:`, `setShuffle:`, and
-`setRepeatMode:completionHandler:`. The desktop Spicy Lyrics source also provides
+ambiguity: `SPTStatefulPlayerTrackPositionAPI` exposes synchronous
+`position`, `duration`, `playbackSpeed`, and `seekTo:` selectors, while
+the playback-control APIs expose shuffle and repeat state/setters. The desktop
+Spicy Lyrics source also provides
 the reference behavior for sampling progress, grouping syllables into words,
 and presenting line-timed lyrics.
 
@@ -75,10 +76,10 @@ Renderer events carrying an older generation or sequence are ignored.
 
 ### Source authority
 
-The local Spotify context player's asynchronous position API is the sole normal
-writer of the position anchor. The coordinator timestamps the request and
-response using monotonic uptime, assigns the sample to the request/response
-midpoint, and projects the returned position to emission time while playing.
+The local Spotify stateful player's synchronous position API is the sole normal
+writer of the position anchor. The coordinator timestamps the getter sequence
+using monotonic uptime, assigns the sample to the read interval's midpoint, and
+projects the returned position to emission time while playing.
 This mirrors the desktop Spicy Lyrics progress strategy without exposing a
 native clock that JavaScript cannot compare directly.
 

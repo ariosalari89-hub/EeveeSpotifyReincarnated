@@ -1,7 +1,9 @@
 (() => {
   "use strict";
 
-  const RENDERER_PROTOCOL_VERSION = 3;
+  const RENDERER_PROTOCOL_VERSION = 4;
+  const model = window.SpicyLyricsModel;
+  if (!model) throw new Error("Spicy Lyrics renderer model is missing");
 
   const $ = (selector) => document.querySelector(selector);
   const dom = {
@@ -23,8 +25,10 @@
     duration: $("#duration"),
     seek: $("#seek"),
     play: $("#play-button"),
+    shuffle: $("#shuffle-button"),
     previous: $("#previous-button"),
     next: $("#next-button"),
+    repeat: $("#repeat-button"),
     close: $("#close-button"),
     settings: $("#settings-button"),
     settingsClose: $("#settings-close"),
@@ -44,10 +48,18 @@
     catch (_) { return {}; }
   })();
 
+  const storedPlaybackOffset = Number(storedPreferences.playbackOffset);
+  const validStoredPlaybackOffset = Number.isFinite(storedPlaybackOffset)
+    && Math.abs(storedPlaybackOffset) <= 5000
+    ? storedPlaybackOffset
+    : 0;
+
   const state = {
     rawLyrics: null,
     trackId: "",
+    generation: "",
     lyricsTrackId: "",
+    lyricsGeneration: "",
     lyricsTimeScale: 1000,
     lines: [],
     lineElements: [],
@@ -56,6 +68,7 @@
     draggingSeek: false,
     dragPosition: 0,
     clockSuspended: false,
+    suspendedPositionMs: 0,
     nativeReduceMotion: false,
     playback: {
       positionMs: 0,
@@ -63,14 +76,22 @@
       isPlaying: false,
       playbackRate: 1,
       receivedAt: performance.now(),
-      sequence: "0"
+      generation: "",
+      sequence: "0",
+      source: "unavailable",
+      requiresFreshSample: true,
+      shuffleEnabled: false,
+      repeatMode: "off",
+      shuffleAvailable: false,
+      repeatAvailable: false,
+      pendingSeekMs: null
     },
     preferences: {
       romanized: Boolean(storedPreferences.romanized),
       translations: storedPreferences.translations !== false,
       dynamicBackground: storedPreferences.dynamicBackground !== false,
       fontSize: Number(storedPreferences.fontSize) || 100,
-      playbackOffset: Math.min(5000, Math.max(-5000, Number(storedPreferences.playbackOffset) || 0))
+      playbackOffset: validStoredPlaybackOffset
     },
     pendingCommands: new Map()
   };
@@ -122,9 +143,22 @@
       button.classList.add("pending");
       button.setAttribute("aria-busy", "true");
       const timeout = setTimeout(() => settleCommand(requestId), timeoutMs);
-      state.pendingCommands.set(requestId, { button, timeout });
+      state.pendingCommands.set(requestId, {
+        type,
+        payload,
+        button,
+        timeout,
+        accepted: false,
+        baseline: {
+          generation: state.generation,
+          sequence: state.playback.sequence,
+          isPlaying: state.playback.isPlaying,
+          shuffleEnabled: state.playback.shuffleEnabled,
+          repeatMode: state.playback.repeatMode
+        }
+      });
     }
-    const message = { type, requestId, ...payload };
+    const message = { type, requestId, generation: state.generation, ...payload };
     if (window.webkit?.messageHandlers?.eevee) {
       window.webkit.messageHandlers.eevee.postMessage(message);
     }
@@ -138,6 +172,49 @@
     pending.button.classList.remove("pending");
     pending.button.removeAttribute("aria-busy");
     state.pendingCommands.delete(requestId);
+  }
+
+  function acknowledgeCommand(payload) {
+    const pending = state.pendingCommands.get(String(payload?.requestId || ""));
+    if (!pending) return;
+    if (!payload?.accepted) {
+      settleCommand(String(payload.requestId));
+      return;
+    }
+    pending.accepted = true;
+    // Skip verification is completed natively before this acknowledgement.
+    if (pending.type === "next" || pending.type === "previous") {
+      settleCommand(String(payload.requestId));
+    }
+  }
+
+  function reconcileCommands() {
+    state.pendingCommands.forEach((pending, requestId) => {
+      if (!pending.accepted) return;
+      let settled = false;
+      switch (pending.type) {
+      case "togglePlay":
+        settled = state.playback.isPlaying !== pending.baseline.isPlaying;
+        break;
+      case "play":
+        settled = state.playback.isPlaying;
+        break;
+      case "pause":
+        settled = !state.playback.isPlaying;
+        break;
+      case "seek":
+        settled = state.playback.pendingSeekMs == null
+          && Math.abs(state.playback.positionMs - finite(pending.payload.positionMs)) < 1800;
+        break;
+      case "toggleShuffle":
+        settled = state.playback.shuffleEnabled !== pending.baseline.shuffleEnabled;
+        break;
+      case "cycleRepeat":
+        settled = state.playback.repeatMode !== pending.baseline.repeatMode;
+        break;
+      }
+      if (settled) settleCommand(requestId);
+    });
   }
 
   class AmbientArtwork {
@@ -327,7 +404,8 @@
         transliterated,
         start,
         end: start != null && end != null && end > start ? end : (start != null ? start + 250 : null),
-        spaceBefore: index > 0 && !previousJoinsCurrent && !punctuation && !/^\s/u.test(displayText)
+        spaceBefore: index > 0 && !previousJoinsCurrent && !punctuation && !/^\s/u.test(displayText),
+        joinsNext: syllable?.IsPartOfWord === true
       };
     }).filter((token) => (token.text || token.transliterated) && Number.isFinite(token.start));
   }
@@ -441,9 +519,10 @@
     return output.filter((line) => line.kind === "interlude" ? line.end > line.start : Boolean(line.text || line.tokens?.length));
   }
 
-  function renderLyrics(raw, trackId = state.trackId) {
+  function renderLyrics(raw, trackId = state.trackId, generation = state.generation) {
     state.rawLyrics = raw;
     state.lyricsTrackId = trackId || "";
+    state.lyricsGeneration = generation || "";
     state.lines = normalizeLyrics(raw);
     state.lineElements = [];
     state.activeLine = -1;
@@ -483,17 +562,22 @@
       } else if (line.tokens?.length) {
         const lineText = document.createElement("span");
         lineText.className = "line-text";
-        line.tokens.forEach((token) => {
-          const tokenElement = document.createElement("span");
-          tokenElement.className = "token";
-          if (token.spaceBefore) tokenElement.classList.add("space-before");
-          const displayText = state.preferences.romanized && token.transliterated.trim()
-            ? token.transliterated
-            : token.text;
-          tokenElement.textContent = displayText;
-          tokenElement.dataset.text = displayText;
-          lineText.appendChild(tokenElement);
-          token.element = tokenElement;
+        model.groupTokens(line.tokens).forEach((group) => {
+          const groupElement = document.createElement("span");
+          groupElement.className = "word-group";
+          if (group.spaceBefore) groupElement.classList.add("space-before");
+          group.tokens.forEach((token) => {
+            const tokenElement = document.createElement("span");
+            tokenElement.className = "token";
+            const displayText = state.preferences.romanized && token.transliterated.trim()
+              ? token.transliterated
+              : token.text;
+            tokenElement.textContent = displayText;
+            tokenElement.dataset.text = displayText;
+            groupElement.appendChild(tokenElement);
+            token.element = tokenElement;
+          });
+          lineText.appendChild(groupElement);
         });
         element.appendChild(lineText);
       } else {
@@ -535,10 +619,14 @@
   }
 
   function positionNow() {
-    if (state.draggingSeek) return state.dragPosition;
-    const base = state.playback.positionMs;
-    if (!state.playback.isPlaying || state.clockSuspended) return base;
-    return base + (performance.now() - state.playback.receivedAt) * state.playback.playbackRate;
+    return model.interpolatedPosition({
+      playback: state.playback,
+      now: performance.now(),
+      clockSuspended: state.clockSuspended,
+      suspendedPosition: state.suspendedPositionMs,
+      dragging: state.draggingSeek,
+      dragPosition: state.dragPosition
+    });
   }
 
   function findActiveLine(position) {
@@ -563,10 +651,11 @@
     position -= state.preferences.playbackOffset;
     const activeIndex = findActiveLine(position);
     state.lines.forEach((line, index) => {
-      const isBackgroundActive = line.kind === "background" && position >= line.start && position <= line.end;
-      const isActive = index === activeIndex || isBackgroundActive;
+      const lineState = model.lyricLineState(line, index, activeIndex, position);
+      const isActive = lineState === "active";
       line.element?.classList.toggle("active", isActive);
-      line.element?.classList.toggle("past", Number.isFinite(line.end) && position > line.end);
+      line.element?.classList.toggle("sung", lineState === "sung");
+      line.element?.classList.toggle("not-sung", lineState === "not-sung");
       if (line.element && line.kind === "lead") {
         if (isActive) line.element.setAttribute("aria-current", "true");
         else line.element.removeAttribute("aria-current");
@@ -649,15 +738,31 @@
 
   function applyTrack(track) {
     const incomingTrackId = String(track?.id || "");
-    if (incomingTrackId && incomingTrackId !== state.trackId) {
+    const incomingGeneration = String(track?.generation || state.generation || "");
+    const changedIdentity = incomingTrackId
+      && (incomingTrackId !== state.trackId
+        || (incomingGeneration && incomingGeneration !== state.generation));
+    if (changedIdentity) {
       state.trackId = incomingTrackId;
+      state.generation = incomingGeneration;
       state.lyricsTrackId = "";
+      state.lyricsGeneration = "";
       state.rawLyrics = null;
       state.lines = [];
       state.activeLine = -1;
       state.followLyrics = true;
+      state.playback.positionMs = 0;
+      state.playback.durationMs = finite(track?.durationMs);
+      state.playback.generation = incomingGeneration;
+      state.playback.sequence = "0";
+      state.playback.receivedAt = performance.now();
+      state.clockSuspended = true;
+      state.suspendedPositionMs = 0;
       updateFollowButton();
       showLoading();
+      state.pendingCommands.forEach((pending, requestId) => {
+        if (pending.type === "next" || pending.type === "previous") settleCommand(requestId);
+      });
     }
     const title = track?.title || "Unknown track";
     const artist = track?.artist || "Unknown artist";
@@ -681,42 +786,71 @@
 
   function applyPlayback(playback) {
     const incomingTrackId = String(playback.trackId || "");
-    // Native publishes the new track envelope before its playback envelope.
-    // If an observer races and still carries the old track, never apply that
-    // position to the new song's lyrics.
+    const incomingGeneration = String(playback.generation || "");
+    if (incomingGeneration && state.generation && incomingGeneration !== state.generation) {
+      // The track envelope normally arrives first, but treating playback as a
+      // generation boundary makes rapid repeated skips safe even if WebKit
+      // delivers the two messages in separate run-loop turns.
+      state.generation = incomingGeneration;
+      state.trackId = incomingTrackId || state.trackId;
+      state.lyricsTrackId = "";
+      state.lyricsGeneration = "";
+      state.rawLyrics = null;
+      state.lines = [];
+      state.activeLine = -1;
+      state.followLyrics = true;
+      showLoading();
+    }
     if (incomingTrackId && state.trackId && incomingTrackId !== state.trackId) return;
     const incomingSequence = String(playback.sequence || "0");
-    try {
-      if (BigInt(incomingSequence) < BigInt(state.playback.sequence || "0")) return;
-    } catch (_) {
-      // Sequence values come from native UInt64 strings. If a future host uses
-      // another representation, accept it instead of stopping the clock.
-    }
+    if (!model.shouldAcceptPlayback(state.playback, {
+      generation: incomingGeneration,
+      sequence: incomingSequence
+    })) return;
     const incomingDuration = finite(playback.durationMs);
+    const repeatMode = ["off", "context", "track"].includes(playback.repeatMode)
+      ? playback.repeatMode
+      : "off";
     state.playback = {
       positionMs: finite(playback.positionMs),
       durationMs: incomingDuration > 0 ? incomingDuration : (state.playback.durationMs || 0),
       isPlaying: Boolean(playback.isPlaying),
       playbackRate: Math.max(.1, finite(playback.playbackRate, 1)),
       receivedAt: performance.now(),
-      sequence: incomingSequence
+      generation: incomingGeneration,
+      sequence: incomingSequence,
+      source: String(playback.source || "unavailable"),
+      requiresFreshSample: Boolean(playback.requiresFreshSample),
+      shuffleEnabled: Boolean(playback.shuffleEnabled),
+      repeatMode,
+      shuffleAvailable: playback.shuffleAvailable !== false,
+      repeatAvailable: playback.repeatAvailable !== false,
+      pendingSeekMs: optionalFinite(playback.pendingSeekMs)
     };
-    state.clockSuspended = false;
+    state.clockSuspended = state.playback.requiresFreshSample || document.hidden;
+    state.suspendedPositionMs = state.playback.positionMs;
     dom.play.classList.toggle("is-playing", state.playback.isPlaying);
     dom.play.setAttribute("aria-label", state.playback.isPlaying ? "Pause" : "Play");
+    dom.play.setAttribute("aria-pressed", String(state.playback.isPlaying));
+    dom.shuffle.disabled = !state.playback.shuffleAvailable;
+    dom.shuffle.classList.toggle("active", state.playback.shuffleEnabled);
+    dom.shuffle.setAttribute("aria-pressed", String(state.playback.shuffleEnabled));
+    dom.shuffle.setAttribute(
+      "aria-label",
+      state.playback.shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"
+    );
+    dom.repeat.disabled = !state.playback.repeatAvailable;
+    dom.repeat.dataset.mode = repeatMode;
+    dom.repeat.classList.toggle("active", repeatMode !== "off");
+    dom.repeat.setAttribute("aria-pressed", String(repeatMode !== "off"));
+    dom.repeat.setAttribute(
+      "aria-label",
+      repeatMode === "track"
+        ? "Turn repeat off"
+        : (repeatMode === "context" ? "Repeat this track" : "Repeat all")
+    );
     ambient.setPlaying(state.playback.isPlaying);
-  }
-
-  function setLocalPlaying(isPlaying) {
-    // Freeze or resume from the exact frame the user touched. The native
-    // bridge applies the same optimistic state and protects it from Spotify's
-    // delayed pre-command callbacks; the next payload then reconciles both.
-    state.playback.positionMs = positionNow();
-    state.playback.receivedAt = performance.now();
-    state.playback.isPlaying = isPlaying;
-    dom.play.classList.toggle("is-playing", isPlaying);
-    dom.play.setAttribute("aria-label", isPlaying ? "Pause" : "Play");
-    ambient.setPlaying(isPlaying);
+    reconcileCommands();
   }
 
   function animationFrame() {
@@ -783,31 +917,33 @@
       case "playback": applyPlayback(payload); break;
       case "lyrics":
         if (payload.trackId && state.trackId && payload.trackId !== state.trackId) break;
+        if (payload.generation && state.generation && payload.generation !== state.generation) break;
         if (payload.state === "loading") showLoading();
-        else if (payload.state === "ready") renderLyrics(payload.data, payload.trackId);
+        else if (payload.state === "ready") {
+          renderLyrics(payload.data, payload.trackId, payload.generation);
+        }
         else showLyricsState(payload.message || "Lyrics are temporarily unavailable.", true);
         break;
       case "lifecycle":
         if (payload.state === "hidden") {
-          state.playback.positionMs = positionNow();
-          state.playback.receivedAt = performance.now();
+          state.suspendedPositionMs = positionNow();
           state.clockSuspended = true;
-        } else if (payload.state === "visible") {
+        } else if (payload.state === "resuming") {
+          state.suspendedPositionMs = positionNow();
           state.clockSuspended = true;
         }
         break;
-      case "commandResult": settleCommand(payload.requestId); break;
+      case "commandResult": acknowledgeCommand(payload); break;
       }
     }
   };
 
   dom.close.addEventListener("click", () => post("close", {}, dom.close));
-  dom.play.addEventListener("click", () => {
-    setLocalPlaying(!state.playback.isPlaying);
-    post("togglePlay", {}, dom.play);
-  });
+  dom.play.addEventListener("click", () => post("togglePlay", {}, dom.play));
+  dom.shuffle.addEventListener("click", () => post("toggleShuffle", {}, dom.shuffle));
   dom.previous.addEventListener("click", () => post("previous", {}, dom.previous, 9000));
   dom.next.addEventListener("click", () => post("next", {}, dom.next, 9000));
+  dom.repeat.addEventListener("click", () => post("cycleRepeat", {}, dom.repeat));
   dom.settings.addEventListener("click", () => setSettingsOpen(true));
   dom.settingsClose.addEventListener("click", () => setSettingsOpen(false));
   dom.settingsScrim.addEventListener("click", () => setSettingsOpen(false));
@@ -845,8 +981,6 @@
   });
   dom.seek.addEventListener("change", () => {
     post("seek", { positionMs: state.dragPosition }, dom.seek);
-    state.playback.positionMs = state.dragPosition;
-    state.playback.receivedAt = performance.now();
     state.draggingSeek = false;
     state.followLyrics = true;
     updateFollowButton();
@@ -884,10 +1018,10 @@
   }, { passive: true });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      state.playback.positionMs = positionNow();
-      state.playback.receivedAt = performance.now();
+      state.suspendedPositionMs = positionNow();
       state.clockSuspended = true;
     } else {
+      state.suspendedPositionMs = positionNow();
       state.clockSuspended = true;
       post("resync");
     }

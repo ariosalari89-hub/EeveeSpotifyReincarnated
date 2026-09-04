@@ -48,8 +48,6 @@ struct SpicyLyricsPlaybackUnitNormalizer {
                     return secondsCandidate
                 }
             }
-            // Do not lock an ambiguous early sample. A later report or the
-            // system transport reference will establish the unit.
             return secondsCandidate
         }
 
@@ -58,11 +56,9 @@ struct SpicyLyricsPlaybackUnitNormalizer {
     }
 }
 
-/// Projects Spotify's timestamped state to the instant its callback reached
-/// the app. `positionAsOfTimestamp` is an anchor, not the current position.
-/// Ignoring the timestamp makes lyrics start late by however long the state sat
-/// in Spotify's observer pipeline, then lets a late callback undo a correct
-/// pause/resume or track-change re-anchor.
+/// Projects a timestamped fallback state to the instant it was received. This
+/// is retained for observer and Now Playing recovery only; the stateful player
+/// position getter already reports seconds on the live player clock.
 struct SpicyLyricsPlaybackTimestampProjector {
     static func positionSeconds(
         anchorPositionSeconds: Double?,
@@ -85,270 +81,279 @@ struct SpicyLyricsPlaybackTimestampProjector {
               callbackTimestamp.isFinite else { return anchor }
 
         let age = callbackTimestamp - sourceTimestamp
-        // A negative age is a clock mismatch. Very old state objects are also
-        // unsafe to extrapolate (foreground recovery uses Now Playing instead).
         guard age >= 0, age <= 300 else { return fallback }
         let rate = playbackRate.isFinite && playbackRate > 0 ? playbackRate : 1
         return anchor + age * rate
     }
 }
 
-struct SpicyLyricsPlaybackClockSnapshot {
+enum SpicyLyricsPlaybackSampleSource: Int {
+    case nowPlayingFallback = 0
+    case observer = 1
+    case statefulPlayer = 2
+
+    var rendererValue: String {
+        switch self {
+        case .nowPlayingFallback: return "nowPlayingFallback"
+        case .observer: return "observer"
+        case .statefulPlayer: return "statefulPlayer"
+        }
+    }
+}
+
+/// A position and discrete-state observation from one native clock domain.
+/// `sampledAtUptimeSeconds` identifies the instant represented by `position`;
+/// `receivedAtUptimeSeconds` is used only to determine source freshness.
+struct SpicyLyricsPlaybackSample {
+    let generation: UInt64
     let positionSeconds: Double
     let durationSeconds: Double
     let playbackRate: Double
     let isPlaying: Bool
     let trackIdentifier: String?
+    let source: SpicyLyricsPlaybackSampleSource
+    let sampledAtUptimeSeconds: Double
+    let receivedAtUptimeSeconds: Double
 }
 
-/// A monotonic media clock built from Spotify's state snapshots.
+struct SpicyLyricsPlaybackClockSnapshot {
+    let generation: UInt64
+    let sequence: UInt64
+    let positionSeconds: Double
+    let durationSeconds: Double
+    let playbackRate: Double
+    let isPlaying: Bool
+    let trackIdentifier: String?
+    let source: SpicyLyricsPlaybackSampleSource?
+    let freshnessSeconds: Double
+    let requiresFreshSample: Bool
+    let pendingSeekTargetSeconds: Double?
+}
+
+/// The one native playback clock used by the full-screen renderer.
 ///
-/// Spotify 9.1.x can repeatedly publish a state object whose `position` is the
-/// position at which that object was created. Treating every callback as a new
-/// clock anchor makes the UI jump back to the same instant several times a
-/// second. This model accepts real discontinuities (seeks and track changes)
-/// while ignoring those duplicate, stale positions between authoritative
-/// updates.
+/// Normal operation accepts position only from the live stateful-player API.
+/// Observer and Now Playing samples may seed or recover the clock, but cannot
+/// overwrite a fresh higher-authority sample. Transport commands never mutate
+/// observed position or play state: a later player sample must confirm them.
 struct SpicyLyricsPlaybackClock {
-    private(set) var hasAnchor = false
+    static let higherAuthorityFreshnessSeconds: Double = 2
+    static let seekConfirmationToleranceSeconds: Double = 1.5
+    static let seekConfirmationTimeoutSeconds: Double = 2
+
+    private(set) var generation: UInt64 = 0
+    private(set) var sequence: UInt64 = 0
     private(set) var trackIdentifier: String?
+    private(set) var hasAnchor = false
 
     private var anchorPositionSeconds: Double = 0
     private var anchorUptimeSeconds: Double = 0
     private var durationSeconds: Double = 0
     private var playbackRate: Double = 1
     private var isPlaying = false
+    private var source: SpicyLyricsPlaybackSampleSource?
+    private var lastSampledAtUptimeSeconds: Double = -.greatestFiniteMagnitude
+    private var lastReceivedAtUptimeSeconds: Double = -.greatestFiniteMagnitude
+    private var isSuspended = false
+    private var requiresFreshSample = false
 
-    private var lastReportedPositionSeconds: Double?
-    private var lastReportUptimeSeconds: Double = 0
     private var pendingSeekTargetSeconds: Double?
+    private var pendingSeekGeneration: UInt64?
     private var pendingSeekDeadlineSeconds: Double = 0
-    private var pendingPlaybackState: Bool?
-    private var pendingPlaybackDeadlineSeconds: Double = 0
 
-    mutating func observe(
-        positionSeconds rawPosition: Double,
-        durationSeconds rawDuration: Double,
-        playbackRate rawRate: Double,
-        isPlaying reportedPlaying: Bool?,
-        trackIdentifier reportedTrackIdentifier: String?,
+    /// Establishes the identity boundary before samples are submitted. A late
+    /// sample carries its original generation and therefore cannot switch the
+    /// clock back to the previous song.
+    @discardableResult
+    mutating func transition(
+        to rawTrackIdentifier: String?,
         at uptimeSeconds: Double
-    ) {
-        guard rawPosition.isFinite, rawDuration.isFinite, rawRate.isFinite, uptimeSeconds.isFinite else {
-            return
+    ) -> UInt64 {
+        guard uptimeSeconds.isFinite else { return generation }
+        let incoming = normalizedTrackIdentifier(rawTrackIdentifier)
+
+        if generation == 0 {
+            generation = 1
+            trackIdentifier = incoming
+            resetTimeline(at: uptimeSeconds)
+            return generation
         }
 
-        let position = max(0, rawPosition)
-        let duration = max(0, rawDuration)
-        let rate = rawRate > 0 ? rawRate : max(0.1, playbackRate)
-        let incomingTrack = reportedTrackIdentifier?.isEmpty == false
-            ? reportedTrackIdentifier
-            : nil
-        let changedTrack = incomingTrack != nil
-            && trackIdentifier != nil
-            && incomingTrack != trackIdentifier
+        // A transient nil identifier is not a new track. The host will call us
+        // again as soon as Spotify exposes the canonical URI.
+        guard let incoming else { return generation }
+        guard incoming != trackIdentifier else { return generation }
 
-        if !hasAnchor || changedTrack {
-            reset(
-                positionSeconds: position,
-                durationSeconds: duration,
-                playbackRate: rate,
-                isPlaying: reportedPlaying ?? false,
-                trackIdentifier: incomingTrack ?? trackIdentifier,
-                at: uptimeSeconds
-            )
-            return
+        generation &+= 1
+        if generation == 0 { generation = 1 }
+        trackIdentifier = incoming
+        resetTimeline(at: uptimeSeconds)
+        return generation
+    }
+
+    /// Accepts a real player observation. Returns false when it was stale,
+    /// belonged to another track generation, lost source arbitration, or was a
+    /// pre-seek position that would undo a command still awaiting confirmation.
+    @discardableResult
+    mutating func submit(_ sample: SpicyLyricsPlaybackSample) -> Bool {
+        guard sample.positionSeconds.isFinite,
+              sample.durationSeconds.isFinite,
+              sample.playbackRate.isFinite,
+              sample.sampledAtUptimeSeconds.isFinite,
+              sample.receivedAtUptimeSeconds.isFinite,
+              sample.receivedAtUptimeSeconds >= sample.sampledAtUptimeSeconds,
+              sample.generation == generation else { return false }
+
+        let incomingTrack = normalizedTrackIdentifier(sample.trackIdentifier)
+        if let incomingTrack,
+           let trackIdentifier,
+           incomingTrack != trackIdentifier {
+            return false
         }
 
-        if let incomingTrack { trackIdentifier = incomingTrack }
+        if hasAnchor,
+           sample.sampledAtUptimeSeconds + 0.000_001 < lastSampledAtUptimeSeconds {
+            return false
+        }
+
+        if let currentSource = source,
+           currentSource.rawValue > sample.source.rawValue,
+           sample.receivedAtUptimeSeconds - lastReceivedAtUptimeSeconds
+               < Self.higherAuthorityFreshnessSeconds {
+            return false
+        }
+
+        if let target = pendingSeekTargetSeconds,
+           pendingSeekGeneration == generation,
+           sample.receivedAtUptimeSeconds <= pendingSeekDeadlineSeconds {
+            guard abs(sample.positionSeconds - target)
+                    <= Self.seekConfirmationToleranceSeconds else {
+                return false
+            }
+            clearPendingSeek()
+        } else if pendingSeekTargetSeconds != nil {
+            clearPendingSeek()
+        }
+
+        let rate = sample.playbackRate > 0 ? sample.playbackRate : max(0.1, playbackRate)
+        let duration = max(0, sample.durationSeconds)
         if duration > 0 { durationSeconds = duration }
 
-        // A transport command updates the renderer immediately. Spotify can
-        // publish one or more snapshots containing the old playing state
-        // before the command reaches its player core, so those stale snapshots
-        // must not restart a just-paused lyric clock (or stop a just-resumed
-        // one). The first matching snapshot confirms the request.
-        if let requestedPlaying = pendingPlaybackState,
-           uptimeSeconds <= pendingPlaybackDeadlineSeconds {
-            guard reportedPlaying == requestedPlaying else {
-                playbackRate = rate
-                isPlaying = requestedPlaying
-                return
-            }
-            pendingPlaybackState = nil
-            pendingPlaybackDeadlineSeconds = 0
-        } else {
-            pendingPlaybackState = nil
-            pendingPlaybackDeadlineSeconds = 0
-        }
-
-        let nextPlaying = reportedPlaying ?? isPlaying
-        let predictedPosition = snapshot(at: uptimeSeconds).positionSeconds
-
-        // A seek requested by this renderer is reflected immediately. Spotify
-        // can emit one or more callbacks carrying the pre-seek position, so
-        // ignore those until the target arrives or the short deadline expires.
-        if let pendingTarget = pendingSeekTargetSeconds,
-           uptimeSeconds <= pendingSeekDeadlineSeconds {
-            if abs(position - pendingTarget) <= 1.25 {
-                anchorPositionSeconds = position
-                anchorUptimeSeconds = uptimeSeconds
-                pendingSeekTargetSeconds = nil
-                lastReportedPositionSeconds = position
-                lastReportUptimeSeconds = uptimeSeconds
-            }
-            playbackRate = rate
-            isPlaying = nextPlaying
-            return
-        }
-        pendingSeekTargetSeconds = nil
-
-        let reportedDelta = lastReportedPositionSeconds.map { position - $0 } ?? 0
-        let reportInterval = max(0, uptimeSeconds - lastReportUptimeSeconds)
-        let plausibleForwardAdvance = max(
-            1.5,
-            reportInterval * max(rate, playbackRate) + 1.25
-        )
-        let isDiscontinuity = reportedDelta < -0.75
-            || reportedDelta > plausibleForwardAdvance
-
-        let repeatedReport = lastReportedPositionSeconds != nil
-            && abs(reportedDelta) < 0.001
-
-        if isDiscontinuity {
-            // A real forward/backward seek must be accepted immediately.
-            anchorPositionSeconds = position
-        } else if nextPlaying {
-            // Duplicate callbacks carry the position at which their state
-            // object was created, so keep interpolating through them. A fresh
-            // moving report is authoritative in both directions; accepting a
-            // small negative correction prevents pause/callback jitter from
-            // accumulating into lyrics that run ahead of the audio.
-            anchorPositionSeconds = repeatedReport ? predictedPosition : position
-        } else {
-            // Once Spotify confirms a pause, its frozen position is the source
-            // of truth. Keeping the prediction here made every delayed pause
-            // permanently add that delay to the lyrics clock.
-            anchorPositionSeconds = position
-        }
-
-        anchorUptimeSeconds = uptimeSeconds
+        anchorPositionSeconds = bounded(max(0, sample.positionSeconds))
+        anchorUptimeSeconds = sample.sampledAtUptimeSeconds
         playbackRate = rate
-        isPlaying = nextPlaying
-        lastReportedPositionSeconds = position
-        lastReportUptimeSeconds = uptimeSeconds
-    }
-
-    mutating func requestedSeek(to rawPosition: Double, at uptimeSeconds: Double) {
-        guard rawPosition.isFinite, uptimeSeconds.isFinite else { return }
-        let target = bounded(max(0, rawPosition))
+        isPlaying = sample.isPlaying
+        source = sample.source
+        lastSampledAtUptimeSeconds = sample.sampledAtUptimeSeconds
+        lastReceivedAtUptimeSeconds = sample.receivedAtUptimeSeconds
         hasAnchor = true
-        anchorPositionSeconds = target
-        anchorUptimeSeconds = uptimeSeconds
-        pendingSeekTargetSeconds = target
-        pendingSeekDeadlineSeconds = uptimeSeconds + 2
-    }
+        sequence &+= 1
+        if sequence == 0 { sequence = 1 }
 
-    /// Replaces the interpolation anchor with an authoritative transport
-    /// snapshot. This is used when the app returns from the background: WebKit
-    /// and native timers may have been suspended for different lengths of time,
-    /// so advancing the old anchor by wall time is not valid.
-    mutating func reanchor(
-        positionSeconds rawPosition: Double,
-        durationSeconds rawDuration: Double,
-        playbackRate rawRate: Double,
-        isPlaying: Bool,
-        trackIdentifier: String?,
-        at uptimeSeconds: Double
-    ) {
-        guard rawPosition.isFinite, rawDuration.isFinite, rawRate.isFinite, uptimeSeconds.isFinite else {
-            return
+        // A foreground transition stays frozen until the real stateful player
+        // clock is sampled. A fallback can be displayed, but cannot restart a
+        // timeline that may have been suspended for an arbitrary interval.
+        if requiresFreshSample && sample.source == .statefulPlayer {
+            requiresFreshSample = false
+            isSuspended = false
+        } else if !requiresFreshSample {
+            isSuspended = false
         }
-        reset(
-            positionSeconds: max(0, rawPosition),
-            durationSeconds: max(0, rawDuration),
-            playbackRate: rawRate > 0 ? rawRate : max(0.1, playbackRate),
-            isPlaying: isPlaying,
-            trackIdentifier: trackIdentifier?.isEmpty == false ? trackIdentifier : self.trackIdentifier,
-            at: uptimeSeconds
-        )
+        return true
     }
 
-    mutating func requestedPlaybackState(
-        isPlaying: Bool,
-        playbackRate rawRate: Double,
+    /// Records a seek request without claiming the player has already moved.
+    /// Stale samples near the old position are rejected until Spotify reports
+    /// the target or the bounded confirmation period expires.
+    @discardableResult
+    mutating func requestSeek(
+        to rawPositionSeconds: Double,
+        generation requestedGeneration: UInt64,
         at uptimeSeconds: Double
-    ) {
-        guard uptimeSeconds.isFinite, rawRate.isFinite else { return }
-        pendingPlaybackState = nil
-        pendingPlaybackDeadlineSeconds = 0
-        reconcilePlaybackState(
-            isPlaying: isPlaying,
-            playbackRate: rawRate,
-            at: uptimeSeconds
-        )
-        pendingPlaybackState = isPlaying
-        pendingPlaybackDeadlineSeconds = uptimeSeconds + 4
+    ) -> Bool {
+        guard rawPositionSeconds.isFinite,
+              uptimeSeconds.isFinite,
+              requestedGeneration == generation,
+              hasAnchor else { return false }
+        pendingSeekTargetSeconds = bounded(max(0, rawPositionSeconds))
+        pendingSeekGeneration = generation
+        pendingSeekDeadlineSeconds = uptimeSeconds + Self.seekConfirmationTimeoutSeconds
+        return true
     }
 
-    mutating func reconcilePlaybackState(
-        isPlaying: Bool,
-        playbackRate rawRate: Double,
-        at uptimeSeconds: Double
-    ) {
-        guard uptimeSeconds.isFinite, rawRate.isFinite else { return }
-
-        if let requestedPlaying = pendingPlaybackState,
-           uptimeSeconds <= pendingPlaybackDeadlineSeconds {
-            guard isPlaying == requestedPlaying else { return }
-            pendingPlaybackState = nil
-            pendingPlaybackDeadlineSeconds = 0
-        } else if pendingPlaybackState != nil {
-            pendingPlaybackState = nil
-            pendingPlaybackDeadlineSeconds = 0
+    /// Freezes interpolation immediately when the app is no longer active.
+    mutating func suspend(at uptimeSeconds: Double) {
+        guard uptimeSeconds.isFinite else { return }
+        if hasAnchor {
+            anchorPositionSeconds = snapshot(at: uptimeSeconds).positionSeconds
+            anchorUptimeSeconds = uptimeSeconds
         }
+        isSuspended = true
+        requiresFreshSample = true
+    }
 
-        let currentPosition = snapshot(at: uptimeSeconds).positionSeconds
-        anchorPositionSeconds = currentPosition
-        anchorUptimeSeconds = uptimeSeconds
-        playbackRate = rawRate > 0 ? rawRate : max(0.1, playbackRate)
-        self.isPlaying = isPlaying
+    /// Keeps the timeline frozen after foregrounding until a new live player
+    /// sample is accepted.
+    mutating func resumeAwaitingFreshSample(at uptimeSeconds: Double) {
+        guard uptimeSeconds.isFinite else { return }
+        if hasAnchor { anchorUptimeSeconds = uptimeSeconds }
+        isSuspended = true
+        requiresFreshSample = true
     }
 
     func snapshot(at uptimeSeconds: Double) -> SpicyLyricsPlaybackClockSnapshot {
-        let elapsed = hasAnchor && isPlaying
-            ? max(0, uptimeSeconds - anchorUptimeSeconds) * playbackRate
+        let safeNow = uptimeSeconds.isFinite ? uptimeSeconds : anchorUptimeSeconds
+        let canAdvance = hasAnchor && isPlaying && !isSuspended && !requiresFreshSample
+        let elapsed = canAdvance
+            ? max(0, safeNow - anchorUptimeSeconds) * playbackRate
             : 0
+        let freshness = lastReceivedAtUptimeSeconds.isFinite
+            ? max(0, safeNow - lastReceivedAtUptimeSeconds)
+            : .greatestFiniteMagnitude
+
         return SpicyLyricsPlaybackClockSnapshot(
+            generation: generation,
+            sequence: sequence,
             positionSeconds: bounded(anchorPositionSeconds + elapsed),
             durationSeconds: durationSeconds,
             playbackRate: playbackRate,
             isPlaying: isPlaying,
-            trackIdentifier: trackIdentifier
+            trackIdentifier: trackIdentifier,
+            source: source,
+            freshnessSeconds: freshness,
+            requiresFreshSample: requiresFreshSample,
+            pendingSeekTargetSeconds: pendingSeekGeneration == generation
+                ? pendingSeekTargetSeconds
+                : nil
         )
     }
 
-    private mutating func reset(
-        positionSeconds: Double,
-        durationSeconds: Double,
-        playbackRate: Double,
-        isPlaying: Bool,
-        trackIdentifier: String?,
-        at uptimeSeconds: Double
-    ) {
-        hasAnchor = true
-        self.trackIdentifier = trackIdentifier
-        anchorPositionSeconds = positionSeconds
+    private mutating func resetTimeline(at uptimeSeconds: Double) {
+        sequence = 0
+        hasAnchor = false
+        anchorPositionSeconds = 0
         anchorUptimeSeconds = uptimeSeconds
-        self.durationSeconds = durationSeconds
-        self.playbackRate = playbackRate
-        self.isPlaying = isPlaying
-        lastReportedPositionSeconds = positionSeconds
-        lastReportUptimeSeconds = uptimeSeconds
+        durationSeconds = 0
+        playbackRate = 1
+        isPlaying = false
+        source = nil
+        lastSampledAtUptimeSeconds = -.greatestFiniteMagnitude
+        lastReceivedAtUptimeSeconds = -.greatestFiniteMagnitude
+        isSuspended = false
+        requiresFreshSample = false
+        clearPendingSeek()
+    }
+
+    private mutating func clearPendingSeek() {
         pendingSeekTargetSeconds = nil
+        pendingSeekGeneration = nil
         pendingSeekDeadlineSeconds = 0
-        pendingPlaybackState = nil
-        pendingPlaybackDeadlineSeconds = 0
+    }
+
+    private func normalizedTrackIdentifier(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func bounded(_ position: Double) -> Double {
