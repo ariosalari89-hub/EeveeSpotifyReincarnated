@@ -630,9 +630,13 @@
       if (rowHeight > 0 && available > 0) {
         const fit = Math.min(1, available / rowHeight);
         root.style.setProperty("--inline-fit", String(fit));
-        root.style.setProperty("--inline-lines", String(Math.max(1,
-          Math.min(2, Math.floor(available / (rowHeight * fit) + 0.001)))));
       }
+      // This native surface is a single-line caption, not a second scrolling
+      // lyric pane. Keep all tokens in one text flow so an oversized timed
+      // phrase is ellipsized instead of becoming a clipped multi-row box.
+      dom.lyrics.querySelectorAll(".word-group.breakable").forEach(
+        (group) => group.classList.remove("breakable"));
+      return;
     }
     // Keep ordinary joined syllables together. Only an over-wide group may
     // wrap at its real token boundaries; a single huge token can wrap within

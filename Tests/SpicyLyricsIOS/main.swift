@@ -175,6 +175,19 @@ struct QAFailure: Error { let message: String }
             guard (try await web.evaluateJavaScript(js)) as? Bool == true else {
                 throw QAFailure(message: "\(mode) compact layout regressed")
             }
+            if mode == "inline" {
+                let captionIsOneRow = try await web.evaluateJavaScript("""
+                (() => { const text=document.querySelector('.inline-visible .line-text');
+                  const rects=[...text.querySelectorAll('.token')].map(e => e.getBoundingClientRect());
+                  return getComputedStyle(text).textOverflow === 'ellipsis'
+                    && rects.length > 0 && rects.every(r => r.top >= -1
+                      && r.bottom <= innerHeight + 1 && Math.abs(r.top - rects[0].top) < 1); })()
+                """)
+                guard captionIsOneRow as? Bool == true else {
+                    throw QAFailure(message: "timed caption token wraps below the visible native slot")
+                }
+                checks.append("long timed tokens remain one complete caption row with ellipsis")
+            }
             let image = try await web.takeSnapshot(configuration: nil)
             let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("qa-\(mode).png")

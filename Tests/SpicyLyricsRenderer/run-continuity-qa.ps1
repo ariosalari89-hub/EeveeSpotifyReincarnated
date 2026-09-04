@@ -109,6 +109,23 @@ try {
 })()
 '@)
     & agent-browser --session $session set viewport 280 48
+    Require-Qa 'a long timed token stays on one complete caption row' (Eval-Qa @'
+(async () => {
+  SpicyQA.send('bootstrap',{surface:'inline',preferences:{fontSize:126}});
+  SpicyQA.lyrics.karaoke.Content=[{Type:'Vocal',Lead:{StartTime:0,EndTime:30,Syllables:[
+    {Text:'track-3 ',StartTime:0,EndTime:10},
+    {Text:'A long lyric should stay inside this phone screen',StartTime:10,EndTime:30}
+  ]}}];
+  SpicyQA.scenario('karaoke',{positionMs:19000,isPlaying:false,isPaused:true,isAdvancing:false});
+  await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+  const text=document.querySelector('.inline-visible .line-text');
+  const row=parseFloat(getComputedStyle(text).lineHeight);
+  const rects=[...text.querySelectorAll('.token')].map(e=>e.getBoundingClientRect());
+  return JSON.stringify({pass:rects.length===2&&rects.every(r=>r.top>=-1&&r.bottom<=innerHeight+1&&Math.abs(r.top-rects[0].top)<1)
+    &&getComputedStyle(text).textOverflow==='ellipsis',row,rects:rects.map(r=>({top:r.top,bottom:r.bottom,height:r.height}))});
+})()
+'@)
+    & agent-browser --session $session screenshot (Join-Path $artifacts 'above-title-long-token.png')
     Require-Qa 'narrow above-title caption at enlarged text never clips glyph rows' (Eval-Qa @'
 (async () => {
   SpicyQA.send('bootstrap',{surface:'inline',preferences:{fontSize:126}});
