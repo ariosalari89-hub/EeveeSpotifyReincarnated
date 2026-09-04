@@ -92,6 +92,8 @@ seek_input = renderer[renderer.index('dom.seek.addEventListener("input"'):
 assert 'post("seek"' not in seek_input
 assert "beginSeekPreview" in model and "reconcileSeekPreview" in model
 assert "deadlineAt" in model
+assert "state.seekPreview?.requestId === requestId" in renderer
+assert "state.seekPreview.requestId = requestId" in renderer
 
 # Full transport stays in the lyrics page and reflects only observed state.
 transport_ids = [
@@ -108,6 +110,7 @@ assert "session.repeatMode" in renderer
 assert "session.canGoPrevious" in renderer and "session.canGoNext" in renderer
 assert 'case "togglePlay", "play", "pause", "next", "previous", "toggleShuffle", "cycleRepeat"' in host
 assert 'case "next"' in bridge and 'case "previous"' in bridge
+assert "guard canContext else { return true }" in bridge
 
 # Karaoke, line, and static payloads stay semantically distinct. Word joins,
 # punctuation, RTL, translations, backgrounds, and duet alignment are retained.

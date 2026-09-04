@@ -115,9 +115,14 @@
     const pending = state.pendingCommands.get(requestId);
     if (!pending) return;
     clearTimeout(pending.timeout);
-    pending.button?.classList.remove("pending");
-    pending.button?.removeAttribute("aria-busy");
     state.pendingCommands.delete(requestId);
+    const buttonStillPending = pending.button && [...state.pendingCommands.values()].some(
+      (command) => command.button === pending.button
+    );
+    if (!buttonStillPending) {
+      pending.button?.classList.remove("pending");
+      pending.button?.removeAttribute("aria-busy");
+    }
   }
 
   function acknowledgeCommand(payload) {
@@ -125,7 +130,7 @@
     const pending = state.pendingCommands.get(requestId);
     if (!pending) return;
     pending.accepted = Boolean(payload?.accepted);
-    if (pending.type === "seek") {
+    if (pending.type === "seek" && state.seekPreview?.requestId === requestId) {
       state.seekPreview = model.acknowledgeSeekPreview(
         state.seekPreview,
         pending.accepted
@@ -141,7 +146,9 @@
     state.pendingCommands.forEach((pending, requestId) => {
       if (pending.accepted !== true) return;
       if (pending.type === "seek") {
-        if (!state.seekPreview) settleCommand(requestId);
+        if (!state.seekPreview || state.seekPreview.requestId !== requestId) {
+          settleCommand(requestId);
+        }
         return;
       }
       if (model.commandObserved(pending.type, pending.baseline, state.session)) {
@@ -327,12 +334,16 @@
 
   function startSeek(targetMs, button) {
     if (!state.session?.canSeek) return;
+    [...state.pendingCommands.entries()].forEach(([requestId, pending]) => {
+      if (pending.type === "seek") settleCommand(requestId);
+    });
     const target = model.clamp(targetMs, 0, state.session.durationMs || Number.MAX_SAFE_INTEGER);
     state.seekPreview = model.beginSeekPreview(target, state.session, performance.now());
     state.followLyrics = true;
     updateFollowButton();
     updateLyrics(target, true);
-    post("seek", { positionMs: target }, button, 3500);
+    const requestId = post("seek", { positionMs: target }, button, 3500);
+    state.seekPreview.requestId = requestId;
   }
 
   function showLoading() {
@@ -431,7 +442,7 @@
       ? session.canToggleRepeatContext
       : (session.repeatMode === "context"
         ? session.canToggleRepeatTrack || session.canToggleRepeatContext
-        : session.canToggleRepeatTrack || session.canToggleRepeatContext);
+        : session.canToggleRepeatTrack);
     dom.repeat.disabled = !repeatAvailable;
     dom.repeat.dataset.mode = session.repeatMode;
     dom.repeat.classList.toggle("active", session.repeatMode !== "off");
@@ -439,8 +450,10 @@
     dom.repeat.setAttribute(
       "aria-label",
       session.repeatMode === "track"
-        ? "Turn repeat off"
-        : (session.repeatMode === "context" ? "Repeat this track" : "Repeat all")
+        ? (session.canToggleRepeatContext ? "Turn repeat off" : "Repeat all")
+        : (session.repeatMode === "context"
+          ? (session.canToggleRepeatTrack ? "Repeat this track" : "Turn repeat off")
+          : "Repeat all")
     );
     dom.seek.disabled = !session.canSeek;
     ambient.setPlaying(isPlaying);

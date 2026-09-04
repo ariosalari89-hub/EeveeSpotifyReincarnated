@@ -219,23 +219,32 @@ final class SpicyLyricsPlaybackBridge {
                 value: NSNumber(value: true)
             )
         case .context:
-            guard canTrack else { return false }
+            if canTrack {
+                return invokeObject(
+                    player,
+                    selector: ABI.repeatTrack,
+                    value: NSNumber(value: true)
+                )
+            }
+            guard canContext else { return false }
             return invokeObject(
                 player,
-                selector: ABI.repeatTrack,
-                value: NSNumber(value: true)
+                selector: ABI.repeatContext,
+                value: NSNumber(value: false)
             )
         case .track:
             // Repeat-track is layered on top of repeat-context in the verified
-            // 9.1.76 state. Both toggles must be available to reach `off`;
-            // otherwise do not leave Spotify in a partially changed mode.
-            guard canTrack, canContext else { return false }
+            // 9.1.76 state. Disabling track first reaches context. When Spotify
+            // also permits context changes, continue to off; otherwise retain
+            // the valid context mode instead of trapping the control.
+            guard canTrack else { return false }
             let trackAccepted = invokeObject(
                 player,
                 selector: ABI.repeatTrack,
                 value: NSNumber(value: false)
             )
             guard trackAccepted else { return false }
+            guard canContext else { return true }
             return invokeObject(
                 player,
                 selector: ABI.repeatContext,

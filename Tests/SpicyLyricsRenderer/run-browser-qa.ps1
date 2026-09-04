@@ -5,7 +5,7 @@ $rendererPath = Join-Path $repoRoot "layout\Library\Application Support\EeveeSpo
 $rendererUrl = ([Uri](Resolve-Path $rendererPath).Path).AbsoluteUri
 $fixturePath = Join-Path $PSScriptRoot "browser-fixture.js"
 $artifactDirectory = Join-Path $repoRoot "artifacts\spicy-v5-qa\automated"
-$session = "spicy-v5-automated"
+$session = "spicy-v5-automated-$PID"
 
 New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
 
@@ -31,12 +31,16 @@ function Require-Qa {
 }
 
 try {
-    & agent-browser --session $session open $rendererUrl | Out-Host
+    # Do not capture the first command's stdout: on Windows the freshly spawned
+    # browser daemon inherits that pipe and keeps it open after `open` exits.
+    & agent-browser --session $session open $rendererUrl
     if ($LASTEXITCODE -ne 0) { throw "Could not open renderer" }
-    & agent-browser --session $session set viewport 393 852 | Out-Host
+    $viewportOutput = & agent-browser --session $session set viewport 393 852
+    $viewportOutput | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Could not set portrait viewport" }
-    Get-Content -LiteralPath $fixturePath -Raw |
-        & agent-browser --session $session eval --stdin | Out-Host
+    $fixture = Get-Content -LiteralPath $fixturePath -Raw
+    $fixtureOutput = $fixture | & agent-browser --session $session eval --stdin
+    $fixtureOutput | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Could not install browser fixture" }
 
     $pauseResume = Invoke-QaEval @'
@@ -96,6 +100,45 @@ try {
 '@
     Require-Qa "single-command seek reconciliation" $seek
 
+    $rapidSeek = Invoke-QaEval @'
+(async () => {
+  window.SpicyQA.observe({positionMs:7000,isPlaying:false,isPaused:true,isAdvancing:false});
+  window.SpicyQA.clearMessages();
+  const control = document.querySelector("#seek");
+  control.value = "12000";
+  control.dispatchEvent(new Event("input", {bubbles:true}));
+  control.dispatchEvent(new Event("change", {bubbles:true}));
+  const first = window.SpicyQA.messages.find((message) => message.type === "seek");
+  control.value = "25000";
+  control.dispatchEvent(new Event("input", {bubbles:true}));
+  control.dispatchEvent(new Event("change", {bubbles:true}));
+  const commands = window.SpicyQA.messages.filter((message) => message.type === "seek");
+  const second = commands[1];
+  window.SpicyQA.send("commandResult", {
+    requestId:first?.requestId,command:"seek",generation:"1",accepted:false
+  });
+  window.SpicyQA.observe({positionMs:7600,isPlaying:false,isPaused:true,isAdvancing:false});
+  await new Promise(requestAnimationFrame);
+  const heldAfterOldResult = Number(control.value);
+  window.SpicyQA.send("commandResult", {
+    requestId:second?.requestId,command:"seek",generation:"1",accepted:true
+  });
+  // The playback slider has a 100 ms HTML step. Use a representable observed
+  // value so this assertion tests stale-preview release instead of the browser's
+  // standards-defined half-step rounding.
+  window.SpicyQA.observe({positionMs:24900,isPlaying:false,isPaused:true,isAdvancing:false});
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const confirmed = Number(control.value);
+  const pending = document.querySelectorAll(".pending").length;
+  return JSON.stringify({
+    pass: commands.length === 2 && first.requestId !== second.requestId
+      && heldAfterOldResult === 25000 && confirmed === 24900 && pending === 0,
+    commandCount:commands.length,heldAfterOldResult,confirmed,pending
+  });
+})()
+'@
+    Require-Qa "superseded seek isolation" $rapidSeek
+
     $lyricsModes = Invoke-QaEval @'
 (async () => {
   window.SpicyQA.scenario("line", {generation:2,positionMs:5500,isPlaying:false,isPaused:true,isAdvancing:false});
@@ -124,16 +167,45 @@ try {
   window.SpicyQA.scenario("karaoke", {generation:4,positionMs:7500,isPlaying:false,isPaused:true,isAdvancing:false});
   await new Promise(requestAnimationFrame);
   window.SpicyQA.clearMessages();
+  const latest = (type) => [...window.SpicyQA.messages].reverse().find((message) => message.type === type);
   document.querySelector("#shuffle-button").click();
-  const shuffle = window.SpicyQA.messages.find((message) => message.type === "toggleShuffle");
+  const shuffle = latest("toggleShuffle");
   window.SpicyQA.send("commandResult", {requestId:shuffle.requestId,command:"toggleShuffle",generation:"4",accepted:true});
   window.SpicyQA.observe({positionMs:7500,isPlaying:false,isPaused:true,isAdvancing:false,shuffleEnabled:true});
+
   document.querySelector("#repeat-button").click();
-  const repeat = window.SpicyQA.messages.find((message) => message.type === "cycleRepeat");
-  window.SpicyQA.send("commandResult", {requestId:repeat.requestId,command:"cycleRepeat",generation:"4",accepted:true});
+  const repeatContext = latest("cycleRepeat");
+  window.SpicyQA.send("commandResult", {requestId:repeatContext.requestId,command:"cycleRepeat",generation:"4",accepted:true});
   window.SpicyQA.observe({positionMs:7500,isPlaying:false,isPaused:true,isAdvancing:false,shuffleEnabled:true,repeatMode:"context"});
+  const contextMode = document.querySelector("#repeat-button").dataset.mode;
+  document.querySelector("#repeat-button").click();
+  const repeatTrack = latest("cycleRepeat");
+  window.SpicyQA.send("commandResult", {requestId:repeatTrack.requestId,command:"cycleRepeat",generation:"4",accepted:true});
+  window.SpicyQA.observe({positionMs:7500,isPlaying:false,isPaused:true,isAdvancing:false,shuffleEnabled:true,repeatMode:"track"});
+  const trackMode = document.querySelector("#repeat-button").dataset.mode;
+  document.querySelector("#repeat-button").click();
+  const repeatOff = latest("cycleRepeat");
+  window.SpicyQA.send("commandResult", {requestId:repeatOff.requestId,command:"cycleRepeat",generation:"4",accepted:true});
+  window.SpicyQA.observe({positionMs:7500,isPlaying:false,isPaused:true,isAdvancing:false,shuffleEnabled:true,repeatMode:"off"});
+  const offMode = document.querySelector("#repeat-button").dataset.mode;
+  const offPressed = document.querySelector("#repeat-button").getAttribute("aria-pressed");
+
+  window.SpicyQA.observe({positionMs:7500,isPlaying:false,isPaused:true,isAdvancing:false,shuffleEnabled:true,repeatMode:"context",canToggleRepeatTrack:false,canToggleRepeatContext:true});
+  const restrictedLabel = document.querySelector("#repeat-button").getAttribute("aria-label");
+  const restrictedDisabled = document.querySelector("#repeat-button").disabled;
+  document.querySelector("#repeat-button").click();
+  const repeatFallback = latest("cycleRepeat");
+  window.SpicyQA.send("commandResult", {requestId:repeatFallback.requestId,command:"cycleRepeat",generation:"4",accepted:true});
+  window.SpicyQA.observe({positionMs:7500,isPlaying:false,isPaused:true,isAdvancing:false,shuffleEnabled:true,repeatMode:"off",canToggleRepeatTrack:false,canToggleRepeatContext:true});
+
+  document.querySelector("#previous-button").click();
+  const previous = latest("previous");
+  window.SpicyQA.send("commandResult", {requestId:previous.requestId,command:"previous",generation:"4",accepted:true});
+  window.SpicyQA.observe({positionMs:100,isPlaying:true,isPaused:false,isAdvancing:true,shuffleEnabled:true,repeatMode:"off"});
+  const previousPending = document.querySelector("#previous-button").classList.contains("pending");
+
   document.querySelector("#next-button").click();
-  const next = window.SpicyQA.messages.find((message) => message.type === "next");
+  const next = latest("next");
   window.SpicyQA.send("commandResult", {requestId:next.requestId,command:"next",generation:"4",accepted:true});
   window.SpicyQA.scenario("next", {generation:5,positionMs:100});
   await new Promise(requestAnimationFrame);
@@ -148,15 +220,20 @@ try {
   await new Promise(requestAnimationFrame);
   const titleAfterStale = document.querySelector("#title").textContent;
   return JSON.stringify({
-    pass: shuffle.generation === "4" && repeat.generation === "4" && next.generation === "4"
+    pass: shuffle.generation === "4" && repeatContext.generation === "4"
+      && repeatTrack.generation === "4" && repeatOff.generation === "4"
+      && repeatFallback.generation === "4" && previous.generation === "4"
+      && next.generation === "4" && contextMode === "context" && trackMode === "track"
+      && offMode === "off" && offPressed === "false"
+      && restrictedLabel === "Turn repeat off" && !restrictedDisabled && !previousPending
       && title === "Next Song" && timing === "line" && pending === 0
       && titleAfterStale === "Next Song",
-    shuffleGeneration:shuffle.generation, repeatGeneration:repeat.generation,
-    nextGeneration:next.generation, title, timing, pending, titleAfterStale
+    contextMode,trackMode,offMode,offPressed,restrictedLabel,restrictedDisabled,
+    previousPending,nextGeneration:next.generation,title,timing,pending,titleAfterStale
   });
 })()
 '@
-    Require-Qa "observed controls and atomic skip" $transport
+    Require-Qa "observed controls, repeat cycle, and atomic skips" $transport
 
     $lifecycle = Invoke-QaEval @'
 (async () => {
@@ -175,10 +252,12 @@ try {
 '@
     Require-Qa "background/foreground freshness gate" $lifecycle
 
-    & agent-browser --session $session screenshot (Join-Path $artifactDirectory "portrait-karaoke.png") | Out-Host
+    $portraitOutput = & agent-browser --session $session screenshot (Join-Path $artifactDirectory "portrait-karaoke.png")
+    $portraitOutput | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Could not capture portrait baseline" }
 
-    & agent-browser --session $session set viewport 852 393 | Out-Host
+    $landscapeOutput = & agent-browser --session $session set viewport 852 393
+    $landscapeOutput | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Could not set landscape viewport" }
     $layout = Invoke-QaEval @'
 (async () => {
@@ -208,7 +287,8 @@ try {
 })()
 '@
     Require-Qa "landscape, enlarged text, and modal geometry" $layout
-    & agent-browser --session $session screenshot (Join-Path $artifactDirectory "landscape-settings.png") | Out-Host
+    $landscapeScreenshotOutput = & agent-browser --session $session screenshot (Join-Path $artifactDirectory "landscape-settings.png")
+    $landscapeScreenshotOutput | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Could not capture landscape baseline" }
 
     $browserErrors = & agent-browser --session $session errors
