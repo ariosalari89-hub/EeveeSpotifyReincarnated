@@ -1,3 +1,4 @@
+#requires -Version 7.0
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
@@ -52,7 +53,7 @@ try {
     $viewportOutput = & agent-browser --session $session set viewport 393 852
     $viewportOutput | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Could not set portrait viewport" }
-    $fixture = Get-Content -LiteralPath $fixturePath -Raw
+    $fixture = Get-Content -LiteralPath $fixturePath -Raw -Encoding utf8
     $fixtureOutput = $fixture | & agent-browser --session $session eval --stdin
     $fixtureOutput | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Could not install browser fixture" }

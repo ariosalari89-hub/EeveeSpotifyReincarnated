@@ -471,7 +471,10 @@
 
   function applySession(payload) {
     const now = performance.now();
-    const incoming = model.normalizeSession(payload, now, performance.timeOrigin + now);
+    // The native stamp is wall-clock epoch, not the browser's estimated
+    // monotonic epoch (which can diverge after a device clock adjustment).
+    // Use wall time only for bounded transit age; animate with performance.now.
+    const incoming = model.normalizeSession(payload, now, Date.now());
     if (incoming.transportExpired) {
       if (!state.awaitingTransportResync) post("resync");
       state.awaitingTransportResync = true;
@@ -879,7 +882,7 @@
       `${model.clamp(state.dragPositionMs / maximum) * 100}%`
     );
     dom.elapsed.textContent = formatTime(state.dragPositionMs);
-    updateLyrics(state.dragPositionMs);
+    updateLyrics(state.dragPositionMs, true);
   });
   dom.seek.addEventListener("change", () => {
     if (!state.draggingSeek) return;

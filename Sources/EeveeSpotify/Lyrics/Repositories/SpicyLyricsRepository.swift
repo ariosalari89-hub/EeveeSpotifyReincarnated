@@ -43,6 +43,7 @@ private struct SpicyLyricsResolvedPayload {
 
 private final class SpicyLyricsInFlightRequest {
     let completion = DispatchGroup()
+    let consumers = SpicyLyricsRequestConsumers()
     var payload: SpicyLyricsResolvedPayload?
     var error: Error?
 
@@ -678,7 +679,7 @@ class SpicyLyricsRepository: LyricsRepository {
     private func resolvedPayload(
         for trackId: String,
         forceRefresh: Bool,
-        shouldContinue: () -> Bool
+        shouldContinue: @escaping () -> Bool
     ) throws -> SpicyLyricsResolvedPayload {
         var preservedPayload: SpicyLyricsResolvedPayload?
         if forceRefresh {
@@ -704,16 +705,20 @@ class SpicyLyricsRepository: LyricsRepository {
 
         let request: SpicyLyricsInFlightRequest
         let isLeader: Bool
+        let consumerID: UUID
         inFlightLock.lock()
-        if let current = inFlightRequests[trackId] {
+        if let current = inFlightRequests[trackId], let id = current.consumers.add(shouldContinue) {
             request = current
+            consumerID = id
             isLeader = false
         } else {
             request = SpicyLyricsInFlightRequest()
+            consumerID = request.consumers.add(shouldContinue)!
             inFlightRequests[trackId] = request
             isLeader = true
         }
         inFlightLock.unlock()
+        defer { request.consumers.remove(consumerID) }
 
         if !isLeader {
             writeDebugLog("[SpicyLyrics] Joined in-flight request for \(trackId)")
@@ -731,7 +736,7 @@ class SpicyLyricsRepository: LyricsRepository {
         do {
             let fetched = try fetchBestRemotePayload(
                 trackId: trackId,
-                shouldContinue: shouldContinue
+                shouldContinue: { request.consumers.shouldContinue }
             )
             var selected = fetched
             if let selectedData = cacheRendererPayload(fetched, for: trackId),
@@ -905,7 +910,7 @@ class SpicyLyricsRepository: LyricsRepository {
     func rendererPayloadData(
         for trackId: String,
         forceRefresh: Bool = false,
-        shouldContinue: () -> Bool = { true }
+        shouldContinue: @escaping () -> Bool = { true }
     ) throws -> Data {
         guard !trackId.isEmpty else { throw LyricsError.noSuchSong }
 

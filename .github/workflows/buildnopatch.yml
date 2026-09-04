@@ -80,6 +80,12 @@ jobs:
       - name: Test Spicy Lyrics renderer bundle
         run: python3 Tests/SpicyLyricsRenderer/test_bundle.py
 
+      - name: Test shared lyric request lifetimes
+        run: |
+          xcrun swiftc Sources/EeveeSpotify/Lyrics/SpicyLyricsRequestConsumers.swift \
+            Tests/SpicyLyricsRequestConsumers/main.swift -o "$RUNNER_TEMP/spicy-request-tests"
+          "$RUNNER_TEMP/spicy-request-tests"
+
       - name: Test Spicy Lyrics native control dispatch
         run: |
           xcrun clang -fobjc-arc -fblocks -framework Foundation \

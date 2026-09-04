@@ -98,8 +98,8 @@ final class SpicyLyricsPlaybackBridge {
         let track = trackMetadata(for: identity.trackIdentifier, duration: snapshot.durationSeconds)
         let restrictions = snapshot.restrictions
         var payload: [String: Any] = [
-            // Same-device epoch bridges native uptime to WebKit's monotonic
-            // time origin. Include serialization/delivery age, not an audio offset.
+            // Same-device wall clocks measure bounded serialization/delivery
+            // age. WebKit anchors that sample to its own monotonic clock.
             "sampledAtEpochMs": (Date().timeIntervalSince1970 - (uptimeSeconds() - observedAt)) * 1000,
             "generation": String(snapshot.generation),
             "sequence": String(snapshot.sequence),

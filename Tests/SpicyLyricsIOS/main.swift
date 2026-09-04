@@ -103,7 +103,9 @@ struct QAFailure: Error { let message: String }
     }
     func waitFor(_ label: String, _ js: String) async throws {
         for _ in 0..<100 {
-            if webView() != nil, (try await evaluate(js)) as? Bool == true { checks.append(label); return }
+            if webView() != nil,
+               (try await evaluate("Boolean(document.querySelector('#app') && window.SpicyNative)")) as? Bool == true,
+               (try await evaluate(js)) as? Bool == true { checks.append(label); return }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
         throw QAFailure(message: label)
@@ -150,7 +152,7 @@ struct QAFailure: Error { let message: String }
         }
         func waitForBoth(_ track: String) async throws {
             for _ in 0..<100 {
-                let js = "document.querySelector('#lyrics').textContent.includes('\(track)')"
+                let js = "document.querySelector('#lyrics')?.textContent.includes('\(track)') === true"
                 if (try await cardWeb.evaluateJavaScript(js)) as? Bool == true,
                    (try await inlineWeb.evaluateJavaScript(js)) as? Bool == true { return }
                 try await Task.sleep(nanoseconds: 100_000_000)
