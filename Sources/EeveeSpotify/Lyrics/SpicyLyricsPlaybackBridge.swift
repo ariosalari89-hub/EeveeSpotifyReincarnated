@@ -15,24 +15,92 @@ final class SpicyLyricsPlaybackBridge {
     private var playbackUnits = SpicyLyricsPlaybackUnitNormalizer()
     private var lastObserverStamp = 0.0
     private var lastObserverReportedPlaying: Bool?
+    private var lastObserverSourceTimestamp: TimeInterval?
+    private var lastObserverTrackIdentifier: String?
+    private var pendingPlaybackRequest: (
+        isPlaying: Bool,
+        requestedAt: TimeInterval,
+        expiresAt: TimeInterval
+    )?
     private var sequence: UInt64 = 0
+
+    private static let perceptualLeadSeconds = 0.1
 
     private init() {}
 
     func processStateChange(player: AnyObject, state: AnyObject) {
         let positionRaw = (safeRead(state, key: "position") as? NSNumber)?.doubleValue ?? 0
+        let timestampedPositionRaw = (safeRead(state, key: "positionAsOfTimestamp") as? NSNumber)?.doubleValue
         let durationRaw = (safeRead(state, key: "duration") as? NSNumber)?.doubleValue ?? 0
         let rate = (safeRead(state, key: "playbackSpeed") as? NSNumber)?.doubleValue ?? 1
         let playing = safeBool(state, key: "isPlaying")
+        let sourceTimestamp = dateTimestamp(safeRead(state, key: "timestamp"))
+        let callbackTimestamp = Date().timeIntervalSince1970
         let track = safeRead(state, key: "track") as AnyObject?
         let uri = extractURI(from: track)
         let trackIdentifier = uri.flatMap { spotifyTrackID(from: $0) }
+        let liveTrackIdentifier = Thread.isMainThread
+            ? statefulPlayer?.currentTrack()?.trackIdentifier
+            : nil
         let stamp = uptimeSeconds()
         let systemPosition = Thread.isMainThread
             ? (MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? NSNumber)?.doubleValue
             : nil
 
         queue.async {
+            if let trackIdentifier,
+               let liveTrackIdentifier,
+               !liveTrackIdentifier.isEmpty,
+               trackIdentifier != liveTrackIdentifier {
+                writeDebugLog(
+                    "[SpicyRenderer] Ignored state for old track \(trackIdentifier); "
+                    + "live track is \(liveTrackIdentifier)"
+                )
+                return
+            }
+
+            if let pending = self.pendingPlaybackRequest {
+                if callbackTimestamp > pending.expiresAt {
+                    self.pendingPlaybackRequest = nil
+                } else if playing == pending.isPlaying {
+                    // A matching observed state confirms the command even when
+                    // Spotify retains the older position-anchor timestamp.
+                    self.pendingPlaybackRequest = nil
+                } else if let sourceTimestamp,
+                          sourceTimestamp + 0.001 < pending.requestedAt {
+                    writeDebugLog(
+                        "[SpicyRenderer] Ignored pre-command playback state "
+                        + "requested=\(pending.isPlaying) reported=\(playing ?? false)"
+                    )
+                    return
+                }
+            }
+
+            let sameTimeline = trackIdentifier == nil
+                || self.lastObserverTrackIdentifier == nil
+                || trackIdentifier == self.lastObserverTrackIdentifier
+            let changedPlaybackState = playing != nil
+                && self.lastObserverReportedPlaying != nil
+                && playing != self.lastObserverReportedPlaying
+            if sameTimeline,
+               !changedPlaybackState,
+               let sourceTimestamp,
+               let previousTimestamp = self.lastObserverSourceTimestamp,
+               sourceTimestamp + 0.001 < previousTimestamp {
+                writeDebugLog(
+                    "[SpicyRenderer] Ignored out-of-order player state age="
+                    + "\(String(format: "%.3f", callbackTimestamp - sourceTimestamp))s "
+                    + "for \(trackIdentifier ?? "unknown")"
+                )
+                return
+            }
+
+            if let trackIdentifier,
+               self.lastObserverTrackIdentifier != trackIdentifier {
+                self.lastObserverSourceTimestamp = nil
+                self.lastObserverTrackIdentifier = trackIdentifier
+            }
+
             let duration = self.playbackUnits.durationSeconds(durationRaw)
             let referencePosition: Double?
             if let systemPosition {
@@ -42,11 +110,39 @@ final class SpicyLyricsPlaybackBridge {
             } else {
                 referencePosition = nil
             }
-            let position = self.playbackUnits.positionSeconds(
+            let effectivePlaying = playing ?? self.lastObserverReportedPlaying
+            let sourceAge = sourceTimestamp.map { callbackTimestamp - $0 }
+            let anchorReference = referencePosition.map {
+                max(0, $0 - ((effectivePlaying == true ? max(0, sourceAge ?? 0) : 0) * max(0.1, rate)))
+            }
+            let timestampedPosition = timestampedPositionRaw.map {
+                self.playbackUnits.positionSeconds(
+                    $0,
+                    durationSeconds: duration,
+                    referenceSeconds: anchorReference
+                )
+            }
+            let fallbackPosition = self.playbackUnits.positionSeconds(
                 positionRaw,
                 durationSeconds: duration,
                 referenceSeconds: referencePosition
             )
+            let position = SpicyLyricsPlaybackTimestampProjector.positionSeconds(
+                anchorPositionSeconds: timestampedPosition,
+                fallbackPositionSeconds: fallbackPosition,
+                sourceTimestamp: sourceTimestamp,
+                callbackTimestamp: callbackTimestamp,
+                playbackRate: rate,
+                isPlaying: effectivePlaying
+            )
+            if changedPlaybackState || (sourceAge ?? 0) > 0.15 {
+                writeDebugLog(
+                    "[SpicyRenderer] Timestamped state track=\(trackIdentifier ?? "unknown") "
+                    + "age=\(String(format: "%.3f", sourceAge ?? -1))s "
+                    + "anchor=\(String(format: "%.3f", timestampedPosition ?? fallbackPosition)) "
+                    + "projected=\(String(format: "%.3f", position)) playing=\(effectivePlaying ?? false)"
+                )
+            }
             self.player = player
             self.clock.observe(
                 positionSeconds: position,
@@ -57,7 +153,13 @@ final class SpicyLyricsPlaybackBridge {
                 at: stamp
             )
             self.lastObserverStamp = stamp
-            self.lastObserverReportedPlaying = playing
+            self.lastObserverReportedPlaying = self.clock.snapshot(at: stamp).isPlaying
+            if let sourceTimestamp {
+                self.lastObserverSourceTimestamp = max(
+                    sourceTimestamp,
+                    self.lastObserverSourceTimestamp ?? sourceTimestamp
+                )
+            }
             self.sequence &+= 1
         }
     }
@@ -68,47 +170,110 @@ final class SpicyLyricsPlaybackBridge {
         let fallbackDuration = (nowPlaying?[MPMediaItemPropertyPlaybackDuration] as? NSNumber)?.doubleValue
         let fallbackRate = (nowPlaying?[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue
         let liveTrackIdentifier = Thread.isMainThread ? statefulPlayer?.currentTrack()?.trackIdentifier : nil
+        let statefulCandidate: AnyObject? = Thread.isMainThread
+            ? statefulPlayer.map { $0 as AnyObject }
+            : nil
+        let corePlayer = safeRead(statefulCandidate, key: "player") as AnyObject?
+        let observedPlaying = observedPlayingState(
+            candidates: uniqueCandidates([statefulCandidate, corePlayer])
+        ) ?? fallbackRate.map { $0 > 0 }
 
         return queue.sync {
             let now = uptimeSeconds()
             let observerIsFresh = lastObserverStamp != 0 && now - lastObserverStamp < 2
+            let timelineMismatch = liveTrackIdentifier?.isEmpty == false
+                && liveTrackIdentifier != clock.trackIdentifier
 
-            if forceNowPlayingReanchor, !observerIsFresh, let fallbackPosition {
+            if forceNowPlayingReanchor,
+               (!observerIsFresh || timelineMismatch || !clock.hasAnchor),
+               let fallbackPosition {
                 let prior = clock.snapshot(at: now)
+                writeDebugLog(
+                    "[SpicyRenderer] Reanchored from Now Playing track="
+                    + "\(liveTrackIdentifier ?? prior.trackIdentifier ?? "unknown") "
+                    + "position=\(String(format: "%.3f", fallbackPosition))s"
+                )
                 clock.reanchor(
                     positionSeconds: max(0, fallbackPosition),
                     durationSeconds: max(0, fallbackDuration ?? prior.durationSeconds),
                     playbackRate: fallbackRate ?? prior.playbackRate,
-                    isPlaying: fallbackRate.map { $0 > 0 } ?? prior.isPlaying,
+                    isPlaying: observedPlaying ?? prior.isPlaying,
                     trackIdentifier: liveTrackIdentifier ?? prior.trackIdentifier,
                     at: now
                 )
                 lastObserverStamp = 0
-                lastObserverReportedPlaying = fallbackRate.map { $0 > 0 }
+                lastObserverReportedPlaying = observedPlaying
+                if timelineMismatch {
+                    lastObserverSourceTimestamp = nil
+                    lastObserverTrackIdentifier = liveTrackIdentifier
+                    pendingPlaybackRequest = nil
+                }
                 sequence &+= 1
-            } else if (!observerIsFresh || !clock.hasAnchor), let fallbackPosition {
+            } else if (timelineMismatch || !observerIsFresh || !clock.hasAnchor),
+                      let fallbackPosition {
+                if timelineMismatch {
+                    writeDebugLog(
+                        "[SpicyRenderer] Reset timeline \(clock.trackIdentifier ?? "unknown") -> "
+                        + "\(liveTrackIdentifier ?? "unknown") at "
+                        + "\(String(format: "%.3f", fallbackPosition))s"
+                    )
+                }
                 clock.observe(
                     positionSeconds: max(0, fallbackPosition),
                     durationSeconds: max(0, fallbackDuration ?? 0),
                     playbackRate: fallbackRate ?? 1,
-                    isPlaying: fallbackRate.map { $0 > 0 },
+                    isPlaying: observedPlaying,
                     trackIdentifier: liveTrackIdentifier ?? clock.trackIdentifier,
                     at: now
                 )
+                if timelineMismatch {
+                    lastObserverSourceTimestamp = nil
+                    lastObserverTrackIdentifier = liveTrackIdentifier
+                    pendingPlaybackRequest = nil
+                }
                 sequence &+= 1
-            } else if observerIsFresh,
-                      lastObserverReportedPlaying == nil,
-                      let fallbackRate {
-                clock.reconcilePlaybackState(
-                    isPlaying: fallbackRate > 0,
-                    playbackRate: fallbackRate,
+            } else if timelineMismatch {
+                // The live track can change one event before Now Playing gains
+                // a position. Never carry the previous song's timeline into
+                // the new lyrics during that gap; the next observer/fallback
+                // payload will replace this conservative zero anchor.
+                let prior = clock.snapshot(at: now)
+                writeDebugLog(
+                    "[SpicyRenderer] Reset timeline \(prior.trackIdentifier ?? "unknown") -> "
+                    + "\(liveTrackIdentifier ?? "unknown") at 0.000s (position pending)"
+                )
+                clock.reanchor(
+                    positionSeconds: 0,
+                    durationSeconds: max(0, fallbackDuration ?? 0),
+                    playbackRate: fallbackRate ?? prior.playbackRate,
+                    isPlaying: observedPlaying ?? prior.isPlaying,
+                    trackIdentifier: liveTrackIdentifier,
                     at: now
                 )
+                lastObserverStamp = 0
+                lastObserverReportedPlaying = observedPlaying
+                lastObserverSourceTimestamp = nil
+                lastObserverTrackIdentifier = liveTrackIdentifier
+                pendingPlaybackRequest = nil
+                sequence &+= 1
+            } else if let observedPlaying {
+                let observedRate = fallbackRate ?? clock.snapshot(at: now).playbackRate
+                clock.reconcilePlaybackState(
+                    isPlaying: observedPlaying,
+                    playbackRate: observedRate,
+                    at: now
+                )
+                lastObserverReportedPlaying = clock.snapshot(at: now).isPlaying
             }
 
             let snapshot = clock.snapshot(at: now)
+            let visualPosition = snapshot.positionSeconds
+                + (snapshot.isPlaying ? Self.perceptualLeadSeconds : 0)
+            let boundedVisualPosition = snapshot.durationSeconds > 0
+                ? min(snapshot.durationSeconds, visualPosition)
+                : visualPosition
             return [
-                "positionMs": Int(snapshot.positionSeconds * 1000),
+                "positionMs": Int(max(0, boundedVisualPosition) * 1000),
                 "durationMs": Int(snapshot.durationSeconds * 1000),
                 "isPlaying": snapshot.isPlaying,
                 "playbackRate": snapshot.playbackRate,
@@ -118,9 +283,9 @@ final class SpicyLyricsPlaybackBridge {
         }
     }
 
-    /// Forces the next payload to use iOS's live Now Playing position. The app
-    /// and WKWebView can suspend independently, so their old monotonic anchors
-    /// cannot safely be extrapolated after returning to the foreground.
+    /// Reconciles the next payload after foregrounding. A newly delivered
+    /// Spotify observer remains preferred; otherwise iOS's live Now Playing
+    /// position replaces the suspended monotonic anchor.
     func foregroundPayload() -> [String: Any] {
         playbackPayload(forceNowPlayingReanchor: true)
     }
@@ -473,6 +638,7 @@ final class SpicyLyricsPlaybackBridge {
 
     private func recordRequestedPlayback(isPlaying: Bool) {
         let stamp = uptimeSeconds()
+        let wallStamp = Date().timeIntervalSince1970
         queue.async {
             let rate = self.clock.snapshot(at: stamp).playbackRate
             self.clock.requestedPlaybackState(
@@ -481,6 +647,11 @@ final class SpicyLyricsPlaybackBridge {
                 at: stamp
             )
             self.lastObserverReportedPlaying = isPlaying
+            self.pendingPlaybackRequest = (
+                isPlaying: isPlaying,
+                requestedAt: wallStamp,
+                expiresAt: wallStamp + 4
+            )
             self.sequence &+= 1
         }
     }
@@ -548,6 +719,23 @@ final class SpicyLyricsPlaybackBridge {
         guard let value = safeRead(object, key: key) else { return nil }
         if let number = value as? NSNumber { return number.boolValue }
         return value as? Bool
+    }
+
+    private func observedPlayingState(candidates: [AnyObject]) -> Bool? {
+        for candidate in candidates {
+            if let playing = safeBool(candidate, key: "isPlaying") { return playing }
+            if let paused = safeBool(candidate, key: "isPaused") { return !paused }
+        }
+        return nil
+    }
+
+    private func dateTimestamp(_ value: Any?) -> TimeInterval? {
+        if let date = value as? Date { return date.timeIntervalSince1970 }
+        if let date = value as? NSDate { return date.timeIntervalSince1970 }
+        guard let number = value as? NSNumber else { return nil }
+        let raw = number.doubleValue
+        guard raw.isFinite, raw > 0 else { return nil }
+        return raw > 10_000_000_000 ? raw / 1000 : raw
     }
 
     private func uptimeSeconds() -> Double {

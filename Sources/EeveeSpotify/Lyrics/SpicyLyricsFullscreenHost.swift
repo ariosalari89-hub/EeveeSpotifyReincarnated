@@ -43,6 +43,8 @@ final class SpicyLyricsFullscreenCoordinator {
 }
 
 final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+    private static let rendererProtocolVersion = 3
+
     private weak var controller: UIViewController?
     private var webView: WKWebView?
     private var playbackTimer: Timer?
@@ -165,6 +167,12 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         let requestID = body["requestId"] as? String ?? ""
         switch type {
         case "ready":
+            let protocolVersion = (body["rendererProtocolVersion"] as? NSNumber)?.intValue ?? -1
+            guard protocolVersion == Self.rendererProtocolVersion else {
+                fallBackToNative(reason: "renderer protocol mismatch: \(protocolVersion)")
+                return
+            }
+            writeDebugLog("[SpicyRenderer] ready protocol=\(protocolVersion)")
             rendererDidBecomeReady()
         case "close":
             sendCommandResult(requestID: requestID, accepted: true)
@@ -220,7 +228,6 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         readyWatchdog = nil
 
         emit(type: "bootstrap", payload: [
-            "rendererVersion": "1.0.0",
             "platform": "ios",
             "reduceMotion": UIAccessibility.isReduceMotionEnabled,
             "boldText": UIAccessibility.isBoldTextEnabled,
@@ -228,7 +235,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
             "preferences": rendererPreferences()
         ])
 
-        publishPlaybackAndTrack(forceTrack: true)
+        publishPlaybackAndTrack(forceTrack: true, forceClockReanchor: false)
         // Keep Spotify's already-present native surface in place until either
         // real lyrics arrive or a short watchdog decides a loading state is
         // preferable. This removes the empty/stale one-frame transition.
@@ -291,6 +298,10 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
                           !self.isDetached,
                           self.lyricsRequestID == requestID,
                           self.activeTrackID == trackID else { return }
+                    // Lyrics can finish several seconds after the view opened.
+                    // Re-anchor immediately before painting them so the first
+                    // active word/line never uses the clock from the loading frame.
+                    self.publishPlaybackAndTrack(forceTrack: false, forceClockReanchor: false)
                     self.emit(type: "lyrics", payload: [
                         "state": "ready",
                         "trackId": trackID,

@@ -58,6 +58,41 @@ struct SpicyLyricsPlaybackUnitNormalizer {
     }
 }
 
+/// Projects Spotify's timestamped state to the instant its callback reached
+/// the app. `positionAsOfTimestamp` is an anchor, not the current position.
+/// Ignoring the timestamp makes lyrics start late by however long the state sat
+/// in Spotify's observer pipeline, then lets a late callback undo a correct
+/// pause/resume or track-change re-anchor.
+struct SpicyLyricsPlaybackTimestampProjector {
+    static func positionSeconds(
+        anchorPositionSeconds: Double?,
+        fallbackPositionSeconds: Double,
+        sourceTimestamp: TimeInterval?,
+        callbackTimestamp: TimeInterval,
+        playbackRate: Double,
+        isPlaying: Bool?
+    ) -> Double {
+        let fallback = fallbackPositionSeconds.isFinite
+            ? max(0, fallbackPositionSeconds)
+            : 0
+        guard let anchorPositionSeconds,
+              anchorPositionSeconds.isFinite else { return fallback }
+
+        let anchor = max(0, anchorPositionSeconds)
+        guard isPlaying == true,
+              let sourceTimestamp,
+              sourceTimestamp.isFinite,
+              callbackTimestamp.isFinite else { return anchor }
+
+        let age = callbackTimestamp - sourceTimestamp
+        // A negative age is a clock mismatch. Very old state objects are also
+        // unsafe to extrapolate (foreground recovery uses Now Playing instead).
+        guard age >= 0, age <= 300 else { return fallback }
+        let rate = playbackRate.isFinite && playbackRate > 0 ? playbackRate : 1
+        return anchor + age * rate
+    }
+}
+
 struct SpicyLyricsPlaybackClockSnapshot {
     let positionSeconds: Double
     let durationSeconds: Double
@@ -253,7 +288,7 @@ struct SpicyLyricsPlaybackClock {
             at: uptimeSeconds
         )
         pendingPlaybackState = isPlaying
-        pendingPlaybackDeadlineSeconds = uptimeSeconds + 2
+        pendingPlaybackDeadlineSeconds = uptimeSeconds + 4
     }
 
     mutating func reconcilePlaybackState(

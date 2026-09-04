@@ -30,6 +30,46 @@ requireNear(
     "learned millisecond position scale was not retained"
 )
 
+// Spotify's positionAsOfTimestamp is an anchor. A state callback that arrives
+// late must be projected to callback time or every fresh lyrics view begins
+// behind the audio until another transport event happens to correct it.
+requireNear(
+    SpicyLyricsPlaybackTimestampProjector.positionSeconds(
+        anchorPositionSeconds: 12,
+        fallbackPositionSeconds: 12,
+        sourceTimestamp: 100,
+        callbackTimestamp: 102.5,
+        playbackRate: 1,
+        isPlaying: true
+    ),
+    14.5,
+    "late timestamped callback was not projected forward"
+)
+requireNear(
+    SpicyLyricsPlaybackTimestampProjector.positionSeconds(
+        anchorPositionSeconds: 12,
+        fallbackPositionSeconds: 12,
+        sourceTimestamp: 100,
+        callbackTimestamp: 102.5,
+        playbackRate: 1,
+        isPlaying: false
+    ),
+    12,
+    "paused timestamped state advanced"
+)
+requireNear(
+    SpicyLyricsPlaybackTimestampProjector.positionSeconds(
+        anchorPositionSeconds: 12,
+        fallbackPositionSeconds: 44,
+        sourceTimestamp: 100,
+        callbackTimestamp: 500,
+        playbackRate: 1,
+        isPlaying: true
+    ),
+    44,
+    "unreasonably old timestamp did not use the live fallback"
+)
+
 private func sample(
     _ clock: inout SpicyLyricsPlaybackClock,
     position: Double,

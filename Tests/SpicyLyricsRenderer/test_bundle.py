@@ -11,7 +11,10 @@ bridge = (ROOT / "Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackBridge.swift").
 repository = (ROOT / "Sources/EeveeSpotify/Lyrics/Repositories/SpicyLyricsRepository.swift").read_text(encoding="utf-8")
 c_header = (ROOT / "Sources/EeveeSpotifyC/include/Tweak.h").read_text(encoding="utf-8")
 
-assert 'src="renderer.js"' in index
+assert 'src="renderer.js?v=3"' in index
+assert 'href="styles.css?v=3"' in index
+assert "const RENDERER_PROTOCOL_VERSION = 3" in renderer
+assert 'post("ready", { rendererProtocolVersion: RENDERER_PROTOCOL_VERSION })' in renderer
 assert 'id="playback-offset"' in index
 assert "preview-fixture" not in index
 assert "SPICY_PREVIEW_LYRICS" not in renderer
@@ -37,9 +40,16 @@ assert 'let names = ["seekTo:", "scrubTo:", "seekToPosition:"]' in bridge
 assert "EeveeInvokeBoolArg" in bridge and "EeveeInvokeBoolArg" in c_header
 assert "capturedPlayer ?? statefulCandidate" not in bridge
 assert "requestedPlaybackState" in bridge
+assert "positionAsOfTimestamp" in bridge
+assert "SpicyLyricsPlaybackTimestampProjector.positionSeconds" in bridge
+assert "Ignored out-of-order player state" in bridge
 assert "setLocalPlaying(!state.playback.isPlaying)" in renderer
 assert "position -= state.preferences.playbackOffset" in renderer
 assert "rendererCacheLifetime: TimeInterval = 3 * 24 * 60 * 60" in repository
+assert "staticRendererCacheLifetime: TimeInterval = 30" in repository
+assert "Joined in-flight request" in repository
+assert "fetchBestRemotePayload" in repository
+assert "Upgraded \\(trackId) from \\(best.type)" in repository
 assert "SpicyLyricsServiceError.queued" in repository
 assert "2 * pow(1.5, Double(queuedAttempt))" in repository
 assert "forceRefresh: Bool = false" in repository

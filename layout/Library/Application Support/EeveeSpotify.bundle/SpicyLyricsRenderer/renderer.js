@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  const RENDERER_PROTOCOL_VERSION = 3;
+
   const $ = (selector) => document.querySelector(selector);
   const dom = {
     app: $("#app"),
@@ -683,6 +685,13 @@
     // If an observer races and still carries the old track, never apply that
     // position to the new song's lyrics.
     if (incomingTrackId && state.trackId && incomingTrackId !== state.trackId) return;
+    const incomingSequence = String(playback.sequence || "0");
+    try {
+      if (BigInt(incomingSequence) < BigInt(state.playback.sequence || "0")) return;
+    } catch (_) {
+      // Sequence values come from native UInt64 strings. If a future host uses
+      // another representation, accept it instead of stopping the clock.
+    }
     const incomingDuration = finite(playback.durationMs);
     state.playback = {
       positionMs: finite(playback.positionMs),
@@ -690,7 +699,7 @@
       isPlaying: Boolean(playback.isPlaying),
       playbackRate: Math.max(.1, finite(playback.playbackRate, 1)),
       receivedAt: performance.now(),
-      sequence: String(playback.sequence || "0")
+      sequence: incomingSequence
     };
     state.clockSuspended = false;
     dom.play.classList.toggle("is-playing", state.playback.isPlaying);
@@ -888,5 +897,5 @@
   applyPreferences();
   showLoading();
   requestAnimationFrame(animationFrame);
-  post("ready");
+  post("ready", { rendererProtocolVersion: RENDERER_PROTOCOL_VERSION });
 })();

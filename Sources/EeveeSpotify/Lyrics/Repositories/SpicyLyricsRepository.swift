@@ -8,11 +8,47 @@ private enum SpicyLyricsServiceError: Error {
     case transportStatus(Int, TimeInterval?)
 }
 
+private enum SpicyLyricsPayloadFidelity: Int, Codable {
+    case unavailable = 0
+    case staticLyrics = 1
+    case line = 2
+    case syllable = 3
+
+    init(type: String) {
+        switch type.lowercased() {
+        case "syllable": self = .syllable
+        case "line": self = .line
+        case "static": self = .staticLyrics
+        default: self = .unavailable
+        }
+    }
+}
+
 private struct SpicyLyricsRendererCacheEnvelope: Codable {
     let schemaVersion: Int
     let storedAt: TimeInterval
     let status: Int
     let payload: Data?
+    let lyricsType: String?
+    let entryCount: Int?
+}
+
+private struct SpicyLyricsResolvedPayload {
+    let rendererData: Data
+    let dto: LyricsDto
+    let type: String
+    let fidelity: SpicyLyricsPayloadFidelity
+    let entryCount: Int
+}
+
+private final class SpicyLyricsInFlightRequest {
+    let completion = DispatchGroup()
+    var payload: SpicyLyricsResolvedPayload?
+    var error: Error?
+
+    init() {
+        completion.enter()
+    }
 }
 
 // MARK: - SpicyLyricsRepository
@@ -69,14 +105,21 @@ class SpicyLyricsRepository: LyricsRepository {
     private let rendererCacheDirectory: URL?
     private let rendererCacheLock = NSLock()
     private var rendererPayloadCache: [String: SpicyLyricsRendererCacheEnvelope] = [:]
+    private let inFlightLock = NSLock()
+    private var inFlightRequests: [String: SpicyLyricsInFlightRequest] = [:]
 
     private static let apiUrl        = "https://api.spicylyrics.org"
     private static let authHeaderKey = "SpicyLyrics-WebAuth"
     // Keep this aligned with the current public Spicy Lyrics client. The API
     // replaces real lyrics with an update notice when this value is too old.
     private static let clientVersion = "6.3.12"
-    private static let rendererCacheSchemaVersion = 1
+    private static let rendererCacheSchemaVersion = 2
     private static let rendererCacheLifetime: TimeInterval = 3 * 24 * 60 * 60
+    // Static is a valid final result for some songs, but the service can also
+    // briefly return it while a timed AML payload is becoming available. Keep
+    // it only long enough to prevent an immediate duplicate attachment from
+    // repeating the bounded upgrade probes.
+    private static let staticRendererCacheLifetime: TimeInterval = 30
     private static let maximumMemoryCacheEntries = 32
 
     // MARK: - Lossless payload cache
@@ -89,9 +132,14 @@ class SpicyLyricsRepository: LyricsRepository {
     }
 
     private func isCurrent(_ envelope: SpicyLyricsRendererCacheEnvelope, now: TimeInterval) -> Bool {
-        envelope.schemaVersion == Self.rendererCacheSchemaVersion
+        let lifetime = envelope.lyricsType.map {
+            SpicyLyricsPayloadFidelity(type: $0) == .staticLyrics
+                ? Self.staticRendererCacheLifetime
+                : Self.rendererCacheLifetime
+        } ?? Self.rendererCacheLifetime
+        return envelope.schemaVersion == Self.rendererCacheSchemaVersion
             && envelope.storedAt <= now
-            && now - envelope.storedAt < Self.rendererCacheLifetime
+            && now - envelope.storedAt < lifetime
             && (envelope.status == 404 || (envelope.status == 200 && envelope.payload != nil))
     }
 
@@ -125,16 +173,43 @@ class SpicyLyricsRepository: LyricsRepository {
     private func storeRendererCache(
         status: Int,
         payload: Data?,
+        lyricsType: String? = nil,
+        entryCount: Int? = nil,
         for trackId: String
-    ) {
-        let envelope = SpicyLyricsRendererCacheEnvelope(
+    ) -> Data? {
+        let incoming = SpicyLyricsRendererCacheEnvelope(
             schemaVersion: Self.rendererCacheSchemaVersion,
             storedAt: Date().timeIntervalSince1970,
             status: status,
-            payload: payload
+            payload: payload,
+            lyricsType: lyricsType,
+            entryCount: entryCount
         )
 
         rendererCacheLock.lock()
+        var existing = rendererPayloadCache[trackId]
+        if existing == nil,
+           let url = rendererCacheURL(for: trackId),
+           let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode(SpicyLyricsRendererCacheEnvelope.self, from: data),
+           isCurrent(decoded, now: Date().timeIntervalSince1970) {
+            existing = decoded
+        }
+
+        let envelope: SpicyLyricsRendererCacheEnvelope
+        if let existing,
+           existing.status == 200,
+           incoming.status == 200,
+           isHigherQuality(existing, than: incoming) {
+            envelope = existing
+            writeDebugLog(
+                "[SpicyLyrics] Kept higher-quality \(existing.lyricsType ?? "unknown") cache "
+                + "instead of \(incoming.lyricsType ?? "unknown") for \(trackId)"
+            )
+        } else {
+            envelope = incoming
+        }
+
         rendererPayloadCache[trackId] = envelope
         if rendererPayloadCache.count > Self.maximumMemoryCacheEntries,
            let oldest = rendererPayloadCache.min(by: { $0.value.storedAt < $1.value.storedAt })?.key {
@@ -149,10 +224,34 @@ class SpicyLyricsRepository: LyricsRepository {
             }
         }
         rendererCacheLock.unlock()
+        return envelope.payload
     }
 
-    private func cacheRendererPayload(_ payload: Data, for trackId: String) {
-        storeRendererCache(status: 200, payload: payload, for: trackId)
+    private func isHigherQuality(
+        _ lhs: SpicyLyricsRendererCacheEnvelope,
+        than rhs: SpicyLyricsRendererCacheEnvelope
+    ) -> Bool {
+        let lhsFidelity = SpicyLyricsPayloadFidelity(type: lhs.lyricsType ?? "")
+        let rhsFidelity = SpicyLyricsPayloadFidelity(type: rhs.lyricsType ?? "")
+        if lhsFidelity != rhsFidelity { return lhsFidelity.rawValue > rhsFidelity.rawValue }
+        let lhsEntries = lhs.entryCount ?? 0
+        let rhsEntries = rhs.entryCount ?? 0
+        if lhsEntries != rhsEntries { return lhsEntries > rhsEntries }
+        return (lhs.payload?.count ?? 0) > (rhs.payload?.count ?? 0)
+    }
+
+    @discardableResult
+    private func cacheRendererPayload(
+        _ payload: SpicyLyricsResolvedPayload,
+        for trackId: String
+    ) -> Data? {
+        storeRendererCache(
+            status: 200,
+            payload: payload.rendererData,
+            lyricsType: payload.type,
+            entryCount: payload.entryCount,
+            for: trackId
+        )
     }
 
     private func cacheMissingLyrics(for trackId: String) {
@@ -206,7 +305,7 @@ class SpicyLyricsRepository: LyricsRepository {
 
     // MARK: - Network
 
-    private func performQuery(trackId: String) throws -> Data {
+    private func performNetworkQuery(trackId: String) throws -> Data {
         guard let url = URL(string: "\(SpicyLyricsRepository.apiUrl)/query") else {
             throw LyricsError.decodingError
         }
@@ -312,7 +411,10 @@ class SpicyLyricsRepository: LyricsRepository {
 
     // MARK: - Parse
 
-    private func parseLyricsData(_ data: Data, trackId: String) throws -> LyricsDto {
+    private func decodeNetworkResponse(
+        _ data: Data,
+        trackId: String
+    ) throws -> SpicyLyricsResolvedPayload {
         guard
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let queriesRaw = json["queries"] as? [[String: Any]]
@@ -377,8 +479,43 @@ class SpicyLyricsRepository: LyricsRepository {
             throw LyricsError.decodingError
         }
 
+        return try makeResolvedPayload(
+            packed,
+            rendererData: rendererData,
+            trackId: trackId,
+            origin: "network"
+        )
+    }
+
+    private func decodeRendererPayload(
+        _ data: Data,
+        trackId: String
+    ) throws -> SpicyLyricsResolvedPayload {
+        let raw: Any
+        do {
+            raw = try JSONSerialization.jsonObject(with: data, options: [])
+        } catch {
+            writeDebugLog("[SpicyLyrics] Invalid cached renderer JSON for \(trackId): \(error)")
+            throw LyricsError.decodingError
+        }
+
+        let packed = try rendererValue(from: raw, depth: 0)
+        return try makeResolvedPayload(
+            packed,
+            rendererData: data,
+            trackId: trackId,
+            origin: "cache"
+        )
+    }
+
+    private func makeResolvedPayload(
+        _ packed: SLObjPackValue,
+        rendererData: Data,
+        trackId: String,
+        origin: String
+    ) throws -> SpicyLyricsResolvedPayload {
         guard let type = packed["Type"]?.stringValue else {
-            writeDebugLog("[SpicyLyrics] Missing Type for \(trackId)")
+            writeDebugLog("[SpicyLyrics] Missing Type in \(origin) payload for \(trackId)")
             throw LyricsError.decodingError
         }
 
@@ -387,20 +524,56 @@ class SpicyLyricsRepository: LyricsRepository {
             ?? 0
         let source = packed["source"]?.stringValue ?? "unknown"
         writeDebugLog(
-            "[SpicyLyrics] Lyrics type=\(type), source=\(source), entries=\(contentCount) for \(trackId)"
+            "[SpicyLyrics] Lyrics type=\(type), source=\(source), entries=\(contentCount), "
+            + "origin=\(origin) for \(trackId)"
         )
 
         let dto: LyricsDto
         switch type {
         case "Syllable": dto = parseSyllableLyrics(packed)
-        case "Line":     dto = parseLineLyrics(packed)
-        case "Static":   dto = parseStaticLyrics(packed)
+        case "Line": dto = parseLineLyrics(packed)
+        case "Static": dto = parseStaticLyrics(packed)
         default:
             writeDebugLog("[SpicyLyrics] Unknown type '\(type)' for \(trackId)")
             throw LyricsError.decodingError
         }
-        cacheRendererPayload(rendererData, for: trackId)
-        return dto
+
+        return SpicyLyricsResolvedPayload(
+            rendererData: rendererData,
+            dto: dto,
+            type: type,
+            fidelity: SpicyLyricsPayloadFidelity(type: type),
+            entryCount: contentCount
+        )
+    }
+
+    private func rendererValue(from raw: Any, depth: Int) throws -> SLObjPackValue {
+        guard depth <= 128 else { throw LyricsError.decodingError }
+        switch raw {
+        case is NSNull:
+            return .null
+        case let value as Bool:
+            return .bool(value)
+        case let value as NSNumber:
+            let number = value.doubleValue
+            guard number.isFinite else { throw LyricsError.decodingError }
+            return .number(number)
+        case let value as String:
+            return .string(value)
+        case let values as [Any]:
+            guard values.count <= 100_000 else { throw LyricsError.decodingError }
+            return .array(try values.map { try rendererValue(from: $0, depth: depth + 1) })
+        case let values as [String: Any]:
+            guard values.count <= 10_000 else { throw LyricsError.decodingError }
+            var result = [String: SLObjPackValue]()
+            result.reserveCapacity(values.count)
+            for (key, value) in values {
+                result[key] = try rendererValue(from: value, depth: depth + 1)
+            }
+            return .object(result)
+        default:
+            throw LyricsError.decodingError
+        }
     }
 
     // MARK: Syllable lyrics
@@ -498,53 +671,169 @@ class SpicyLyricsRepository: LyricsRepository {
 
     // MARK: - LyricsRepository
 
-    func getLyrics(_ query: LyricsSearchQuery, options: LyricsOptions) throws -> LyricsDto {
-        let trackId = query.spotifyTrackId
-        guard !trackId.isEmpty else {
-            writeDebugLog("[SpicyLyrics] Empty track ID")
-            throw LyricsError.noSuchSong
-        }
-        do {
-            let response = try performQuery(trackId: trackId)
-            return try parseLyricsData(response, trackId: trackId)
-        } catch let error as LyricsError {
-            throw error
-        } catch {
-            writeDebugLog("[SpicyLyrics] Native lyrics fetch failed for \(trackId): \(error)")
-            throw LyricsError.unknownError
-        }
-    }
-
-    /// Returns the lossless Spicy Lyrics payload used by the local full-screen
-    /// renderer. Payloads and 404s use the same three-day lifetime as desktop
-    /// Spicy Lyrics. A queued (inner HTTP 503) response is retried with desktop's
-    /// 2s × 1.5 backoff, capped at 10s, until this request is superseded.
-    /// This intentionally contains no Spotify access token.
-    func rendererPayloadData(
+    private func resolvedPayload(
         for trackId: String,
-        forceRefresh: Bool = false,
-        shouldContinue: () -> Bool = { true }
-    ) throws -> Data {
-        guard !trackId.isEmpty else { throw LyricsError.noSuchSong }
-
+        forceRefresh: Bool,
+        shouldContinue: () -> Bool
+    ) throws -> SpicyLyricsResolvedPayload {
         if forceRefresh {
             removeRendererCache(for: trackId)
         } else if let cached = try cachedRendererPayload(for: trackId) {
-            writeDebugLog("[SpicyLyrics] Lossless cache hit for \(trackId)")
-            return cached
+            do {
+                let payload = try decodeRendererPayload(cached, trackId: trackId)
+                writeDebugLog(
+                    "[SpicyLyrics] Lossless \(payload.type) cache hit for \(trackId)"
+                )
+                return payload
+            } catch {
+                writeDebugLog("[SpicyLyrics] Discarding unreadable cache for \(trackId)")
+                removeRendererCache(for: trackId)
+            }
         }
 
+        let request: SpicyLyricsInFlightRequest
+        let isLeader: Bool
+        inFlightLock.lock()
+        if let current = inFlightRequests[trackId] {
+            request = current
+            isLeader = false
+        } else {
+            request = SpicyLyricsInFlightRequest()
+            inFlightRequests[trackId] = request
+            isLeader = true
+        }
+        inFlightLock.unlock()
+
+        if !isLeader {
+            writeDebugLog("[SpicyLyrics] Joined in-flight request for \(trackId)")
+            while request.completion.wait(timeout: .now() + .milliseconds(100)) == .timedOut {
+                guard shouldContinue() else { throw SpicyLyricsServiceError.cancelled }
+            }
+            inFlightLock.lock()
+            let payload = request.payload
+            let error = request.error
+            inFlightLock.unlock()
+            if let payload { return payload }
+            throw error ?? LyricsError.unknownError
+        }
+
+        do {
+            let fetched = try fetchBestRemotePayload(
+                trackId: trackId,
+                shouldContinue: shouldContinue
+            )
+            var selected = fetched
+            if let selectedData = cacheRendererPayload(fetched, for: trackId),
+               selectedData != fetched.rendererData {
+                do {
+                    selected = try decodeRendererPayload(selectedData, trackId: trackId)
+                } catch {
+                    removeRendererCache(for: trackId)
+                    _ = cacheRendererPayload(fetched, for: trackId)
+                    selected = fetched
+                }
+            }
+            finishInFlight(request, trackId: trackId, payload: selected, error: nil)
+            return selected
+        } catch {
+            if let lyricsError = error as? LyricsError,
+               case .noSuchSong = lyricsError {
+                cacheMissingLyrics(for: trackId)
+            }
+            finishInFlight(request, trackId: trackId, payload: nil, error: error)
+            throw error
+        }
+    }
+
+    private func finishInFlight(
+        _ request: SpicyLyricsInFlightRequest,
+        trackId: String,
+        payload: SpicyLyricsResolvedPayload?,
+        error: Error?
+    ) {
+        inFlightLock.lock()
+        request.payload = payload
+        request.error = error
+        if let current = inFlightRequests[trackId], current === request {
+            inFlightRequests.removeValue(forKey: trackId)
+        }
+        inFlightLock.unlock()
+        request.completion.leave()
+    }
+
+    private func fetchBestRemotePayload(
+        trackId: String,
+        shouldContinue: () -> Bool
+    ) throws -> SpicyLyricsResolvedPayload {
+        var best = try fetchRemotePayload(
+            trackId: trackId,
+            shouldContinue: shouldContinue
+        )
+
+        // The service can return Static, Line and Syllable payloads for the
+        // same track in adjacent requests. That race was visible in the device
+        // log: the lower-fidelity response sometimes landed last and made a
+        // timed song look completely inert. Probe every non-syllable result on
+        // a short bounded schedule, then retain the best response. This also
+        // lets a transient Line result upgrade to the word-timed payload used
+        // by desktop Spicy Lyrics.
+        guard best.fidelity != .syllable else { return best }
+        let upgradeDelays: [TimeInterval] = [0.16, 0.38, 0.72]
+        for (offset, delay) in upgradeDelays.enumerated() {
+            let attempt = offset + 1
+            try waitForRetry(delay, shouldContinue: shouldContinue)
+            do {
+                let candidate = try fetchRemotePayload(
+                    trackId: trackId,
+                    shouldContinue: shouldContinue
+                )
+                if isHigherQuality(candidate, than: best) {
+                    writeDebugLog(
+                        "[SpicyLyrics] Upgraded \(trackId) from \(best.type) to \(candidate.type) "
+                        + "on probe \(attempt)"
+                    )
+                    best = candidate
+                } else {
+                    writeDebugLog(
+                        "[SpicyLyrics] Timing upgrade probe \(attempt) kept \(best.type) for \(trackId)"
+                    )
+                }
+                if best.fidelity == .syllable { break }
+            } catch SpicyLyricsServiceError.cancelled {
+                throw SpicyLyricsServiceError.cancelled
+            } catch {
+                writeDebugLog(
+                    "[SpicyLyrics] Timing upgrade probe \(attempt) failed for \(trackId): \(error)"
+                )
+                break
+            }
+        }
+        writeDebugLog(
+            "[SpicyLyrics] Selected \(best.type), entries=\(best.entryCount) for \(trackId)"
+        )
+        return best
+    }
+
+    private func isHigherQuality(
+        _ lhs: SpicyLyricsResolvedPayload,
+        than rhs: SpicyLyricsResolvedPayload
+    ) -> Bool {
+        if lhs.fidelity != rhs.fidelity { return lhs.fidelity.rawValue > rhs.fidelity.rawValue }
+        if lhs.entryCount != rhs.entryCount { return lhs.entryCount > rhs.entryCount }
+        return lhs.rendererData.count > rhs.rendererData.count
+    }
+
+    private func fetchRemotePayload(
+        trackId: String,
+        shouldContinue: () -> Bool
+    ) throws -> SpicyLyricsResolvedPayload {
         var queuedAttempt = 0
         var authenticationRetries = 0
 
         while shouldContinue() {
             do {
-                let response = try performQuery(trackId: trackId)
-                _ = try parseLyricsData(response, trackId: trackId)
-                guard let loaded = try cachedRendererPayload(for: trackId) else {
-                    throw LyricsError.decodingError
-                }
-                return loaded
+                let response = try performNetworkQuery(trackId: trackId)
+                return try decodeNetworkResponse(response, trackId: trackId)
             } catch SpicyLyricsServiceError.queued {
                 let delay = min(10, 2 * pow(1.5, Double(queuedAttempt)))
                 queuedAttempt += 1
@@ -558,20 +847,50 @@ class SpicyLyricsRepository: LyricsRepository {
                 spotifyAccessToken = nil
                 writeDebugLog("[SpicyLyrics] Waiting once for a fresh token for \(trackId)")
                 try waitForRetry(0.5, shouldContinue: shouldContinue)
-            } catch LyricsError.noSuchSong {
-                cacheMissingLyrics(for: trackId)
-                throw LyricsError.noSuchSong
-            } catch let error as LyricsError {
-                throw error
-            } catch SpicyLyricsServiceError.cancelled {
-                throw SpicyLyricsServiceError.cancelled
-            } catch {
-                writeDebugLog("[SpicyLyrics] Lossless fetch failed for \(trackId): \(error)")
-                throw LyricsError.unknownError
             }
         }
 
         throw SpicyLyricsServiceError.cancelled
+    }
+
+    func getLyrics(_ query: LyricsSearchQuery, options: LyricsOptions) throws -> LyricsDto {
+        let trackId = query.spotifyTrackId
+        guard !trackId.isEmpty else {
+            writeDebugLog("[SpicyLyrics] Empty track ID")
+            throw LyricsError.noSuchSong
+        }
+        do {
+            return try resolvedPayload(
+                for: trackId,
+                forceRefresh: false,
+                shouldContinue: { true }
+            ).dto
+        } catch let error as LyricsError {
+            throw error
+        } catch {
+            writeDebugLog("[SpicyLyrics] Native lyrics fetch failed for \(trackId): \(error)")
+            throw LyricsError.unknownError
+        }
+    }
+
+    /// Returns the lossless Spicy Lyrics payload used by the local full-screen
+    /// renderer. Timed payloads and 404s use the desktop three-day lifetime;
+    /// Static payloads expire quickly because a timed AML response may become
+    /// available moments later. A queued (inner HTTP 503) response is retried
+    /// with desktop's 2s × 1.5 backoff, capped at 10s, until superseded.
+    /// This intentionally contains no Spotify access token.
+    func rendererPayloadData(
+        for trackId: String,
+        forceRefresh: Bool = false,
+        shouldContinue: () -> Bool = { true }
+    ) throws -> Data {
+        guard !trackId.isEmpty else { throw LyricsError.noSuchSong }
+
+        return try resolvedPayload(
+            for: trackId,
+            forceRefresh: forceRefresh,
+            shouldContinue: shouldContinue
+        ).rendererData
     }
 
     private func waitForRetry(
