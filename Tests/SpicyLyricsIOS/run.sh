@@ -1,0 +1,47 @@
+#!/bin/bash
+set -euo pipefail
+QA_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/spicy-ios-qa.XXXXXX")
+QA_APP="$QA_DIR/SpicyLyricsQA.app"
+mkdir -p "$QA_APP"
+SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+ARCH=$(uname -m)
+xcrun swiftc -swift-version 5 -target "$ARCH-apple-ios17.0-simulator" -sdk "$SDK" \
+  -framework UIKit -framework WebKit \
+  Sources/EeveeSpotify/Lyrics/SpicyLyricsFullscreenHost.swift \
+  Sources/EeveeSpotify/Lyrics/SpicyLyricsFullscreenCoordinator.swift \
+  Tests/SpicyLyricsIOS/main.swift -o "$QA_APP/SpicyLyricsQA"
+cp -R "layout/Library/Application Support/EeveeSpotify.bundle/SpicyLyricsRenderer" "$QA_APP/"
+python3 - "$QA_APP/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as output:
+    plistlib.dump({
+        "CFBundleIdentifier": "local.spicylyrics.qa", "CFBundleExecutable": "SpicyLyricsQA",
+        "CFBundleName": "Spicy Lyrics QA", "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1", "CFBundleShortVersionString": "1.0",
+        "MinimumOSVersion": "17.0", "UILaunchScreen": {},
+        "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False},
+        "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]
+    }, output)
+PY
+codesign --force --sign - "$QA_APP"
+RUNTIME=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS")]; print(r[-1]["identifier"] if r else "")')
+[ -n "$RUNTIME" ] || { echo "No iOS simulator runtime available" >&2; exit 1; }
+DEVICE=$(xcrun simctl create SpicyLyricsQA com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$RUNTIME")
+trap 'xcrun simctl shutdown "$DEVICE" >/dev/null 2>&1 || true; xcrun simctl delete "$DEVICE" >/dev/null 2>&1 || true' EXIT
+xcrun simctl boot "$DEVICE"
+xcrun simctl bootstatus "$DEVICE" -b
+xcrun simctl install "$DEVICE" "$QA_APP"
+xcrun simctl launch "$DEVICE" local.spicylyrics.qa
+CONTAINER=$(xcrun simctl get_app_container "$DEVICE" local.spicylyrics.qa data)
+for iteration in {1..90}; do
+  if [ -f "$CONTAINER/Documents/qa-result.txt" ]; then
+    cp "$CONTAINER/Documents/qa-result.txt" "$RUNNER_TEMP/spicy-ios-qa-result.txt"
+    cat "$RUNNER_TEMP/spicy-ios-qa-result.txt"
+    grep -q '^PASS$' "$RUNNER_TEMP/spicy-ios-qa-result.txt"
+    exit
+  fi
+  sleep 1
+done
+xcrun simctl spawn "$DEVICE" log show --last 3m --predicate 'process == "SpicyLyricsQA"' --style compact
+echo "iOS QA timed out" >&2
+exit 1

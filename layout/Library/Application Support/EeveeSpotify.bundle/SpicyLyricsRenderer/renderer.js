@@ -88,6 +88,9 @@
   }
 
   function post(type, payload = {}, button = null, timeoutMs = 3000) {
+    if (button && type !== "seek" && [...state.pendingCommands.values()].some(
+      (pending) => pending.button === button
+    )) return "";
     const requestId = makeRequestId();
     const generation = String(state.session?.generation || "");
     if (button) {
@@ -432,11 +435,15 @@
     dom.previous.disabled = !session.canGoPrevious;
     dom.next.disabled = !session.canGoNext;
     dom.shuffle.disabled = !session.canToggleShuffle;
-    dom.shuffle.classList.toggle("active", session.shuffleEnabled);
-    dom.shuffle.setAttribute("aria-pressed", String(session.shuffleEnabled));
+    dom.shuffle.dataset.mode = session.shuffleMode;
+    dom.shuffle.classList.toggle("active", session.shuffleMode !== "off");
+    dom.shuffle.setAttribute("aria-pressed", String(session.shuffleMode !== "off"));
     dom.shuffle.setAttribute(
       "aria-label",
-      session.shuffleEnabled ? "Turn shuffle off" : "Turn shuffle on"
+      session.shuffleMode === "smart" ? "Smart Shuffle on. Change shuffle mode"
+        : (session.shuffleMode === "shuffle"
+          ? (session.smartShuffleAvailable ? "Shuffle on. Change shuffle mode" : "Turn shuffle off")
+          : "Turn shuffle on")
     );
     const repeatAvailable = session.repeatMode === "off"
       ? session.canToggleRepeatContext
@@ -545,7 +552,7 @@
         model.groupTokens(line.tokens).forEach((group) => {
           const word = document.createElement("span");
           word.className = "word-group";
-          if (group.spaceBefore) word.classList.add("space-before");
+          if (group.spaceBefore) lineText.appendChild(document.createTextNode(" "));
           group.tokens.forEach((token) => {
             const tokenElement = document.createElement("span");
             tokenElement.className = "token";
@@ -593,7 +600,22 @@
       firstStartMs: timedLines[0]?.start ?? -1,
       lastEndMs: timedLines[timedLines.length - 1]?.end ?? -1
     });
-    requestAnimationFrame(() => updateLyrics(positionNow(), true));
+    requestAnimationFrame(() => {
+      fitWordGroups();
+      updateLyrics(positionNow(), true);
+    });
+  }
+
+  function fitWordGroups() {
+    // Keep ordinary joined syllables together. Only an over-wide group may
+    // wrap at its real token boundaries; a single huge token can wrap within
+    // its own box without changing its timestamps or text.
+    const groups = [...dom.lyrics.querySelectorAll(".word-group")];
+    groups.forEach((group) => group.classList.remove("breakable"));
+    const oversized = groups.filter((group) => (
+      group.offsetWidth > group.parentElement.clientWidth - 1
+    ));
+    oversized.forEach((group) => group.classList.add("breakable"));
   }
 
   function updateLyrics(rawPosition, forceScroll = false) {
@@ -696,6 +718,8 @@
     ambient.setEnabled(state.preferences.dynamicBackground && !reduceMotion());
     if (rerender && state.rawLyrics) {
       renderLyrics(state.rawLyrics, state.lyricsTrackId, state.lyricsGeneration);
+    } else if (state.lines.length) {
+      requestAnimationFrame(fitWordGroups);
     }
     savePreferences();
   }
@@ -785,7 +809,10 @@
   };
 
   dom.close.addEventListener("click", () => post("close", {}, dom.close));
-  dom.play.addEventListener("click", () => post("togglePlay", {}, dom.play));
+  dom.play.addEventListener("click", () => {
+    const playing = state.session?.isPlaying && !state.session?.isPaused;
+    post(playing ? "pause" : "play", {}, dom.play);
+  });
   dom.shuffle.addEventListener("click", () => post("toggleShuffle", {}, dom.shuffle));
   dom.previous.addEventListener("click", () => post("previous", {}, dom.previous, 8000));
   dom.next.addEventListener("click", () => post("next", {}, dom.next, 8000));
@@ -902,7 +929,10 @@
   let resizeFrame = 0;
   addEventListener("resize", () => {
     cancelAnimationFrame(resizeFrame);
-    resizeFrame = requestAnimationFrame(() => updateLyrics(positionNow(), true));
+    resizeFrame = requestAnimationFrame(() => {
+      fitWordGroups();
+      updateLyrics(positionNow(), true);
+    });
   }, { passive: true });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {

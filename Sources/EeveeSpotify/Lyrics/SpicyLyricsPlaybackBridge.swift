@@ -96,7 +96,7 @@ final class SpicyLyricsPlaybackBridge {
 
         let track = trackMetadata(for: identity.trackIdentifier, duration: snapshot.durationSeconds)
         let restrictions = snapshot.restrictions
-        return [
+        var payload: [String: Any] = [
             "generation": String(snapshot.generation),
             "sequence": String(snapshot.sequence),
             "trackId": identity.trackIdentifier,
@@ -123,6 +123,11 @@ final class SpicyLyricsPlaybackBridge {
             "canToggleRepeatTrack": !restrictions.disallowTogglingRepeatTrack,
             "track": track
         ]
+        let controls = EeveeSpicyReadControls(player.flatMap { stateObject(from: $0) })
+        for (key, value) in controls { payload[key] = value }
+        let smart = (controls["smartShuffleEnabled"] as? NSNumber)?.boolValue ?? false
+        payload["shuffleMode"] = smart ? "smart" : (snapshot.shuffleEnabled ? "shuffle" : "off")
+        return payload
     }
 
     func suspendPlaybackClock() {
@@ -146,11 +151,21 @@ final class SpicyLyricsPlaybackBridge {
             return false
         }
 
+        if command != "seek" {
+            let nativeResult = EeveeSpicyPerformControl(command, stateObject(from: player))
+            if nativeResult >= 0 {
+                let dispatched = nativeResult == 1
+                writeDebugLog("[SpicyControls] command=\(command) native dispatched=\(dispatched)")
+                if dispatched { scheduleObservationBurst() }
+                return dispatched
+            }
+        }
+
         let accepted: Bool
         switch command {
         case "togglePlay":
             let paused = (payload["isPaused"] as? Bool) ?? true
-            accepted = setPlaying(!paused, player: player, payload: payload)
+            accepted = setPlaying(paused, player: player, payload: payload)
         case "play":
             accepted = setPlaying(true, player: player, payload: payload)
         case "pause":
@@ -171,10 +186,10 @@ final class SpicyLyricsPlaybackBridge {
         case "toggleShuffle":
             let allowed = (payload["canToggleShuffle"] as? Bool) ?? false
             let current = (payload["shuffleEnabled"] as? Bool) ?? false
-            accepted = allowed && invokeObject(
+            accepted = allowed && invokeBoolean(
                 player,
                 selector: ABI.shuffle,
-                value: NSNumber(value: !current)
+                value: !current
             )
         case "cycleRepeat":
             accepted = cycleRepeat(player: player, payload: payload)
@@ -213,24 +228,24 @@ final class SpicyLyricsPlaybackBridge {
         switch current {
         case .off:
             guard canContext else { return false }
-            return invokeObject(
+            return invokeBoolean(
                 player,
                 selector: ABI.repeatContext,
-                value: NSNumber(value: true)
+                value: true
             )
         case .context:
             if canTrack {
-                return invokeObject(
+                return invokeBoolean(
                     player,
                     selector: ABI.repeatTrack,
-                    value: NSNumber(value: true)
+                    value: true
                 )
             }
             guard canContext else { return false }
-            return invokeObject(
+            return invokeBoolean(
                 player,
                 selector: ABI.repeatContext,
-                value: NSNumber(value: false)
+                value: false
             )
         case .track:
             // Repeat-track is layered on top of repeat-context in the verified
@@ -238,17 +253,17 @@ final class SpicyLyricsPlaybackBridge {
             // also permits context changes, continue to off; otherwise retain
             // the valid context mode instead of trapping the control.
             guard canTrack else { return false }
-            let trackAccepted = invokeObject(
+            let trackAccepted = invokeBoolean(
                 player,
                 selector: ABI.repeatTrack,
-                value: NSNumber(value: false)
+                value: false
             )
             guard trackAccepted else { return false }
             guard canContext else { return true }
-            return invokeObject(
+            return invokeBoolean(
                 player,
                 selector: ABI.repeatContext,
-                value: NSNumber(value: false)
+                value: false
             )
         }
     }
@@ -359,6 +374,10 @@ final class SpicyLyricsPlaybackBridge {
         }
         EeveeSBInvokeSeekDouble(target, selector, value)
         return true
+    }
+
+    private func invokeBoolean(_ target: AnyObject, selector: Selector, value: Bool) -> Bool {
+        EeveeSpicySetBooleanOption(target, selector, value)
     }
 
     private func methodArgumentType(_ target: AnyObject, selector: Selector) -> String? {

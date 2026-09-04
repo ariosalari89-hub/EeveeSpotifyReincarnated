@@ -20,6 +20,8 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #080808; color: var(--text); }
+#app { min-width: 0; max-width: 100%; grid-template-columns: minmax(0, 1fr); }
+.stage, .lyrics-pane, #lyrics-scroller, #lyrics { min-width: 0; max-width: 100%; }
 body { -webkit-font-smoothing: antialiased; touch-action: manipulation; }
 button, input { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
@@ -93,11 +95,17 @@ button { -webkit-tap-highlight-color: transparent; }
 .media-copy #album { color: rgba(255,255,255,.42); margin-top: 4px; font-size: clamp(13px, 1.25vw, 16px); }
 
 .lyrics-pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; -webkit-mask-image: linear-gradient(transparent 0, #000 9%, #000 88%, transparent 100%); mask-image: linear-gradient(transparent 0, #000 9%, #000 88%, transparent 100%); }
-#lyrics-scroller { height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 41% 4px 44%; outline: none; scroll-behavior: smooth; }
+#lyrics-scroller { width: 100%; height: 100%; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 41% 4px 44%; outline: none; scroll-behavior: smooth; }
 #lyrics-scroller::-webkit-scrollbar { display: none; }
 #lyrics { display: flex; flex-direction: column; gap: clamp(17px, 2.5vh, 30px); }
 .lyric-line {
   position: relative;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
   min-height: 44px;
   border: 0;
   padding: 3px 2px;
@@ -123,12 +131,13 @@ button { -webkit-tap-highlight-color: transparent; }
 .lyric-line.static { color: rgba(255,255,255,.86); opacity: .82; cursor: default; transform: none; }
 .lyric-line.active { opacity: 1; transform: scale(1) translateY(-1px); filter: drop-shadow(0 5px 16px rgba(0,0,0,.18)); }
 .lyric-line:active { transform: scale(.975); }
-.line-text { display: block; transition: color .18s ease, text-shadow .18s ease; }
-.lyric-line.line-timed.active { color: var(--text); -webkit-text-fill-color: var(--text); transform: scale(1.05) translateY(-1px); }
+.line-text { display: block; min-width: 0; max-width: 100%; transition: color .18s ease, text-shadow .18s ease; }
+.lyric-line.line-timed.active { color: var(--text); -webkit-text-fill-color: var(--text); transform: scale(1) translateY(-1px); }
 .lyric-line.line-timed.active > .line-text { color: var(--text); -webkit-text-fill-color: var(--text); text-shadow: 0 0 10px rgba(255,255,255,.14); }
 .word-group { display: inline-flex; white-space: nowrap; align-items: baseline; }
-.word-group.space-before { margin-inline-start: .255em; }
-.token { position: relative; display: inline-block; color: rgba(255,255,255,.25); --fill: 0%; --pulse: 0; transform: translateY(calc(var(--pulse) * -2px)) scale(calc(1 + var(--pulse) * .035)); transform-origin: center bottom; transition: transform .1s linear; }
+.word-group.breakable { display: inline; white-space: normal; }
+.word-group.breakable .token { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.token { position: relative; display: inline-block; color: rgba(255,255,255,.25); --fill: 0%; --pulse: 0; transform: translateY(calc(var(--pulse) * -2px)); transform-origin: center bottom; transition: transform .1s linear; }
 .token::after { content: attr(data-text); position: absolute; inset: 0; width: 100%; color: #fff; clip-path: inset(0 calc(100% - var(--fill)) 0 0); text-shadow: 0 0 calc(2px + var(--pulse) * 13px) rgba(255,255,255,calc(.1 + var(--pulse) * .34)); }
 .rtl .token::after { clip-path: inset(0 0 0 calc(100% - var(--fill))); }
 .line-translation { display: block; margin-top: .38em; font-size: .46em; line-height: 1.22; letter-spacing: -.012em; color: rgba(255,255,255,.62); font-weight: 630; }
@@ -167,6 +176,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .transport-button svg { width: 23px; height: 23px; fill: currentColor; }
 .transport-button.state-button { position: relative; color: rgba(255,255,255,.72); }
 .transport-button.state-button.active { color: #1ed760; opacity: 1; }
+.smart-shuffle-mark { display: none; position: absolute; top: 3px; right: 3px; font-size: 13px; line-height: 1; }
+#shuffle-button[data-mode="smart"] .smart-shuffle-mark { display: block; }
 .transport-button:disabled { opacity: .28; pointer-events: none; }
 .repeat-one { display: none; position: absolute; inset: 0; place-items: center; padding-top: 1px; font-size: 8px; font-weight: 900; color: currentColor; }
 #repeat-button[data-mode="track"] .repeat-one { display: grid; }

@@ -19,29 +19,6 @@ private final class SpicyLyricsRequestCancellation {
     }
 }
 
-final class SpicyLyricsFullscreenCoordinator {
-    static let shared = SpicyLyricsFullscreenCoordinator()
-
-    private let hosts = NSMapTable<UIViewController, SpicyLyricsFullscreenHost>(
-        keyOptions: .weakMemory,
-        valueOptions: .strongMemory
-    )
-
-    private init() {}
-
-    func attach(to controller: UIViewController) {
-        guard hosts.object(forKey: controller) == nil else { return }
-        let host = SpicyLyricsFullscreenHost(controller: controller)
-        hosts.setObject(host, forKey: controller)
-        if !host.attach() { hosts.removeObject(forKey: controller) }
-    }
-
-    func detach(from controller: UIViewController) {
-        hosts.object(forKey: controller)?.detach()
-        hosts.removeObject(forKey: controller)
-    }
-}
-
 /// Owns one full-screen renderer and the complete native/WebKit protocol.
 /// Track metadata and playback are deliberately sent as one `session` message;
 /// a WebKit run-loop turn can therefore never combine one song's artwork or
@@ -73,8 +50,13 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private var webContentRestartCount = 0
     private var isRecoveringRenderer = false
 
-    init(controller: UIViewController) {
+    private let onClose: (() -> Void)?
+    private let onReveal: (() -> Void)?
+
+    init(controller: UIViewController, onClose: (() -> Void)? = nil, onReveal: (() -> Void)? = nil) {
         self.controller = controller
+        self.onClose = onClose
+        self.onReveal = onReveal
         super.init()
     }
 
@@ -557,6 +539,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     }
 
     private func close() {
+        if let onClose { onClose(); return }
         guard let controller else { return }
         if controller.presentingViewController != nil {
             controller.dismiss(animated: true)
@@ -569,6 +552,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
 
     private func revealRenderer() {
         guard let controller, let webView, webView.alpha < 1 else { return }
+        onReveal?()
         controller.view.bringSubviewToFront(webView)
         guard controller.viewIfLoaded?.window != nil,
               !UIAccessibility.isReduceMotionEnabled else {
@@ -616,6 +600,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private func fallBackToNative(reason: String) {
         writeDebugLog("[SpicyRenderer] native fallback: \(reason)")
         detach()
+        onClose?()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

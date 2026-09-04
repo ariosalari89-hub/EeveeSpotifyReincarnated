@@ -4,8 +4,8 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $rendererPath = Join-Path $repoRoot "layout\Library\Application Support\EeveeSpotify.bundle\SpicyLyricsRenderer\index.html"
 $rendererUrl = ([Uri](Resolve-Path $rendererPath).Path).AbsoluteUri
 $fixturePath = Join-Path $PSScriptRoot "browser-fixture.js"
-$artifactDirectory = Join-Path $repoRoot "artifacts\spicy-v5-qa\automated"
-$session = "spicy-v5-automated-$PID"
+$artifactDirectory = Join-Path $repoRoot "artifacts\spicy-v5.2-qa\automated"
+$session = "spicy-v5.2-automated-$PID"
 
 New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
 
@@ -64,6 +64,31 @@ try {
 })()
 '@
     Require-Qa "pause/resume clock" $pauseResume
+
+    $buttonDispatch = Invoke-QaEval @'
+(async () => {
+  const play = document.querySelector("#play-button");
+  window.SpicyQA.observe({positionMs:5000,isPlaying:true,isPaused:false,isAdvancing:true});
+  window.SpicyQA.clearMessages();
+  play.click();
+  play.click();
+  const requests = window.SpicyQA.messages.filter(m => ["play","pause","togglePlay"].includes(m.type));
+  const pause = requests[0];
+  window.SpicyQA.send("commandResult", {requestId:pause?.requestId,accepted:true});
+  window.SpicyQA.observe({positionMs:5200,isPlaying:false,isPaused:true,isAdvancing:false});
+  await new Promise(requestAnimationFrame);
+  const paused = play.getAttribute("aria-label") === "Play" && !play.classList.contains("pending");
+  play.click();
+  const resume = window.SpicyQA.messages.filter(m => m.type === "play")[0];
+  window.SpicyQA.send("commandResult", {requestId:resume?.requestId,accepted:true});
+  window.SpicyQA.observe({positionMs:5200,isPlaying:true,isPaused:false,isAdvancing:true});
+  await new Promise(requestAnimationFrame);
+  return JSON.stringify({pass:requests.length === 1 && pause?.type === "pause" && paused
+    && resume?.type === "play" && play.getAttribute("aria-label") === "Pause" && !play.classList.contains("pending"),
+    requestTypes:requests.map(m => m.type),paused,resumeType:resume?.type});
+})()
+'@
+    Require-Qa "explicit pause/play button dispatch and duplicate tap protection" $buttonDispatch
 
     $seek = Invoke-QaEval @'
 (async () => {
@@ -235,6 +260,30 @@ try {
 '@
     Require-Qa "observed controls, repeat cycle, and atomic skips" $transport
 
+    $smartShuffle = Invoke-QaEval @'
+(async () => {
+  window.SpicyQA.observe({shuffleEnabled:true,shuffleMode:"shuffle",smartShuffleAvailable:true});
+  const button = document.querySelector("#shuffle-button");
+  button.click();
+  const request = [...window.SpicyQA.messages].reverse().find(m => m.type === "toggleShuffle");
+  window.SpicyQA.send("commandResult", {requestId:request.requestId,accepted:true});
+  window.SpicyQA.observe({shuffleEnabled:true,shuffleMode:"smart",smartShuffleAvailable:true});
+  await new Promise(requestAnimationFrame);
+  const smart = button.dataset.mode === "smart" && !button.classList.contains("pending")
+    && getComputedStyle(button.querySelector(".smart-shuffle-mark")).display !== "none"
+    && button.getAttribute("aria-label").includes("Smart Shuffle");
+  button.click();
+  const offRequest = [...window.SpicyQA.messages].reverse().find(m => m.type === "toggleShuffle");
+  window.SpicyQA.send("commandResult", {requestId:offRequest.requestId,accepted:true});
+  window.SpicyQA.observe({shuffleEnabled:false,shuffleMode:"off",smartShuffleAvailable:true});
+  await new Promise(requestAnimationFrame);
+  const off = button.dataset.mode === "off" && button.getAttribute("aria-pressed") === "false"
+    && getComputedStyle(button.querySelector(".smart-shuffle-mark")).display === "none";
+  return JSON.stringify({pass:smart && off,smart,off});
+})()
+'@
+    Require-Qa "smart shuffle observed state and glyph" $smartShuffle
+
     $lifecycle = Invoke-QaEval @'
 (async () => {
   window.SpicyQA.scenario("karaoke", {generation:6,positionMs:7500,isPlaying:false,isPaused:true,isAdvancing:false});
@@ -251,6 +300,31 @@ try {
 })()
 '@
     Require-Qa "background/foreground freshness gate" $lifecycle
+
+    $longLyrics = Invoke-QaEval @'
+(async () => {
+  window.SpicyQA.observe({positionMs:6500,isPlaying:false,isPaused:true,isAdvancing:false});
+  window.SpicyQA.send("lyrics", {state:"ready",trackId:"qa-karaoke",generation:"6",data:{
+    Type:"Syllable",Content:[
+      {Type:"Vocal",OppositeAligned:true,Lead:{StartTime:0,EndTime:14,Syllables:Array.from({length:14},(_,i)=>({
+        Text:"Day-",StartTime:i,EndTime:i+1,IsPartOfWord:true
+      }))}},
+      {Type:"Vocal",Lead:{StartTime:15,EndTime:30,Syllables:[
+        {Text:"Aye, ",StartTime:15,EndTime:18},
+        {Text:"Panini",StartTime:18,EndTime:21},
+        {Text:"don't you be a meanie",StartTime:21,EndTime:30}
+      ]}}
+    ]
+  }});
+  window.SpicyQA.send("bootstrap", {preferences:{fontSize:126}});
+  await new Promise(r => setTimeout(r, 600));
+  const all = [...document.querySelectorAll(".lyric-line,.word-group,.token,.transport button,.timeline,#settings-button")];
+  const overflow = all.filter(e => {const r=e.getBoundingClientRect(); return r.left < -1 || r.right > innerWidth+1;}).map(e=>e.className||e.id);
+  return JSON.stringify({pass:overflow.length===0 && document.querySelectorAll(".word-group.breakable").length>0,
+    overflow,breakable:document.querySelectorAll(".word-group.breakable").length});
+})()
+'@
+    Require-Qa "Panini long joined lyrics at enlarged text" $longLyrics
 
     $portraitOutput = & agent-browser --session $session screenshot (Join-Path $artifactDirectory "portrait-karaoke.png")
     $portraitOutput | Write-Host

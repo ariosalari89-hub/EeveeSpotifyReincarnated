@@ -80,6 +80,26 @@ jobs:
       - name: Test Spicy Lyrics renderer bundle
         run: python3 Tests/SpicyLyricsRenderer/test_bundle.py
 
+      - name: Test Spicy Lyrics native control dispatch
+        run: |
+          xcrun clang -fobjc-arc -fblocks -framework Foundation \
+            -ISources/EeveeSpotifyC/include \
+            Sources/EeveeSpotifyC/SpicyLyricsNativeControls.m \
+            Tests/SpicyLyricsNativeControls/main.m \
+            -o "$RUNNER_TEMP/spicy-native-controls-tests"
+          "$RUNNER_TEMP/spicy-native-controls-tests"
+
+      - name: Test Spicy Lyrics in iOS WebKit and UIKit
+        run: bash Tests/SpicyLyricsIOS/run.sh
+
+      - name: Upload iOS integration result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpicyLyrics-iOS-QA
+          path: ${{ runner.temp }}/spicy-ios-qa-result.txt
+          if-no-files-found: warn
+
       - name: Build .deb (rootless)
         env:
           REPO_SLUG: ${{ github.repository }}

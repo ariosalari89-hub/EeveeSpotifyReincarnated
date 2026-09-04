@@ -63,7 +63,7 @@ assert "projectedPosition" in model
 assert "requiresFreshObservation" in clock and "requiresFreshObservation" in model
 
 # Spotify 9.1.76's verified ABI is encoded exactly. Seek is a Double in
-# seconds; transport uses nil object options; shuffle/repeat use NSNumber.
+# seconds. Fallback options support the actual primitive/object argument ABI.
 for selector in (
     '"pause:"',
     '"resume:"',
@@ -76,7 +76,9 @@ for selector in (
 ):
     assert selector in bridge
 assert "invokeDouble" in bridge and "EeveeSBInvokeSeekDouble" in bridge
-assert "NSNumber(value: !current)" in bridge
+assert "EeveeSpicySetBooleanOption" in bridge
+assert "setPlaying(paused, player:" in bridge
+assert "EeveeSpicyPerformControl" in bridge
 assert "EeveeInvokeObjectArg" in bridge and "EeveeInvokeObjectArg" in c_header
 assert "selector cascade" in bridge
 assert "scheduleObservationBurst" in bridge
@@ -105,7 +107,7 @@ transport_ids = [
 ]
 positions = [index.index(item) for item in transport_ids]
 assert positions == sorted(positions)
-assert "session.shuffleEnabled" in renderer
+assert "session.shuffleMode" in renderer
 assert "session.repeatMode" in renderer
 assert "session.canGoPrevious" in renderer and "session.canGoNext" in renderer
 assert 'case "togglePlay", "play", "pause", "next", "previous", "toggleShuffle", "cycleRepeat"' in host

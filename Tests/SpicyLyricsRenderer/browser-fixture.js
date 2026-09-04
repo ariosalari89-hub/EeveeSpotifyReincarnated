@@ -175,6 +175,8 @@
       isAdvancing: overrides.isAdvancing ?? (isPlaying && !isPaused),
       requiresFreshObservation: overrides.requiresFreshObservation ?? false,
       shuffleEnabled: overrides.shuffleEnabled ?? false,
+      shuffleMode: overrides.shuffleMode || (overrides.shuffleEnabled ? "shuffle" : "off"),
+      smartShuffleAvailable: overrides.smartShuffleAvailable ?? false,
       repeatMode: overrides.repeatMode || "off",
       canSeek: overrides.canSeek ?? true,
       canPause: overrides.canPause ?? true,

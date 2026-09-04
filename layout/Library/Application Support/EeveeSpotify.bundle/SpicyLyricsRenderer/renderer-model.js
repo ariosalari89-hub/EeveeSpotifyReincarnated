@@ -65,6 +65,9 @@
         && !Boolean(payload?.requiresFreshObservation),
       requiresFreshObservation: Boolean(payload?.requiresFreshObservation),
       shuffleEnabled: Boolean(payload?.shuffleEnabled),
+      shuffleMode: ["off", "shuffle", "smart"].includes(payload?.shuffleMode)
+        ? payload.shuffleMode : (payload?.shuffleEnabled ? "shuffle" : "off"),
+      smartShuffleAvailable: Boolean(payload?.smartShuffleAvailable),
       repeatMode,
       canSeek: payload?.canSeek !== false,
       canPause: payload?.canPause !== false,
@@ -154,7 +157,7 @@
         || (finite(baseline.positionMs) > 1500
           && finite(current.positionMs) + 1000 < finite(baseline.positionMs));
     case "toggleShuffle":
-      return current.shuffleEnabled !== baseline.shuffleEnabled;
+      return current.shuffleMode !== baseline.shuffleMode;
     case "cycleRepeat":
       return current.repeatMode !== baseline.repeatMode;
     default:

@@ -21,6 +21,7 @@ struct ServerSidedFeaturePolicy {
         "social-session",
         "social-session-free-tier",
         "jam-social-session",
+        "smart-shuffle",
     ]
 
     // Hide only remote/Premium Jam hosting. Spotify's separate in-person join

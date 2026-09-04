@@ -13,6 +13,7 @@ for name in [
     "social-session",
     "social-session-free-tier",
     "jam-social-session",
+    "smart-shuffle",
 ] {
     require(protectedAttributes.contains(name), "missing server-authoritative attribute: \(name)")
 }

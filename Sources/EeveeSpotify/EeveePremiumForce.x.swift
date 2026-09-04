@@ -68,7 +68,6 @@ private let stripKeys: Set<String> = [
     "last-premium-activation-date",
     "on-demand-trial",
     "on-demand-trial-in-progress",
-    "smart-shuffle",
 ]
 
 private func rewritePremiumDict(_ dict: NSDictionary) -> NSDictionary {

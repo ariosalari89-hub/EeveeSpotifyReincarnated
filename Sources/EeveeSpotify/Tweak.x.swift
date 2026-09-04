@@ -382,6 +382,7 @@ struct EeveeSpotify: Tweak {
 
             // Lyrics hooks (guarded)
             if lyricsEnabled {
+                EeveeSpicyInstallPlaybackControls()
                 let fullscreenOK: Bool = {
                     // For 9.1.x, targetName resolves to Lyrics_FullscreenElementPageImpl.FullscreenElementViewController
                     if let cls = NSClassFromString("Lyrics_FullscreenElementPageImpl.FullscreenElementViewController") {

@@ -65,10 +65,11 @@ class LyricsFullscreenViewControllerHook: ClassHook<UIViewController> {
         SpicyLyricsFullscreenCoordinator.shared.attach(to: target)
     }
 
-    func viewWillDisappear(_ animated: Bool) {
-        if EeveeSpotify.hookTarget == .v91 {
-            SpicyLyricsFullscreenCoordinator.shared.detach(from: target)
-        }
-        orig.viewWillDisappear(animated)
+    func viewDidAppear(_ animated: Bool) {
+        orig.viewDidAppear(animated)
+        guard EeveeSpotify.hookTarget == .v91,
+              UserDefaults.lyricsSource == .spicylyrics else { return }
+        // The window scene is available even if viewDidLoad ran off-window.
+        SpicyLyricsFullscreenCoordinator.shared.attach(to: target)
     }
 }
