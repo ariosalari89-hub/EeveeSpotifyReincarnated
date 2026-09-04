@@ -49,7 +49,7 @@ final class SpicyLyricsPlaybackBridge {
         let fallbackDuration = (nowPlaying?[MPMediaItemPropertyPlaybackDuration] as? NSNumber)?.doubleValue
         let fallbackRate = (nowPlaying?[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue
 
-        queue.sync {
+        return queue.sync {
             let stateIsFresh = stateStamp != 0 && uptimeSeconds() - stateStamp < 2
             let basePosition = stateIsFresh ? positionSeconds : (fallbackPosition ?? positionSeconds)
             let baseDuration = stateIsFresh ? durationSeconds : (fallbackDuration ?? durationSeconds)
@@ -181,7 +181,7 @@ final class SpicyLyricsPlaybackBridge {
 
     private func normalizedArtworkURL(from metadata: [String: String]) -> String? {
         let keys = ["image_xlarge_url", "image_large_url", "image_url", "album_image_url", "cover_url", "image_uri"]
-        guard let raw = keys.lazy.compactMap({ nonEmpty(metadata[$0]) }).first else { return nil }
+        guard let raw = keys.lazy.compactMap({ self.nonEmpty(metadata[$0]) }).first else { return nil }
         if raw.hasPrefix("spotify:image:") {
             return "https://i.scdn.co/image/\(raw.replacingOccurrences(of: "spotify:image:", with: ""))"
         }

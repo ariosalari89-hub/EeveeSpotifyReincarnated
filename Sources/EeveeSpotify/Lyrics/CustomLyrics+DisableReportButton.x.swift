@@ -58,8 +58,9 @@ class LyricsFullscreenViewControllerHook: ClassHook<UIViewController> {
         orig.viewDidAppear(animated)
         guard EeveeSpotify.hookTarget == .v91,
               UserDefaults.lyricsSource == .spicylyrics else { return }
+        let controller = target
         DispatchQueue.main.async {
-            SpicyLyricsFullscreenCoordinator.shared.attach(to: target)
+            SpicyLyricsFullscreenCoordinator.shared.attach(to: controller)
         }
     }
 
