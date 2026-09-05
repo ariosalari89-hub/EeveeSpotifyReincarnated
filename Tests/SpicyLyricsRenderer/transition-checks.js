@@ -6,6 +6,21 @@ window.runSpicyTransitionChecks = async function (phase) {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const paused = { isPlaying: false, isPaused: true, isAdvancing: false };
   const check = (name, pass, detail) => results.push({ name, pass, detail });
+  const waitForPaintedCaption = async text => {
+    // A timer is not evidence that a newly attached/resized WKWebView has
+    // painted its starting phrase. Establish that precondition in real frames.
+    await document.fonts.ready;
+    let stableFrames = 0;
+    for (const deadline = performance.now() + 3000; performance.now() < deadline;) {
+      await frame();
+      const line = document.querySelector('#lyrics .inline-visible');
+      const rect = line?.getBoundingClientRect();
+      stableFrames = !document.hidden && innerHeight === 52 && line?.textContent === text
+        && rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight ? stableFrames + 1 : 0;
+      if (stableFrames >= 6) return;
+    }
+    throw new Error('Caption did not paint its stable initial phrase before transition sampling');
+  };
   const bootstrap = (surface, reduceMotion = false) => SpicyQA.send('bootstrap', {
     surface, reduceMotion, preferences: { fontSize: 100, playbackOffset: 0, dynamicBackground: false }
   });
@@ -17,13 +32,15 @@ window.runSpicyTransitionChecks = async function (phase) {
     { Type: 'Vocal', Text: 'Third phrase', StartTime: 4, EndTime: 6 }
   ];
   SpicyQA.scenario('line', { ...paused, positionMs: 1500 });
-  await wait(500);
+  await waitForPaintedCaption('First phrase');
   SpicyQA.observe({ ...paused, positionMs: 2100 });
-  const opacity = [];
+  const opacity = [], frameTimes = [];
+  const transitionStarted = performance.now();
   let overlappingCaptionFrames = 0;
   for (const deadline = performance.now() + 400; performance.now() < deadline;) {
     await frame();
     const line = document.querySelector('#lyrics .inline-visible');
+    frameTimes.push(performance.now() - transitionStarted);
     opacity.push(Number(getComputedStyle(line).opacity));
     const outgoing = document.querySelector('.caption-outgoing');
     if (outgoing) {
@@ -32,7 +49,7 @@ window.runSpicyTransitionChecks = async function (phase) {
     }
   }
   check('caption changes blend through real intermediate frames',
-    opacity.some(o => o > .05 && o < .95) && opacity.at(-1) > .99, opacity);
+    opacity.some(o => o > .05 && o < .95) && opacity.at(-1) > .99, { opacity, frameTimes });
   check('incoming and outgoing caption text never superimpose', overlappingCaptionFrames === 0, overlappingCaptionFrames);
   check('caption has one semantic current phrase after its transition',
     document.querySelectorAll('#lyrics .inline-visible').length === 1
