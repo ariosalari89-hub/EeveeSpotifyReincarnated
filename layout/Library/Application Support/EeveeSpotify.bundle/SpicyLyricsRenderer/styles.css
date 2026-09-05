@@ -5,8 +5,8 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --text: #fff;
-  --muted: rgba(255,255,255,.76);
-  --dim: #b0b0b0;
+  --muted: rgba(255,255,255,.9);
+  --dim: #c4c4c4;
   --surface: rgba(18,18,18,.54);
   --surface-strong: rgba(18,18,18,.88);
   --accent: #fff;
@@ -26,29 +26,32 @@ body { -webkit-font-smoothing: antialiased; touch-action: manipulation; }
 button, input { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 
-#ambient-canvas, #artwork-backdrop, .contrast-veil {
+#artwork-backdrop, .contrast-veil {
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
 }
-#ambient-canvas { z-index: 0; transform: scale(1.08); transition: opacity .7s ease; }
 #artwork-backdrop {
   z-index: 0;
   background-size: cover;
   background-position: center;
-  filter: blur(58px) saturate(1.35);
-  opacity: .24;
-  transform: scale(1.22);
-  transition: background-image .65s ease, opacity .4s ease;
+  filter: blur(34px) saturate(1.18);
+  opacity: 1;
+  transform: scale(1.24);
+  animation: artwork-drift 24s ease-in-out infinite alternate;
+  animation-play-state: paused;
+}
+#artwork-backdrop.is-animated { animation-play-state: running; }
+@keyframes artwork-drift {
+  from { transform: scale(1.24) translate3d(-1%, 1%, 0); }
+  to { transform: scale(1.28) translate3d(1%, -1%, 0); }
 }
 .contrast-veil {
   z-index: 1;
-  background:
-    radial-gradient(circle at 22% 34%, transparent 0 18%, rgba(0,0,0,.14) 52%, rgba(0,0,0,.36) 100%),
-    linear-gradient(180deg, rgba(0,0,0,.16), rgba(0,0,0,.36) 72%, rgba(0,0,0,.72)),
-    rgba(0,0,0,.62);
+  background: linear-gradient(180deg, rgba(8,10,14,.5), rgba(8,10,14,.54) 48%, rgba(4,6,11,.85)),
+    rgba(5,7,12,.2);
 }
 
 #app {
@@ -266,13 +269,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-  #ambient-canvas { display: none; }
-  #artwork-backdrop { opacity: .34; }
+  #artwork-backdrop { animation: none; transform: scale(1.24); }
   .lyric-line, .lyric-line.active { transform: none; }
   .token { transform: none; }
 }
 
 @media (orientation: landscape) {
+  .media-pane, #mini-cover { display: none; }
+  .stage { grid-template-columns: minmax(0,1fr); gap: 0; padding-inline: max(calc(var(--safe-left) + 20px), 8vw) max(calc(var(--safe-right) + 20px), 8vw); }
   .media-pane .media-copy { display: none; }
   .mini-track { display: flex; }
 }
@@ -283,7 +287,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
   animation-iteration-count: 1 !important;
   transition-duration: .01ms !important;
 }
-.native-reduce-motion #ambient-canvas { display: none; }
+.native-reduce-motion #artwork-backdrop { animation: none; transform: scale(1.24); }
 .native-reduce-motion .lyric-line,
 .native-reduce-motion .lyric-line.active,
 .native-reduce-motion .token { transform: none; }
@@ -292,7 +296,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
    and expand controls. These modes replace only the lyric-content bounds. */
 html[data-surface="card"], html[data-surface="inline"],
 html[data-surface="card"] body, html[data-surface="inline"] body { background: transparent; }
-html:not([data-surface="fullscreen"]) #ambient-canvas,
 html:not([data-surface="fullscreen"]) #artwork-backdrop,
 html:not([data-surface="fullscreen"]) .contrast-veil,
 html:not([data-surface="fullscreen"]) .topbar,

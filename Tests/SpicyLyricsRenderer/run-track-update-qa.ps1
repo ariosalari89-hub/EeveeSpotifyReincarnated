@@ -30,14 +30,16 @@ try {
     const metadataUpdated=['title','mini-title'].every(id=>document.getElementById(id).textContent==='Updated title')
       &&['artist','mini-artist'].every(id=>document.getElementById(id).textContent==='Updated artist')
       &&document.querySelector('#album').textContent==='Updated album';
-    const colorUpdated=images===unchanged.images+1;
+    // The background now displays the cover itself, not a sampled-color mesh.
+    const colorDoesNotRedecode=images===unchanged.images;
     context.fillStyle='#aa7766';context.fillRect(0,0,8,8);changed.artwork=canvas.toDataURL();
     SpicyQA.sendSession({positionMs:9500,track:changed});await wait(100);
-    const artworkUpdated=images===unchanged.images+2&&document.querySelector('#cover').src===changed.artwork
-      &&document.querySelector('#mini-cover').src===changed.artwork;
-    return JSON.stringify({unchanged,metadataUpdated,colorUpdated,artworkUpdated,
+    const artworkUpdated=images===unchanged.images+1&&document.querySelector('#cover').src===changed.artwork
+      &&document.querySelector('#mini-cover').src===changed.artwork
+      &&getComputedStyle(document.querySelector('#artwork-backdrop')).backgroundImage.includes(changed.artwork);
+    return JSON.stringify({unchanged,metadataUpdated,colorDoesNotRedecode,artworkUpdated,
       pass:unchanged.images===0&&unchanged.mutations===0&&unchanged.position>=8000
-        &&metadataUpdated&&colorUpdated&&artworkUpdated});
+        &&metadataUpdated&&colorDoesNotRedecode&&artworkUpdated});
   } finally { observer.disconnect();window.Image=OriginalImage; }
 })()
 '@

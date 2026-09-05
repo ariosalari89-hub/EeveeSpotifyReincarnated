@@ -124,6 +124,20 @@ window.runSpicyTransitionChecks = async function (phase) {
     gapEnd > gapStart + 10
       && new Set(gapPositions.filter(p => p > gapStart + 1 && p < gapEnd - 1)).size >= 4,
     { start: gapStart, positions: gapPositions });
+  const refreshSession = SpicyQA.observe({ ...paused, positionMs: 6100, durationMs: 60000 });
+  await wait(50);
+  const refreshStart = scroller.scrollTop;
+  SpicyQA.send('lyrics', { state:'ready', trackId:refreshSession.trackId,
+    generation:refreshSession.generation, data:JSON.parse(JSON.stringify(SpicyQA.lyrics.line)) });
+  const refreshPositions = [];
+  for (const deadline = performance.now() + 450; performance.now() < deadline;) {
+    await frame(); refreshPositions.push(scroller.scrollTop);
+  }
+  const refreshEnd = refreshPositions.at(-1);
+  check('an unchanged lyrics refresh preserves the in-flight preview glide',
+    refreshEnd > refreshStart + 10
+      && new Set(refreshPositions.filter(p => p > refreshStart + 1 && p < refreshEnd - 1)).size >= 4,
+    { start:refreshStart, positions:refreshPositions });
   bootstrap('card', true);
   SpicyQA.observe({ ...paused, positionMs: 10100, durationMs: 60000 });
   await frame(); await frame();

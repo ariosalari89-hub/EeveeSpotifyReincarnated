@@ -8,7 +8,6 @@
   const $ = (selector) => document.querySelector(selector);
   const dom = {
     app: $("#app"),
-    canvas: $("#ambient-canvas"),
     backdrop: $("#artwork-backdrop"),
     cover: $("#cover"),
     miniCover: $("#mini-cover"),
@@ -54,6 +53,7 @@
     session: null,
     trackPresentationKey: null,
     rawLyrics: null,
+    lyricsContentKey: "",
     lyricsTrackId: "",
     lyricsGeneration: "",
     lyricsType: "unknown",
@@ -170,168 +170,53 @@
     });
   }
 
-  class AmbientArtwork {
-    constructor(canvas) {
-      this.canvas = canvas;
-      this.context = canvas.getContext("2d", { alpha: false });
-      this.colors = ["#233b58", "#4f244c", "#111827", "#69442d"];
-      this.image = null;
-      this.playing = false;
-      this.enabled = true;
-      this.lastFrame = 0;
-      this.phase = 0;
+  class ArtworkBackground {
+    constructor(layer) {
+      this.layer = layer;
+      this.artwork = "";
       this.artworkRequest = 0;
-      this.resize = this.resize.bind(this);
-      this.frame = this.frame.bind(this);
-      addEventListener("resize", this.resize, { passive: true });
-      this.resize();
-      requestAnimationFrame(this.frame);
+      this.enabled = true;
+      this.playing = false;
+      this.ready = false;
     }
 
-    resize() {
-      const aspect = innerWidth / Math.max(1, innerHeight);
-      this.canvas.width = Math.min(380, Math.max(180, Math.round(250 * aspect)));
-      this.canvas.height = Math.min(300, Math.max(180, Math.round(this.canvas.width / aspect)));
-      this.draw();
+    setEnabled(enabled) { this.enabled = enabled; this.syncMotion(); }
+    setPlaying(playing) { this.playing = playing; this.syncMotion(); }
+
+    syncMotion() {
+      this.layer.classList.toggle("is-animated", this.ready && this.enabled && this.playing
+        && state.surface === "fullscreen" && state.lifecyclePhase === "visible"
+        && !document.hidden && !reduceMotion());
     }
 
-    setEnabled(enabled) {
-      this.enabled = enabled;
-      this.canvas.style.opacity = enabled ? "1" : "0";
-      dom.backdrop.style.opacity = enabled ? ".24" : ".42";
-      this.draw();
-    }
-
-    setPlaying(playing) { this.playing = playing; }
-
-    setArtwork(url, fallbackColor) {
+    setArtwork(url) {
+      if (this.artwork === url) return;
+      this.artwork = url;
       const request = ++this.artworkRequest;
-      if (fallbackColor && /^#?[0-9a-f]{6}$/i.test(fallbackColor)) {
-        const color = fallbackColor.startsWith("#") ? fallbackColor : `#${fallbackColor}`;
-        this.colors = [color, shade(color, .55), shade(color, 1.3), "#101010"];
-      }
-      if (!url) { this.image = null; this.draw(); return; }
+      this.ready = false;
+      this.layer.style.backgroundImage = "none";
+      this.syncMotion();
+      if (!url) return;
       const image = new Image();
       image.decoding = "async";
       image.onload = () => {
         if (request !== this.artworkRequest) return;
-        this.image = image;
-        this.sampleColors(image);
-        this.draw();
+        this.layer.style.backgroundImage = `url(${JSON.stringify(url)})`;
+        this.ready = true;
+        this.syncMotion();
       };
+      // A failed image stays on the neutral background, never the prior song.
       image.onerror = () => {
         if (request !== this.artworkRequest) return;
-        this.image = null;
-        this.draw();
+        this.ready = false;
+        this.layer.style.backgroundImage = "none";
+        this.syncMotion();
       };
       image.src = url;
     }
-
-    sampleColors(image) {
-      try {
-        const sample = document.createElement("canvas");
-        sample.width = sample.height = 24;
-        const context = sample.getContext("2d", { willReadFrequently: true });
-        context.drawImage(image, 0, 0, 24, 24);
-        const pixels = context.getImageData(0, 0, 24, 24).data;
-        const candidates = [];
-        for (let index = 0; index < pixels.length; index += 32) {
-          const r = pixels[index], g = pixels[index + 1], b = pixels[index + 2];
-          const maximum = Math.max(r, g, b), minimum = Math.min(r, g, b);
-          const brightness = (r + g + b) / 3;
-          if (brightness > 24 && brightness < 228) {
-            candidates.push({ r, g, b, score: maximum - minimum + brightness * .16 });
-          }
-        }
-        candidates.sort((left, right) => right.score - left.score);
-        const selected = [];
-        for (const color of candidates) {
-          if (selected.every((other) => Math.hypot(
-            color.r - other.r,
-            color.g - other.g,
-            color.b - other.b
-          ) > 55)) selected.push(color);
-          if (selected.length === 4) break;
-        }
-        if (selected.length >= 2) {
-          this.colors = selected.map(({ r, g, b }) => `rgb(${r},${g},${b})`);
-        }
-      } catch (_) {
-        // Remote artwork can taint canvas. The CSS artwork remains available.
-      }
-    }
-
-    frame(timestamp) {
-      const frameInterval = reduceMotion() ? 1000 : 33;
-      if (this.enabled && this.playing && state.lifecyclePhase === "visible"
-          && !document.hidden && timestamp - this.lastFrame >= frameInterval) {
-        this.phase += Math.min(100, timestamp - this.lastFrame) * .000045;
-        this.lastFrame = timestamp;
-        this.draw();
-      }
-      requestAnimationFrame(this.frame);
-    }
-
-    draw() {
-      const context = this.context;
-      if (!context || !this.enabled) return;
-      const width = this.canvas.width, height = this.canvas.height;
-      context.globalCompositeOperation = "source-over";
-      context.fillStyle = "#101010";
-      context.fillRect(0, 0, width, height);
-      if (this.image) {
-        const imageAspect = this.image.naturalWidth / this.image.naturalHeight;
-        const canvasAspect = width / height;
-        let drawWidth, drawHeight;
-        if (imageAspect > canvasAspect) {
-          drawHeight = height * 1.2;
-          drawWidth = drawHeight * imageAspect;
-        } else {
-          drawWidth = width * 1.2;
-          drawHeight = drawWidth / imageAspect;
-        }
-        context.globalAlpha = .22;
-        context.drawImage(
-          this.image,
-          (width - drawWidth) / 2,
-          (height - drawHeight) / 2,
-          drawWidth,
-          drawHeight
-        );
-        context.globalAlpha = 1;
-      }
-      context.globalCompositeOperation = "screen";
-      this.colors.forEach((color, index) => {
-        const phase = reduceMotion()
-          ? index * 1.7
-          : this.phase * (index % 2 ? -1 : 1) + index * 1.63;
-        const x = width * (.5 + Math.cos(phase) * (.3 + index * .025));
-        const y = height * (.5 + Math.sin(phase * 1.23) * (.34 - index * .025));
-        const radius = Math.max(width, height) * (.57 + index * .05);
-        const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
-        gradient.addColorStop(0, color);
-        gradient.addColorStop(1, "rgba(0,0,0,0)");
-        context.globalAlpha = .42;
-        context.fillStyle = gradient;
-        context.fillRect(0, 0, width, height);
-      });
-      context.globalCompositeOperation = "source-over";
-      context.globalAlpha = 1;
-      const veil = context.createLinearGradient(0, 0, 0, height);
-      veil.addColorStop(0, "rgba(0,0,0,.08)");
-      veil.addColorStop(1, "rgba(0,0,0,.44)");
-      context.fillStyle = veil;
-      context.fillRect(0, 0, width, height);
-    }
   }
 
-  function shade(hex, factor) {
-    const value = hex.replace("#", "");
-    const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16));
-    return `rgb(${channels.map((channel) => Math.round(model.clamp(channel * factor, 0, 255))).join(",")})`;
-  }
-
-  const ambient = new AmbientArtwork(dom.canvas);
+  const ambient = new ArtworkBackground(dom.backdrop);
 
   function positionNow(now = performance.now()) {
     state.seekPreview = model.reconcileSeekPreview(state.seekPreview, state.session, now);
@@ -434,13 +319,11 @@
       dom.cover.alt = `Cover art for ${title}`;
       dom.miniCover.src = artwork;
       dom.miniCover.alt = "";
-      dom.backdrop.style.backgroundImage = `url(${JSON.stringify(artwork)})`;
     } else {
       dom.cover.removeAttribute("src");
       dom.miniCover.removeAttribute("src");
-      dom.backdrop.style.backgroundImage = "none";
     }
-    if (state.surface === "fullscreen") ambient.setArtwork(artwork, dominantColor);
+    ambient.setArtwork(state.surface === "fullscreen" ? artwork : "");
   }
 
   function applyControls() {
@@ -540,6 +423,7 @@
     state.captionIndex = -1;
     state.lastLyricPosition = null;
     state.rawLyrics = raw;
+    state.lyricsContentKey = JSON.stringify(raw);
     state.lyricsTrackId = String(trackId || "");
     state.lyricsGeneration = String(generation || "");
     const normalized = model.normalizeLyrics(raw, {
@@ -1009,6 +893,12 @@
         if (!model.shouldAcceptLyrics(state.session, payload)) break;
         if (payload.state === "loading") showLoading();
         else if (payload.state === "ready") {
+          // Timed-lyrics upgrade checks can return the unchanged line payload.
+          // Keep its DOM, scroll glide and caption animation in that case.
+          if (dom.lyricState.hidden && state.lines.length
+              && state.lyricsTrackId === String(payload.trackId || "")
+              && state.lyricsGeneration === String(payload.generation || "")
+              && state.lyricsContentKey === JSON.stringify(payload.data)) break;
           renderLyrics(payload.data, payload.trackId, payload.generation);
         } else {
           showLyricsState(payload.message || "Lyrics are temporarily unavailable.", true);
@@ -1030,6 +920,7 @@
         } else if (payload.state === "visible") {
           state.lifecyclePhase = "visible";
         }
+        ambient.syncMotion();
         break;
       case "commandResult":
         acknowledgeCommand(payload);
@@ -1277,6 +1168,7 @@
       state.lifecycleFrozen = true;
       post("resync");
     }
+    ambient.syncMotion();
   }, { passive: true });
   prefersReducedMotion.addEventListener?.("change", () => applyPreferences());
 

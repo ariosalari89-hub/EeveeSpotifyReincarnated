@@ -55,4 +55,15 @@ let pass = presentation["title"] as? String == "Current song"
     && presentation["artwork"] as? String == "https://i.scdn.co/image/0123456789abcdef"
 print("\(pass ? "PASS" : "FAIL") metadata follows the authoritative observer even when the legacy player was never captured")
 print("title=\(presentation["title"] ?? "nil") artist=\(presentation["artist"] ?? "nil") artwork=\(presentation["artwork"] ?? "nil")")
-exit(pass ? 0 : 1)
+guard pass else { exit(1) }
+
+track.metadata = ["album_title": "Updated album"]
+player.state.timestamp = NSDate()
+let partial = bridge.sessionPayload()?["track"] as? [String: Any] ?? [:]
+let partialPass = partial["title"] as? String == "Current song"
+    && partial["artist"] as? String == "Current artist"
+    && partial["album"] as? String == "Updated album"
+    && partial["artwork"] as? String == "https://i.scdn.co/image/0123456789abcdef"
+print("\(partialPass ? "PASS" : "FAIL") partial metadata updates retain known details only for the current song")
+print("title=\(partial["title"] ?? "nil") artist=\(partial["artist"] ?? "nil") album=\(partial["album"] ?? "nil") artwork=\(partial["artwork"] ?? "nil")")
+exit(partialPass ? 0 : 1)

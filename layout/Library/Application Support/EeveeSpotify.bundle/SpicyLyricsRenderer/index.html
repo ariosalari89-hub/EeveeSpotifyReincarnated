@@ -8,7 +8,6 @@
   <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
-  <canvas id="ambient-canvas" aria-hidden="true"></canvas>
   <div id="artwork-backdrop" aria-hidden="true"></div>
   <div class="contrast-veil" aria-hidden="true"></div>
 
@@ -100,7 +99,7 @@
     </div>
     <label class="setting-row"><span><strong>Romanized lyrics</strong><small>Use transliterated text when available</small></span><input id="romanized-toggle" type="checkbox"></label>
     <label class="setting-row"><span><strong>Translations</strong><small>Show translated lines below lyrics</small></span><input id="translation-toggle" type="checkbox" checked></label>
-    <label class="setting-row"><span><strong>Dynamic background</strong><small>Animate colors sampled from the cover</small></span><input id="background-toggle" type="checkbox" checked></label>
+    <label class="setting-row"><span><strong>Dynamic background</strong><small>Slowly move the blurred cover art</small></span><input id="background-toggle" type="checkbox" checked></label>
     <label class="setting-range"><span><strong>Lyric size</strong><output id="font-output">100%</output></span><input id="font-size" type="range" min="82" max="126" value="100" step="2" aria-label="Lyric size"></label>
     <label class="setting-range"><span><strong>Playback offset</strong><output id="offset-output">0 ms</output></span><small>Positive values delay lyrics; negative values show them earlier.</small><input id="playback-offset" type="range" min="-5000" max="5000" value="0" step="10" aria-label="Playback offset in milliseconds"></label>
     <p class="provider-note">Lyrics provided by Spicy Lyrics</p>
