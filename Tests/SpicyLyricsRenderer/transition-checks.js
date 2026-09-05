@@ -159,5 +159,55 @@ window.runSpicyTransitionChecks = async function (phase) {
   const active = document.querySelector('.active').getBoundingClientRect();
   check('returning preview follows the fresh lyric', active.top >= 0 && active.bottom <= innerHeight);
   }
+  if (phase === 'background') {
+    bootstrap('fullscreen');
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
+    const context = canvas.getContext('2d'); context.fillStyle = '#466a91';context.fillRect(0,0,16,16);
+    const artwork = canvas.toDataURL();
+    const track = {...SpicyQA.tracks.line,artwork};
+    const observe = options => SpicyQA.sendSession({positionMs:2500,durationMs:60000,track,...options});
+    SpicyQA.send('bootstrap',{surface:'fullscreen',preferences:{dynamicBackground:true},reduceMotion:false});
+    observe({isPlaying:true,isPaused:false,isAdvancing:true});
+    const backdrop = document.querySelector('#artwork-backdrop');
+    for (const deadline = performance.now()+3000;performance.now()<deadline;) {
+      await frame(); if(getComputedStyle(backdrop).backgroundImage.includes(artwork)) break;
+    }
+    check('blur background loads the current cover at full strength',
+      getComputedStyle(backdrop).backgroundImage.includes(artwork)
+        && Number(getComputedStyle(backdrop).opacity) >= .9
+        && getComputedStyle(backdrop).filter.includes('blur('));
+    const movingStart = getComputedStyle(backdrop).transform;
+    await wait(250);
+    check('enabled background moves slowly during playback',
+      getComputedStyle(backdrop).animationPlayState === 'running'
+        && getComputedStyle(backdrop).transform !== movingStart);
+    SpicyQA.send('lifecycle',{state:'hidden'});
+    await frame();await frame();
+    const hiddenTransform = getComputedStyle(backdrop).transform;
+    await wait(120);
+    check('hidden cover background freezes without residual animation',
+      getComputedStyle(backdrop).animationPlayState === 'paused'
+        && getComputedStyle(backdrop).transform === hiddenTransform);
+    SpicyQA.send('lifecycle',{state:'visible'});
+    observe(paused);
+    await frame();
+    check('paused playback keeps the blur still and visible',
+      getComputedStyle(backdrop).animationPlayState === 'paused'
+        && getComputedStyle(backdrop).backgroundImage.includes(artwork));
+    SpicyQA.send('bootstrap',{surface:'fullscreen',preferences:{dynamicBackground:true},reduceMotion:true});
+    observe({isPlaying:true,isPaused:false,isAdvancing:true});
+    await frame();
+    check('reduced motion disables cover movement without dimming the blur',
+      getComputedStyle(backdrop).animationName === 'none' && Number(getComputedStyle(backdrop).opacity) >= .9);
+    SpicyQA.send('bootstrap',{surface:'fullscreen',preferences:{dynamicBackground:false},reduceMotion:false});
+    await frame();
+    check('dynamic-background preference can leave a static blurred cover',
+      getComputedStyle(backdrop).animationPlayState === 'paused'
+        && getComputedStyle(backdrop).backgroundImage.includes(artwork));
+    SpicyQA.scenario('next',paused);
+    await frame();
+    check('new track with no cover clears the previous background',
+      getComputedStyle(backdrop).backgroundImage === 'none');
+  }
   return results;
 };

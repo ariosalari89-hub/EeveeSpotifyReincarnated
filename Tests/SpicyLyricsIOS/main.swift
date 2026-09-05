@@ -562,8 +562,9 @@ struct QAFailure: Error { let message: String }
             _ = try await evaluateTransitionScript(String(contentsOf: file, encoding: .utf8) + "\n;true")
         }
         var rows = [[String: Any]]()
-        for phase in ["inline", "card"] {
-            web.frame.size.height = phase == "inline" ? 52 : 320
+        let phases = baseline ? ["inline", "card"] : ["inline", "card", "background"]
+        for phase in phases {
+            web.frame.size.height = phase == "inline" ? 52 : (phase == "background" ? 640 : 320)
             try await Task.sleep(nanoseconds: 100_000_000)
             // Explicit completion avoids selecting the fire-and-forget Void
             // overload; await the JavaScript promise and preserve its result.

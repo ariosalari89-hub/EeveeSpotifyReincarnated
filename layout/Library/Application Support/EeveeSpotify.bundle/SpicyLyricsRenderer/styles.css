@@ -6,7 +6,7 @@
   --safe-left: env(safe-area-inset-left, 0px);
   --text: #fff;
   --muted: rgba(255,255,255,.9);
-  --dim: #c4c4c4;
+  --dim: #ccc;
   --surface: rgba(18,18,18,.54);
   --surface-strong: rgba(18,18,18,.88);
   --accent: #fff;
@@ -50,7 +50,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .contrast-veil {
   z-index: 1;
-  background: linear-gradient(180deg, rgba(8,10,14,.5), rgba(8,10,14,.54) 48%, rgba(4,6,11,.85)),
+  background: linear-gradient(180deg, rgba(8,10,14,.55), rgba(8,10,14,.58) 48%, rgba(4,6,11,.85)),
     rgba(5,7,12,.2);
 }
 

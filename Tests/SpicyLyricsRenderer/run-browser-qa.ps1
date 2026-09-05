@@ -340,28 +340,29 @@ try {
 })()
 '@
     Require-Qa "Panini long joined lyrics at enlarged text" $longLyrics
-    $contrast = Invoke-QaEval @'
-(() => {
-  const veil = getComputedStyle(document.querySelector('.contrast-veil'));
-  const alpha = Number(veil.backgroundColor.match(/[\d.]+/g)[3]);
-  const topShade = Number(veil.backgroundImage.match(/linear-gradient\([^;]*?rgba\(0, 0, 0, ([\d.]+)\)/)?.[1]);
-  const maximumBackground = Math.ceil(255 * (1-alpha) * (1-topShade));
-  const luminance = rgb => rgb.map(c => c/255).map(c => c<=0.04045 ? c/12.92 : ((c+0.055)/1.055)**2.4)
-    .reduce((sum,c,i) => sum+c*[0.2126,0.7152,0.0722][i],0);
-  const background = [maximumBackground,maximumBackground,maximumBackground];
-  const contrast = selector => {
-    const color = getComputedStyle(document.querySelector(selector)).color.match(/[\d.]+/g).map(Number);
-    const opacity = color[3] ?? 1;
-    const foreground = color.slice(0,3).map(c=>c*opacity+maximumBackground*(1-opacity));
-    return (luminance(foreground)+0.05)/(luminance(background)+0.05);
-  };
-  const ratios = {inactive:contrast('.token'),artist:contrast('#artist'),timeline:contrast('.timeline')};
+    $contrastStyles = Invoke-QaEval @'
+(async () => {
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 8;
+  const context = canvas.getContext('2d'); context.fillStyle = 'white';context.fillRect(0,0,8,8);
+  const artwork = canvas.toDataURL();
+  SpicyQA.sendSession({positionMs:6500,isPlaying:false,isPaused:true,isAdvancing:false,
+    track:{...SpicyQA.tracks.karaoke,artwork}});
+  for (let i=0;i<120&&!getComputedStyle(document.querySelector('#artwork-backdrop')).backgroundImage.includes(artwork);i++) {
+    await new Promise(requestAnimationFrame);
+  }
+  if (!getComputedStyle(document.querySelector('#artwork-backdrop')).backgroundImage.includes(artwork)) throw new Error('White cover did not load');
+  const color = selector => getComputedStyle(document.querySelector(selector)).color.match(/[\d.]+/g).map(Number);
   const opaqueLines = [...document.querySelectorAll('.lyric-line')].every(e=>getComputedStyle(e).opacity==='1');
-  return JSON.stringify({pass:alpha>=0.62 && topShade>=0.16 && opaqueLines
-    && ratios.inactive>=3.5 && ratios.artist>=5 && ratios.timeline>=5,
-    maximumBackground,ratios,opaqueLines});
+  document.querySelector('#app').style.visibility = 'hidden';
+  return JSON.stringify({colors:{inactive:color('.token'),artist:color('#artist'),timeline:color('.timeline')},opaqueLines});
 })()
 '@
+    $whiteBackground = Join-Path $artifactDirectory 'worst-case-white-background.png'
+    & agent-browser --session $session screenshot $whiteBackground | Out-Null
+    $contrastRaw = & python (Join-Path $PSScriptRoot 'check-contrast.py') $whiteBackground ($contrastStyles | ConvertTo-Json -Compress -Depth 5)
+    if ($LASTEXITCODE -ne 0) { throw 'Pixel contrast measurement failed' }
+    $contrast = $contrastRaw | ConvertFrom-Json
+    $null = Invoke-QaEval "(()=>{document.querySelector('#app').style.visibility='';return JSON.stringify({restored:true});})()"
     Require-Qa "lyric and metadata contrast against worst-case white artwork" $contrast
     Test-QaAccessibility "portrait karaoke"
 
