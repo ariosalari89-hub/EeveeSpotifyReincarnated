@@ -114,6 +114,7 @@ button { -webkit-tap-highlight-color: transparent; }
   min-height: 44px;
   border: 0;
   padding: 3px 2px;
+  padding-inline-end: 5%;
   margin: 1% 0;
   color: var(--dim);
   background: transparent;
@@ -131,7 +132,7 @@ button { -webkit-tap-highlight-color: transparent; }
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.lyric-line.opposite { text-align: right; transform-origin: right center; }
+.lyric-line.opposite { text-align: right; transform-origin: right center; padding-inline-start: 5%; padding-inline-end: 2px; }
 .lyric-line.rtl { direction: rtl; }
 .lyric-line.rtl:not(.opposite) { text-align: right; transform-origin: right center; }
 .lyric-line.rtl.opposite { text-align: left; transform-origin: left center; }
@@ -148,7 +149,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .word-space { display: inline-block; width: .32ch; white-space: pre; }
 .word-group.breakable { display: inline; white-space: normal; }
 .word-group.breakable .token { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
-.token, .letter { position: relative; display: inline-block; --fill: 0%; transform: translateY(calc(var(--effect-y, .01) * 1em)); scale: var(--effect-scale, .95); transform-origin: center center; }
+.token, .letter { position: relative; display: inline-block; --fill: 0%; transform: translateY(calc(var(--effect-y, .01) * var(--lead-font-size))); scale: var(--effect-scale, .95); transform-origin: center center; }
 .token, .letter, .lyric-line.line-timed > .line-text, .dot { text-shadow: 0 0 var(--text-shadow-blur-radius, 4px) rgba(255,255,255,var(--text-shadow-opacity, 0)); }
 .token, .letter, .lyric-line.line-timed > .line-text {
   --gradient-position: -20%;
@@ -169,7 +170,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .rtl .token.joins-previous.joins-next { transform-origin: center center; }
 .token.emphasis { display: inline-flex; background-image: none; text-shadow: none; }
 .word-group.breakable .token.emphasis { display: inline; }
-.letter.space-letter { white-space: pre; min-width: .32ch; }
+.letter.space-letter { white-space: pre; min-width: .3ch; }
 .rtl .token { --gradient-degrees: -90deg; }
 .lyric-line.line-timed > .line-text { --gradient-degrees: 180deg; --gradient-alpha-end: .35; --gradient-position: inherit; }
 .lyric-line.background .token, .lyric-line.background .letter { --gradient-alpha: .6; --gradient-alpha-end: .3; }

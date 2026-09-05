@@ -203,6 +203,7 @@ struct QAFailure: Error { let message: String }
         guard nativeAvailable, loaded, !card.isHidden, !caption.isHidden else {
             throw QAFailure(message: "Spotify has_lyrics=false prevents provider lookup and both mobile lyric surfaces: nativeAvailable=\(nativeAvailable), loaded=\(loaded)")
         }
+        try await captureSimulatorScreen(marker: "availability", label: "lyrics availability")
         guard track.original["has_lyrics"] as? String == "false",
               track.metadata()["title"] as? String == "Availability fixture",
               track.metadata()["artist_name"] as? String == "Unchanged artist",
@@ -271,11 +272,11 @@ struct QAFailure: Error { let message: String }
         throw QAFailure(message: "landscape native/visual viewport did not settle")
     }
 
-    func captureSimulatorScreen() async throws {
+    func captureSimulatorScreen(marker: String = "screen", label: String = "landscape") async throws {
         // UIKit's hierarchy snapshot can omit composited WebKit controls.
         // Ask the outer harness for a screenshot of the real simulator display.
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        try "landscape".write(to: documents.appendingPathComponent("qa-screen-ready.txt"),
+        try label.write(to: documents.appendingPathComponent("qa-\(marker)-ready.txt"),
                               atomically: true, encoding: .utf8)
         // This deadline belongs to the external simctl screenshot process, not
         // the app's response time. On a cold CI host capture alone took 14.3s,
@@ -284,8 +285,8 @@ struct QAFailure: Error { let message: String }
         // completed display capture before advancing to another screen.
         let captureDeadline = ProcessInfo.processInfo.systemUptime + 60
         while ProcessInfo.processInfo.systemUptime < captureDeadline {
-            if FileManager.default.fileExists(atPath: documents.appendingPathComponent("qa-screen-done.txt").path) {
-                checks.append("actual simulator landscape display captured by simctl")
+            if FileManager.default.fileExists(atPath: documents.appendingPathComponent("qa-\(marker)-done.txt").path) {
+                checks.append("actual simulator \(label) display captured by simctl")
                 return
             }
             try await Task.sleep(nanoseconds: 100_000_000)

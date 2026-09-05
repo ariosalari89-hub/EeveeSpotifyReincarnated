@@ -68,6 +68,10 @@ xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 # The desktop-parity phases add independent three-surface motion/paint checks;
 # only the overall suite budget grows, not any assertion's sampling deadline.
 for iteration in {1..200}; do
+  if [ -f "$CONTAINER/Documents/qa-availability-ready.txt" ] && [ ! -f "$CONTAINER/Documents/qa-availability-done.txt" ]; then
+    xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/qa-availability-screen.png"
+    touch "$CONTAINER/Documents/qa-availability-done.txt"
+  fi
   if [ -f "$CONTAINER/Documents/qa-screen-ready.txt" ] && [ ! -f "$CONTAINER/Documents/qa-screen-done.txt" ]; then
     xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/qa-landscape-screen.png"
     touch "$CONTAINER/Documents/qa-screen-done.txt"

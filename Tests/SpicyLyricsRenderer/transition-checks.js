@@ -75,6 +75,13 @@ window.runSpicyTransitionChecks = async function (phase) {
         && getComputedStyle(rtl[0].querySelector('.token')).getPropertyValue('--gradient-degrees').trim()==='-90deg'
         && !rtl.some(line=>line.querySelector('.letter')),
       rtl.map(line=>({text:line.textContent,align:getComputedStyle(line).textAlign})));
+    if(surface!=='inline') {
+      const inset=rtl[0].offsetWidth*.05;
+      const leadInset=parseFloat(getComputedStyle(rtl[0]).paddingLeft);
+      const duetInset=parseFloat(getComputedStyle(rtl[1]).paddingRight);
+      check(`${surface}: duet voices keep the desktop five-percent opposite-side inset`,
+        Math.abs(leadInset-inset)<1 && Math.abs(duetInset-inset)<1,{leadInset,duetInset,expected:inset});
+    }
     SpicyQA.lyrics.karaoke.Content=[{Type:'Vocal',Lead:{StartTime:0,EndTime:2,Syllables:[
       {Text:'A',StartTime:0,EndTime:.3,IsPartOfWord:true},{Text:'ny',StartTime:.3,EndTime:.7},
       {Text:'time',StartTime:.7,EndTime:1.5}]}}];
@@ -90,13 +97,30 @@ window.runSpicyTransitionChecks = async function (phase) {
   if (phase.startsWith('desktop-contrast-')) {
     const surface=phase.slice('desktop-contrast-'.length);
     SpicyQA.send('bootstrap',{surface,highContrast:true,reduceMotion:true,preferences:{fontSize:82}});
+    // Every phase also runs consecutively in one WKWebView. Own this fixture
+    // instead of depending on the default data before the layout phase edits it.
+    SpicyQA.lyrics.karaoke.Content=[
+      {Type:'Vocal',Lead:{StartTime:6,EndTime:9,Syllables:[{Text:'Any time',StartTime:6,EndTime:9}]}},
+      {Type:'Vocal',Lead:{StartTime:10,EndTime:13,Syllables:[{Text:'Next phrase',StartTime:10,EndTime:13}]},
+        Background:[{StartTime:10,EndTime:13,Syllables:[{Text:'Quiet backing',StartTime:10,EndTime:13}]}]}
+    ];
     SpicyQA.scenario('karaoke',{...paused,positionMs:6500});await frame();await frame();
     const lines=[...document.querySelectorAll('.lyric-line:not(.interlude)')];
     const glyphs=[...document.querySelectorAll('.token:not(.emphasis),.letter')];
     check(`${surface}: Increase Contrast restores clear readable quiet lyrics without changing sync`,
       lines.every(line=>getComputedStyle(line).opacity==='1' && parseFloat(getComputedStyle(line).getPropertyValue('--line-blur'))===0)
         && glyphs.every(glyph=>parseFloat(getComputedStyle(glyph).getPropertyValue('--gradient-alpha-end'))>=.85)
-        && document.querySelector('#lyrics [aria-current]')?.textContent.includes('Any time'));
+        && document.querySelector('#lyrics [aria-current]')?.textContent.includes('Any time'),
+      {current:document.querySelector('#lyrics [aria-current]')?.textContent,
+        lines:lines.map(line=>({opacity:getComputedStyle(line).opacity,blur:getComputedStyle(line).getPropertyValue('--line-blur')})),
+        alpha: glyphs.map(glyph=>getComputedStyle(glyph).getPropertyValue('--gradient-alpha-end'))});
+    const retainedLine=document.querySelector('#lyrics [aria-current]');
+    SpicyQA.send('accessibility',{highContrast:false,reduceMotion:true});await wait(250);
+    const quiet=document.querySelector('.background .token');
+    check(`${surface}: a live accessibility change restores PC dimming without replacing the lyric`,
+      retainedLine===document.querySelector('#lyrics [aria-current]')
+        && Math.abs(parseFloat(getComputedStyle(quiet).getPropertyValue('--gradient-alpha-end'))-.3)<.001
+        && getComputedStyle(quiet.closest('.lyric-line')).opacity==='0.51');
   }
   if (phase.startsWith('desktop-backdrop-')) {
     const surface = phase.slice('desktop-backdrop-'.length);
@@ -202,7 +226,8 @@ window.runSpicyTransitionChecks = async function (phase) {
     const surface=phase.slice('desktop-motion-'.length);
     bootstrap(surface);
     SpicyQA.lyrics.karaoke.Content=[{Type:'Vocal',Lead:{StartTime:0,EndTime:2,
-      Syllables:[{Text:'Stay',StartTime:0,EndTime:.8},{Text:'close',StartTime:.8,EndTime:1.6}]}}];
+      Syllables:[{Text:'Stay',StartTime:0,EndTime:.8},{Text:'close',StartTime:.8,EndTime:1.6}]},
+      Background:[{StartTime:0,EndTime:2,Syllables:[{Text:'Echo',StartTime:0,EndTime:.8}]}]}];
     SpicyQA.scenario('karaoke',{...paused,positionMs:400});
     await document.fonts.ready;await wait(2300);
     const word=document.querySelector('.lead.active .token');const s=getComputedStyle(word);
@@ -214,6 +239,10 @@ window.runSpicyTransitionChecks = async function (phase) {
       Math.abs(scale-1.0485204081632653)<.002 && Math.abs(y+0.03534979423868313)<.002
         && Math.abs(blur-6.475308641975309)<.06 && s.textShadow!=='none',
       {scale,y,blur,textShadow:s.textShadow});
+    const backing=getComputedStyle(document.querySelector('.background.active .token'));
+    const backingLift=new DOMMatrix(backing.transform).m42/em;
+    if(surface!=='inline') check(`${surface}: backing vocals lift in the desktop lead-size coordinate system`,
+      Math.abs(backingLift+0.03534979423868313)<.002,{backingLift,leadLift:y});
     bootstrap(surface,true);SpicyQA.observe({...paused,positionMs:500});await frame();await frame();
     const reduced=getComputedStyle(word);
     check(`${surface}: reduced motion removes lift and scale while retaining timed whitening`,
