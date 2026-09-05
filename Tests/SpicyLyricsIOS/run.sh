@@ -41,9 +41,15 @@ xcrun simctl boot "$DEVICE"
 xcrun simctl bootstatus "$DEVICE" -b
 bash Tests/SpicyLyricsPlaybackBridge/run.sh "$DEVICE"
 xcrun simctl install "$DEVICE" "$QA_APP"
-xcrun simctl launch "$DEVICE" local.spicylyrics.qa
+# Resolve the container and initialize the simulator display service before the
+# app starts its screenshot handshake. Cold simctl setup can otherwise consume
+# the capture allowance while the app has already settled in landscape.
 CONTAINER=$(xcrun simctl get_app_container "$DEVICE" local.spicylyrics.qa data)
-for iteration in {1..90}; do
+xcrun simctl io "$DEVICE" screenshot --type=png "$QA_DIR/preflight-screen.png"
+xcrun simctl launch "$DEVICE" local.spicylyrics.qa
+# Include the conditional 21-second healthy-recovery setup in the suite budget;
+# individual app, rotation, close and screenshot assertions keep their deadlines.
+for iteration in {1..120}; do
   if [ -f "$CONTAINER/Documents/qa-screen-ready.txt" ] && [ ! -f "$CONTAINER/Documents/qa-screen-done.txt" ]; then
     xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/qa-landscape-screen.png"
     touch "$CONTAINER/Documents/qa-screen-done.txt"

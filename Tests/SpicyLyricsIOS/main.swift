@@ -207,6 +207,8 @@ struct QAFailure: Error { let message: String }
 
     func testEmbeddedSurfaces() async throws {
         guard let root = scene.keyWindow?.rootViewController else { throw QAFailure(message: "missing native player root") }
+        let restartMarker = "[SpicyRenderer] recreating WebKit"
+        let restartsBeforeSetup = QADiagnostics.snapshot().components(separatedBy: restartMarker).count
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
         try await Task.sleep(nanoseconds: 600_000_000)
         var enabled = true
@@ -271,6 +273,25 @@ struct QAFailure: Error { let message: String }
             throw QAFailure(message: details.joined(separator: "\n"))
         }
         try await waitForBoth("track-3")
+        let startupRestarts = QADiagnostics.snapshot().components(separatedBy: restartMarker).count - restartsBeforeSetup
+        if startupRestarts > 0 {
+            // A cold simulator may already have used the host's two permitted
+            // startup recoveries. A deliberate third termination before its
+            // existing 20-second stability interval correctly selects native
+            // fallback, not the recovery case this test is meant to exercise.
+            // Require the same live views to remain healthy through that window;
+            // do not reset private state or relax the production recovery limit.
+            let stableUntil = ProcessInfo.processInfo.systemUptime + 21
+            while ProcessInfo.processInfo.systemUptime < stableUntil {
+                guard findWeb(card) === cardWeb, findWeb(inline) === inlineWeb,
+                      (try await cardWeb.evaluateJavaScript("Boolean(window.SpicyNative && document.querySelector('#lyrics')?.textContent.includes('track-3'))")) as? Bool == true,
+                      (try await inlineWeb.evaluateJavaScript("Boolean(window.SpicyNative && document.querySelector('#lyrics')?.textContent.includes('track-3'))")) as? Bool == true else {
+                    throw QAFailure(message: "startup-recovered compact renderers did not remain stable before termination testing")
+                }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            checks.append("compact renderers remained healthy through the existing stability interval after \(startupRestarts) startup recoveries")
+        }
         let oldCardWeb = cardWeb
         let oldInlineWeb = inlineWeb
         // Exercise the public WKNavigationDelegate termination callback on the
@@ -447,6 +468,10 @@ struct QAFailure: Error { let message: String }
     }
     func run() async {
         do {
+            // Keep the isolated renderer assertions independent of the later
+            // external display-capture handshake and native lifecycle fixtures.
+            try await testRendererTransitions(baseline: true)
+            try await testRendererTransitions(baseline: false)
             SpicyLyricsFullscreenCoordinator.shared.attach(to: source)
             guard let preparing = scene.keyWindow, preparing.rootViewController !== source,
                   preparing.rootViewController?.view.subviews.count == 2 else {
@@ -533,8 +558,6 @@ struct QAFailure: Error { let message: String }
             }
             checks.append("close disposes persistent window and restores original window in \(ProcessInfo.processInfo.systemUptime - closeStarted)s")
             try await testEmbeddedSurfaces()
-            try await testRendererTransitions(baseline: true)
-            try await testRendererTransitions(baseline: false)
             finish(result: "PASS")
         } catch {
             finish(result: "FAIL: \(error)\n\(await failureDiagnostics())")
