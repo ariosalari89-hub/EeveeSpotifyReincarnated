@@ -95,13 +95,7 @@ jobs:
           "$RUNNER_TEMP/spicy-request-tests"
 
       - name: Test Spicy Lyrics native control dispatch
-        run: |
-          xcrun clang -fobjc-arc -fblocks -framework Foundation \
-            -ISources/EeveeSpotifyC/include \
-            Sources/EeveeSpotifyC/SpicyLyricsNativeControls.m \
-            Tests/SpicyLyricsNativeControls/main.m \
-            -o "$RUNNER_TEMP/spicy-native-controls-tests"
-          "$RUNNER_TEMP/spicy-native-controls-tests"
+        run: bash Tests/SpicyLyricsNativeControls/run.sh
 
       - name: Test Spicy Lyrics in iOS WebKit and UIKit
         run: bash Tests/SpicyLyricsIOS/run.sh

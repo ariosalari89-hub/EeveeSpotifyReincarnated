@@ -2,11 +2,20 @@
 #import <objc/runtime.h>
 #import "SpicyLyricsNativeControls.h"
 
+extern void *SpicyQAMakeSwiftSmartShuffle(void);
+
 static void require(BOOL condition, NSString *message) {
     if (!condition) { NSLog(@"FAIL: %@", message); exit(1); }
 }
 
-@interface FakeSmartShuffle : NSObject
+@protocol QASmartShuffle
+@property NSInteger mode;
+@property BOOL offeredPicker;
+@property BOOL rejectChange;
+@property NSUInteger explicitCalls;
+@end
+
+@interface FakeSmartShuffle : NSObject <QASmartShuffle>
 @property NSInteger mode;
 @property BOOL offeredPicker;
 @property BOOL rejectChange;
@@ -47,7 +56,7 @@ static void require(BOOL condition, NSString *message) {
 @property BOOL smartUnavailable;
 @property NSInteger trackNumber;
 @property NSInteger repeatMode;
-@property FakeSmartShuffle *smartShuffleHandler;
+@property id<QASmartShuffle> smartShuffleHandler;
 @end
 @implementation FakeActions
 - (BOOL)respondsToSelector:(SEL)selector {
@@ -125,6 +134,18 @@ int main(void) {
         require(EeveeSpicyPerformControl(@"next", state) == 0 && actions.trackNumber == 0, @"restriction must reject skip");
         require(![EeveeSpicyReadControls(state)[@"canPause"] boolValue], @"restriction must reach renderer");
         require(EeveeSpicyPerformControl(@"seek", state) == -1, @"seek must keep its existing path");
+
+        id<QASmartShuffle> swiftSmart = CFBridgingRelease(SpicyQAMakeSwiftSmartShuffle());
+        require(![(id)swiftSmart isKindOfClass:NSObject.class], @"Swift boundary must not inherit NSObject");
+        require(![(id)swiftSmart respondsToSelector:@selector(methodSignatureForSelector:)],
+                @"Swift boundary must reproduce the missing reflection method");
+        actions.smartShuffleHandler = swiftSmart;
+        actions.allowed = YES;
+        NSLog(@"Reading controls with Spotify-shaped native Swift handler");
+        NSDictionary *swiftControls = EeveeSpicyReadControls(state);
+        require([swiftControls[@"smartShuffleEnabled"] isEqual:@NO]
+                && [swiftControls[@"smartShuffleAvailable"] isEqual:@YES],
+                @"opening the song page must read native Swift controls without aborting");
 
         BoolOptions *options = [BoolOptions new];
         for (NSNumber *value in @[@YES, @NO, @YES]) {
