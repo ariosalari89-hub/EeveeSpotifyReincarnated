@@ -564,9 +564,13 @@ struct QAFailure: Error { let message: String }
         }
     }
     func testRendererTransitions(baseline: Bool) async throws {
-        guard let root = scene.keyWindow?.rootViewController,
+        guard var root = scene.keyWindow?.rootViewController,
               let page = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: baseline ? "SpicyLyricsBefore" : "SpicyLyricsRenderer") else {
             throw QAFailure(message: "transition fixture has no root or renderer")
+        }
+        while let presented = root.presentedViewController { root = presented }
+        guard root.viewIfLoaded?.window != nil else {
+            throw QAFailure(message: "transition fixture controller must be on screen for frame sampling")
         }
         let web = WKWebView(frame: CGRect(x: 0, y: 100, width: 360, height: 320))
         web.scrollView.isScrollEnabled = false
