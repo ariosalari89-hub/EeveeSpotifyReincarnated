@@ -102,3 +102,14 @@ real contextURI-only state. The source fix reads contextURI before contextURL.
 All existing model/bundle/control/lifecycle/browser scenarios pass locally after
 the repair. Added actual-gesture tests cover hold/drag/release, card wheel/reentry,
 timed caption pages, line-timed glyph bounds, dots and landscape metadata.
+
+### Native loading failure investigation
+
+Run `33931319965` failed the embedded-generation assertion. Diagnostic-only run
+`33932019076` reproduced it and established that both LIVE views were ready, not
+busy, visible, and showing track-3; both cached test references were stale. The
+production startup watchdog had replaced slow WebKit instances and recovered.
+The test now resolves the live child view on each wait instead of checking a
+detached renderer. A deliberate WKNavigationDelegate termination callback test
+requires both views to be replaced and to recover current lyrics. No wait bound
+or assertion is removed, and no production timeout is relaxed to conceal this.

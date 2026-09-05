@@ -182,14 +182,20 @@ struct QAFailure: Error { let message: String }
             if let web = view as? WKWebView { return web }
             return view.subviews.compactMap(findWeb).first
         }
-        guard let cardWeb = findWeb(card), let inlineWeb = findWeb(inline) else {
+        guard var cardWeb = findWeb(card), var inlineWeb = findWeb(inline) else {
             throw QAFailure(message: "verified content-class runtime hooks did not attach both renderers")
         }
         func waitForBoth(_ track: String) async throws {
             for _ in 0..<100 {
                 let js = "document.querySelector('#lyrics')?.textContent.includes('\(track)') === true"
-                if (try await cardWeb.evaluateJavaScript(js)) as? Bool == true,
-                   (try await inlineWeb.evaluateJavaScript(js)) as? Bool == true { return }
+                // Production can replace a slow/terminated WebKit renderer.
+                // Assert against the live UI, never a detached cached WKWebView.
+                if let currentCard = findWeb(card), let currentInline = findWeb(inline) {
+                    cardWeb = currentCard
+                    inlineWeb = currentInline
+                    if (try await cardWeb.evaluateJavaScript(js)) as? Bool == true,
+                       (try await inlineWeb.evaluateJavaScript(js)) as? Bool == true { return }
+                }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
             var details = ["embedded lyric generations did not converge for \(track)"]
@@ -202,6 +208,18 @@ struct QAFailure: Error { let message: String }
             throw QAFailure(message: details.joined(separator: "\n"))
         }
         try await waitForBoth("track-3")
+        let oldCardWeb = cardWeb
+        let oldInlineWeb = inlineWeb
+        // Exercise the public WKNavigationDelegate termination callback on the
+        // production host. This deliberately tests lifecycle handling, not an
+        // actual OS process kill; the replaced renderer must show current lyrics.
+        cardWeb.navigationDelegate?.webViewWebContentProcessDidTerminate?(cardWeb)
+        inlineWeb.navigationDelegate?.webViewWebContentProcessDidTerminate?(inlineWeb)
+        try await waitForBoth("track-3")
+        guard cardWeb !== oldCardWeb, inlineWeb !== oldInlineWeb else {
+            throw QAFailure(message: "renderer termination did not replace the embedded WebKit views")
+        }
+        checks.append("both compact surfaces recover current lyrics after renderer termination callback")
         header.setNeedsLayout(); header.layoutIfNeeded()
         guard original.alpha == 0, originalInline.alpha == 0, header.alpha == 1,
               card.bounds.height == 320, inline.bounds.height == 52, !originalTap.isEnabled else {
