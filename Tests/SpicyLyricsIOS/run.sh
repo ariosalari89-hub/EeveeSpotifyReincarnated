@@ -36,7 +36,20 @@ codesign --force --sign - "$QA_APP"
 RUNTIME=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS")]; print(r[-1]["identifier"] if r else "")')
 [ -n "$RUNTIME" ] || { echo "No iOS simulator runtime available" >&2; exit 1; }
 DEVICE=$(xcrun simctl create SpicyLyricsQA com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$RUNTIME")
-trap 'xcrun simctl shutdown "$DEVICE" >/dev/null 2>&1 || true; xcrun simctl delete "$DEVICE" >/dev/null 2>&1 || true' EXIT
+QA_VIDEO_PID=""
+stop_capture() {
+  if [ -n "$QA_VIDEO_PID" ]; then
+    kill -INT "$QA_VIDEO_PID" 2>/dev/null || true
+    wait "$QA_VIDEO_PID" || true
+    QA_VIDEO_PID=""
+  fi
+}
+cleanup() {
+  stop_capture
+  xcrun simctl shutdown "$DEVICE" >/dev/null 2>&1 || true
+  xcrun simctl delete "$DEVICE" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 xcrun simctl boot "$DEVICE"
 xcrun simctl bootstatus "$DEVICE" -b
 bash Tests/SpicyLyricsPlaybackBridge/run.sh "$DEVICE"
@@ -46,6 +59,8 @@ xcrun simctl install "$DEVICE" "$QA_APP"
 # the capture allowance while the app has already settled in landscape.
 CONTAINER=$(xcrun simctl get_app_container "$DEVICE" local.spicylyrics.qa data)
 xcrun simctl io "$DEVICE" screenshot --type=png "$QA_DIR/preflight-screen.png"
+xcrun simctl io "$DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/qa-session.mp4" >"$QA_DIR/video.log" 2>&1 &
+QA_VIDEO_PID=$!
 xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 # Include the conditional 21-second healthy-recovery setup in the suite budget;
 # individual app, rotation, close and screenshot assertions keep their deadlines.

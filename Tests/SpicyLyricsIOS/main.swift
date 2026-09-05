@@ -407,12 +407,15 @@ struct QAFailure: Error { let message: String }
             }
         }
         checks.append("foreground followups leave covered renderers suspended")
+        _ = try await evaluate("document.querySelector('#next-button').click()")
+        try await waitFor("skipping inside fullscreen loads the next generation", "document.querySelector('#lyrics').textContent.includes('track-5')")
         SpicyLyricsPlaybackBridge.shared.position = 22_000
         NotificationCenter.default.post(name: .spicyLyricsPlaybackStateDidChange, object: nil)
         try await waitFor("visible fullscreen keeps receiving playback while embedded views sleep", "Number(document.querySelector('#seek').value) === 22000")
         SpicyLyricsFullscreenCoordinator.shared.close()
         try await Task.sleep(nanoseconds: 500_000_000)
         guard card.window != nil else { throw QAFailure(message: "closing compact entry dismissed Now Playing") }
+        try await waitForBoth("track-5")
         SpicyLyricsPlaybackBridge.shared.payloadReads = 0
         NotificationCenter.default.post(name: .spicyLyricsPlaybackStateDidChange, object: nil)
         guard SpicyLyricsPlaybackBridge.shared.payloadReads == 2 else {
@@ -432,13 +435,51 @@ struct QAFailure: Error { let message: String }
             throw QAFailure(message: "embedded lyrics resumed from a stale position after fullscreen closed")
         }
         checks.append("preview and caption resume from fresh playback after fullscreen closes")
+        // A native track refresh may replace every child of the same caption
+        // container while fullscreen covers it. Exercise that UIKit operation,
+        // not a synthetic renderer message or a private host-state mutation.
+        let replacementCaption = UILabel(frame: inline.bounds)
+        replacementCaption.text = "NEW NATIVE CAPTION MUST NOT OVERLAP"
+        _ = try await inlineWeb.evaluateJavaScript("document.querySelector('.inline-visible').click()")
+        try await waitFor("caption reopens fullscreen after an in-screen skip", "document.querySelector('#lyrics').textContent.includes('track-5')")
+        SpicyLyricsPlaybackBridge.shared.onSkip = {
+            inline.subviews.forEach { $0.removeFromSuperview() }
+            inline.addSubview(replacementCaption)
+            inline.setNeedsLayout(); inline.layoutIfNeeded()
+        }
+        _ = try await evaluate("document.querySelector('#next-button').click()")
+        try await waitFor("fullscreen survives native caption child replacement on skip", "document.querySelector('#lyrics').textContent.includes('track-6')")
+        SpicyLyricsPlaybackBridge.shared.onSkip = nil
+        SpicyLyricsFullscreenCoordinator.shared.close()
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let rebuiltContext = UIGraphicsImageRenderer(bounds: root.view.bounds).image { _ in
+            root.view.drawHierarchy(in: root.view.bounds, afterScreenUpdates: true)
+        }
+        let rebuiltPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("qa-caption-after-skip.png")
+        try rebuiltContext.pngData()?.write(to: rebuiltPath)
+        guard findWeb(inline) === inlineWeb, inlineWeb.window === inline.window else {
+            throw QAFailure(message: "native caption child replacement orphaned the live renderer: liveWeb=\(findWeb(inline) != nil), cachedWebAttached=\(inlineWeb.window != nil), nativeAlpha=\(replacementCaption.alpha), nativeMasked=\(replacementCaption.layer.mask != nil)")
+        }
+        try await waitForBoth("track-6")
+        let resumedCaption = try await inlineWeb.evaluateJavaScript("""
+        (() => { const line = document.querySelector('#lyrics .inline-visible');
+          const bounds = line?.getBoundingClientRect();
+          return line?.textContent.includes('track-6') && bounds.height > 0
+            && bounds.top >= -1 && bounds.bottom <= innerHeight + 1
+            && getComputedStyle(line).opacity === '1'; })()
+        """)
+        guard resumedCaption as? Bool == true, replacementCaption.layer.mask != nil else {
+            throw QAFailure(message: "caption did not visibly recover the new song after fullscreen skip and native rebuild")
+        }
+        checks.append("native caption child replacement preserves one live renderer and visibly resumes the skipped-to song")
         guard let expand = header.expandButtonContainerView.subviews.compactMap({ $0 as? UIButton })
             .first(where: { $0.accessibilityIdentifier == "spicy-preview-expand" }),
               header.expandButtonContainerView.hitTest(CGPoint(x: 22, y: 20), with: nil) === expand else {
             throw QAFailure(message: "native expand target was not replaced before its zoom action")
         }
         expand.sendActions(for: .touchUpInside)
-        try await waitFor("native header expand enters Spicy directly", "document.querySelector('#lyrics').textContent.includes('track-4')")
+        try await waitFor("native header expand enters Spicy directly", "document.querySelector('#lyrics').textContent.includes('track-6')")
         guard nativeExpandCount == 0 else { throw QAFailure(message: "native zoom action fired") }
         SpicyLyricsFullscreenCoordinator.shared.close()
         try await Task.sleep(nanoseconds: 500_000_000)
@@ -449,6 +490,7 @@ struct QAFailure: Error { let message: String }
         guard findWeb(card) == nil, findWeb(inline) == nil, original.alpha == 1,
               originalInline.alpha == 1, !original.accessibilityElementsHidden,
               originalInline.layer.mask == nil, lateNativeChild.layer.mask == nil, originalTap.isEnabled,
+              replacementCaption.alpha == 1, replacementCaption.layer.mask == nil,
               !header.expandButtonContainerView.subviews.contains(where: { $0.accessibilityIdentifier == "spicy-preview-expand" }) else {
             throw QAFailure(message: "embedded detach did not restore native content and clean up WebKit")
         }
@@ -462,7 +504,7 @@ struct QAFailure: Error { let message: String }
             throw QAFailure(message: "canceling during preparation must restore the player")
         }
         SpicyLyricsFullscreenCoordinator.shared.open(from: root)
-        try await waitFor("reopen after interrupted preparation loads current lyrics", "document.querySelector('#lyrics').textContent.includes('track-4')")
+        try await waitFor("reopen after interrupted preparation loads current lyrics", "document.querySelector('#lyrics').textContent.includes('track-6')")
         SpicyLyricsFullscreenCoordinator.shared.close()
         try await Task.sleep(nanoseconds: 500_000_000)
     }
