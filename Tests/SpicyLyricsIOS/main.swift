@@ -523,11 +523,47 @@ struct QAFailure: Error { let message: String }
             guard overlay?.isHidden == true else { throw QAFailure(message: "close must dispose persistent window") }
             checks.append("close restores original window")
             try await testEmbeddedSurfaces()
+            try await testRendererTransitions()
             finish(result: "PASS")
         } catch {
             finish(result: "FAIL: \(error)\n\(await failureDiagnostics())")
         }
     }
+    func testRendererTransitions() async throws {
+        guard let root = scene.keyWindow?.rootViewController,
+              let page = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "SpicyLyricsRenderer") else {
+            throw QAFailure(message: "transition fixture has no root or renderer")
+        }
+        let web = WKWebView(frame: CGRect(x: 0, y: 100, width: 360, height: 320))
+        web.scrollView.isScrollEnabled = false
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        root.view.addSubview(web)
+        defer { web.removeFromSuperview() }
+        web.loadFileURL(page, allowingReadAccessTo: page.deletingLastPathComponent())
+        var ready = false
+        for _ in 0..<100 {
+            if (try? await web.evaluateJavaScript("Boolean(window.SpicyNative)")) as? Bool == true { ready = true; break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard ready else { throw QAFailure(message: "transition renderer not ready") }
+        for name in ["browser-fixture", "transition-checks"] {
+            guard let file = Bundle.main.url(forResource: name, withExtension: "js") else {
+                throw QAFailure(message: "missing isolated transition test")
+            }
+            _ = try await web.evaluateJavaScript(String(contentsOf: file, encoding: .utf8))
+        }
+        let result = try await web.callAsyncJavaScript("return await runSpicyTransitionChecks()", arguments: [:], in: nil, in: .page)
+        guard let rows = result as? [[String: Any]], !rows.isEmpty else { throw QAFailure(message: "no transition results") }
+        var failures = [String]()
+        for row in rows {
+            let name = row["name"] as? String ?? "unnamed"
+            let passed = row["pass"] as? Bool == true
+            checks.append("\(passed ? "PASS" : "FAIL") WKWebView \(name): \(row["detail"] ?? "")")
+            if !passed { failures.append(name) }
+        }
+        guard failures.isEmpty else { throw QAFailure(message: failures.joined(separator: "; ")) }
+    }
+
     func finish(result: String) {
         let report = ([result] + checks).joined(separator: "\n")
         print(report)

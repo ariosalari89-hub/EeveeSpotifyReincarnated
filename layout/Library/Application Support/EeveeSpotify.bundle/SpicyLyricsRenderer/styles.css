@@ -170,7 +170,9 @@ button { -webkit-tap-highlight-color: transparent; }
 .timeline { min-width: 0; display: grid; grid-template-columns: 42px minmax(0,1fr) 42px; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .timeline span:last-child { text-align: right; }
 #seek { --seek-progress: 0%; appearance: none; -webkit-appearance: none; width: 100%; height: 44px; margin: 0; background: transparent; cursor: pointer; }
-#seek { touch-action: none; }
+#seek-control { height: 44px; min-width: 0; cursor: pointer; touch-action: none; }
+#seek-control, #seek { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+#seek { display: block; pointer-events: none; }
 #seek::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, #fff 0 var(--seek-progress), rgba(255,255,255,.28) var(--seek-progress) 100%); }
 #seek::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.28); }
 .transport { justify-self: end; display: flex; align-items: center; gap: 6px; }
@@ -234,7 +236,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
   #lyrics { gap: 22px; }
   .lyric-line { font-size: calc(clamp(31px, 9.2vw, 44px) * var(--lyric-scale)); }
   .lyric-line.background { font-size: calc(clamp(22px, 6.8vw, 32px) * var(--lyric-scale)); }
-  .player-bar { grid-template-columns: 1fr auto; grid-template-rows: 34px 68px; gap: 3px 12px; padding: 4px max(calc(var(--safe-right) + 20px), 22px) max(calc(var(--safe-bottom) + 7px), 10px) max(calc(var(--safe-left) + 20px), 22px); }
+  .player-bar { grid-template-columns: 1fr auto; grid-template-rows: 44px 68px; gap: 3px 12px; padding: 4px max(calc(var(--safe-right) + 20px), 22px) max(calc(var(--safe-bottom) + 7px), 10px) max(calc(var(--safe-left) + 20px), 22px); }
   .mini-track { display: none; }
   .timeline { grid-column: 1 / -1; grid-row: 1; }
   .transport { grid-column: 1 / -1; grid-row: 2; justify-self: center; justify-content: space-between; width: 100%; max-width: 400px; gap: 8px; }

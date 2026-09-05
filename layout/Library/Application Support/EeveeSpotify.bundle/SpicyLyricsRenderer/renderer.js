@@ -24,6 +24,7 @@
     elapsed: $("#elapsed"),
     duration: $("#duration"),
     seek: $("#seek"),
+    seekControl: $("#seek-control"),
     play: $("#play-button"),
     shuffle: $("#shuffle-button"),
     previous: $("#previous-button"),
@@ -475,6 +476,7 @@
           : "Repeat all")
     );
     dom.seek.disabled = !session.canSeek;
+    if (!session.canSeek) cancelSeekDrag();
     ambient.setPlaying(isPlaying);
   }
 
@@ -497,6 +499,7 @@
     state.seekPreview = model.reconcileSeekPreview(state.seekPreview, incoming, now);
     state.session = incoming;
     if (changed) {
+      cancelSeekDrag();
       state.rawLyrics = null;
       state.lyricsTrackId = "";
       state.lyricsGeneration = "";
@@ -845,7 +848,7 @@
   function setSettingsOpen(open) {
     const wasOpen = !dom.settingsSheet.hidden;
     if (open === wasOpen) return;
-    if (open) settingsReturnFocus = document.activeElement;
+    if (open) { cancelSeekDrag(); settingsReturnFocus = document.activeElement; }
     dom.settingsSheet.hidden = !open;
     dom.settingsScrim.hidden = !open;
     dom.settings.setAttribute("aria-expanded", String(open));
@@ -906,6 +909,7 @@
         break;
       case "lifecycle":
         if (payload.state === "hidden" || payload.state === "resuming") {
+          cancelSeekDrag();
           state.frozenPositionMs = positionNow();
           state.lifecyclePhase = payload.state;
           state.lifecycleFrozen = true;
@@ -989,9 +993,44 @@
     }
   }, { passive: true });
 
-  let seekPointerId = null;
-  dom.seek.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || !state.session?.canSeek) return;
+  let seekDrag = null;
+  function paintSeekDrag(position) {
+    dom.seek.value = String(position);
+    state.dragPositionMs = Number(dom.seek.value);
+    dom.seek.style.setProperty("--seek-progress",
+      `${model.clamp(state.dragPositionMs / Math.max(1, Number(dom.seek.max))) * 100}%`);
+    dom.elapsed.textContent = formatTime(state.dragPositionMs);
+    dom.seek.setAttribute("aria-valuetext", `${formatTime(state.dragPositionMs)} of ${formatTime(state.session?.durationMs)}`);
+    updateLyrics(state.dragPositionMs, true);
+  }
+
+  function cancelSeekDrag() {
+    const drag = seekDrag;
+    seekDrag = null;
+    if (drag && dom.seekControl.hasPointerCapture(drag.pointerId)) {
+      dom.seekControl.releasePointerCapture(drag.pointerId);
+    }
+    if (!state.draggingSeek) return;
+    state.draggingSeek = false;
+    state.seekPreview = null;
+    updateLyrics(positionNow(), true);
+  }
+
+  function moveSeekDrag(event) {
+    if (!seekDrag || event.pointerId !== seekDrag.pointerId) return;
+    event.preventDefault();
+    const position = model.clamp((event.clientX - seekDrag.left - seekDrag.offset) / seekDrag.travel) * seekDrag.maximum;
+    if (Math.abs(position - seekDrag.startPosition) >= 50) seekDrag.changed = true;
+    paintSeekDrag(position);
+  }
+
+  // The wrapper owns the entire touch target. WebKit's range thumb hit testing
+  // and default drag cannot compete with this gesture; the actual range stays
+  // focusable and adjustable by keyboard and assistive technology.
+  dom.seekControl.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !event.isPrimary || seekDrag || !state.session?.canSeek
+        || state.lifecyclePhase !== "visible") return;
+    event.preventDefault();
     const position = positionNow();
     [...state.pendingCommands.entries()].forEach(([id, pending]) => {
       if (pending.type === "seek") settleCommand(id);
@@ -999,48 +1038,47 @@
     state.seekPreview = null;
     state.draggingSeek = true;
     state.dragPositionMs = position;
-    seekPointerId = event.pointerId;
+    const rect = dom.seek.getBoundingClientRect();
+    const maximum = Math.max(1, state.session.durationMs);
+    const left = rect.left + 7, travel = Math.max(1, rect.width - 14);
+    const thumb = left + model.clamp(position / maximum) * travel;
+    seekDrag = {
+      pointerId: event.pointerId, generation: state.session.generation,
+      maximum, left, travel, startPosition: position, changed: false,
+      offset: Math.abs(event.clientX - thumb) <= 22 ? event.clientX - thumb : 0
+    };
+    dom.seek.max = String(maximum);
     state.followLyrics = true;
     updateFollowButton();
-    dom.seek.setPointerCapture(event.pointerId);
+    dom.seekControl.setPointerCapture(event.pointerId);
+    dom.seek.focus({ preventScroll: true });
+    moveSeekDrag(event);
   });
-
+  dom.seekControl.addEventListener("pointermove", moveSeekDrag);
+  dom.seekControl.addEventListener("pointerup", (event) => {
+    if (!seekDrag || event.pointerId !== seekDrag.pointerId) return;
+    moveSeekDrag(event);
+    const commit = seekDrag.changed && seekDrag.generation === state.session?.generation
+      && state.session?.canSeek && state.lifecyclePhase === "visible";
+    const target = state.dragPositionMs;
+    cancelSeekDrag();
+    if (commit) startSeek(target, dom.seek);
+  });
+  dom.seekControl.addEventListener("pointercancel", cancelSeekDrag);
+  dom.seekControl.addEventListener("lostpointercapture", cancelSeekDrag);
+  dom.seekControl.addEventListener("contextmenu", (event) => event.preventDefault());
   dom.seek.addEventListener("input", () => {
+    if (seekDrag || !state.session?.canSeek) return;
     state.draggingSeek = true;
     state.followLyrics = true;
     updateFollowButton();
-    state.dragPositionMs = model.finite(dom.seek.value);
-    const maximum = Math.max(1, model.finite(dom.seek.max, 1));
-    dom.seek.style.setProperty(
-      "--seek-progress",
-      `${model.clamp(state.dragPositionMs / maximum) * 100}%`
-    );
-    dom.elapsed.textContent = formatTime(state.dragPositionMs);
-    updateLyrics(state.dragPositionMs, true);
+    paintSeekDrag(Number(dom.seek.value));
   });
   dom.seek.addEventListener("change", () => {
-    if (!state.draggingSeek) return;
+    if (seekDrag || !state.draggingSeek) return;
     const target = state.dragPositionMs;
     state.draggingSeek = false;
     startSeek(target, dom.seek);
-  });
-  const cancelSeekDrag = () => {
-    seekPointerId = null;
-    if (!state.draggingSeek) return;
-    state.draggingSeek = false;
-    state.seekPreview = null;
-    updateLyrics(positionNow(), true);
-  };
-  dom.seek.addEventListener("pointercancel", cancelSeekDrag);
-  // A thumb held without movement produces no input/change. Release its
-  // ownership without sending a seek, after the browser's change dispatch.
-  dom.seek.addEventListener("pointerup", () => {
-    seekPointerId = null;
-    // change follows the pointerup event's microtask checkpoint in WebKit/
-    // Chromium. A microtask here cancels the drag before it can commit.
-    setTimeout(() => {
-      if (state.draggingSeek && seekPointerId === null) cancelSeekDrag();
-    }, 0);
   });
   dom.seek.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); cancelSeekDrag(); }
@@ -1110,6 +1148,7 @@
   });
   let resizeFrame = 0;
   addEventListener("resize", () => {
+    cancelSeekDrag();
     cancelAnimationFrame(resizeFrame);
     resizeFrame = requestAnimationFrame(() => {
       fitWordGroups();
@@ -1118,6 +1157,7 @@
   }, { passive: true });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      cancelSeekDrag();
       state.frozenPositionMs = positionNow();
       state.lifecyclePhase = "hidden";
       state.lifecycleFrozen = true;
