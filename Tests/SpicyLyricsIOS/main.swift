@@ -1,6 +1,10 @@
 import UIKit
 import WebKit
 
+// Every runtime hook observes the same changing preference, as UserDefaults
+// does in Spotify; separate fixtures must not install conflicting closures.
+private enum QALyricsPreference { static var enabled = true }
+
 @objc(SPTPlayerTrack) final class QALyricsAvailabilityTrack: NSObject {
     let original: NSDictionary = ["has_lyrics": "false", "title": "Availability fixture", "artist_name": "Unchanged artist"]
     let uri: NSURL
@@ -159,7 +163,8 @@ struct QAFailure: Error { let message: String }
     func testNativeAvailability() async throws {
         let trackID = "3N1zlgIGnFcnNiTuDaeYzy"
         let track = QALyricsAvailabilityTrack("spotify:track:" + trackID)
-        SpicyLyricsEmbeddedSurfaces.install { true }
+        QALyricsPreference.enabled = true
+        SpicyLyricsEmbeddedSurfaces.install { QALyricsPreference.enabled }
         SpicyLyricsPlaybackBridge.shared.trackIDOverride = trackID
         let card = QACardContentView(frame: CGRect(x: 16, y: 200, width: 340, height: 320))
         let caption = QAInlineLyricsView(frame: CGRect(x: 24, y: 140, width: 320, height: 52))
@@ -172,7 +177,7 @@ struct QAFailure: Error { let message: String }
         defer {
             card.removeFromSuperview(); caption.removeFromSuperview()
             SpicyLyricsPlaybackBridge.shared.trackIDOverride = nil
-            SpicyLyricsEmbeddedSurfaces.install { false }
+            QALyricsPreference.enabled = false
         }
         func findWeb(_ view: UIView) -> WKWebView? {
             if let web = view as? WKWebView { return web }
@@ -183,7 +188,9 @@ struct QAFailure: Error { let message: String }
             let script = "document.querySelector('#lyrics')?.textContent.includes('\(trackID)') === true"
             if let cardWeb = findWeb(card), let captionWeb = findWeb(caption),
                (try? await cardWeb.evaluateJavaScript(script)) as? Bool == true,
-               (try? await captionWeb.evaluateJavaScript(script)) as? Bool == true {
+               (try? await captionWeb.evaluateJavaScript(script)) as? Bool == true,
+               cardWeb.alpha > 0.99, captionWeb.alpha > 0.99,
+               cardWeb.window != nil, captionWeb.window != nil {
                 loaded = true; break
             }
             try await Task.sleep(nanoseconds: 100_000_000)
@@ -203,7 +210,7 @@ struct QAFailure: Error { let message: String }
               QALyricsAvailabilityTrack("spotify:local:artist:album:song:123").metadata()["has_lyrics"] as? String == "false" else {
             throw QAFailure(message: "lyrics availability changed stored metadata or a non-music URI")
         }
-        SpicyLyricsEmbeddedSurfaces.install { false }
+        QALyricsPreference.enabled = false
         guard track.metadata()["has_lyrics"] as? String == "false" else {
             throw QAFailure(message: "disabled Spicy Lyrics still overrides native availability")
         }
@@ -305,7 +312,7 @@ struct QAFailure: Error { let message: String }
         let restartsBeforeSetup = QADiagnostics.snapshot().components(separatedBy: restartMarker).count
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
         try await Task.sleep(nanoseconds: 600_000_000)
-        var enabled = true
+        QALyricsPreference.enabled = true
         let artworkImage = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { context in
             UIColor(red: 0.2, green: 0.38, blue: 0.6, alpha: 1).setFill()
             context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
@@ -315,7 +322,7 @@ struct QAFailure: Error { let message: String }
         let previousArtwork = SpicyLyricsPlaybackBridge.shared.artwork
         SpicyLyricsPlaybackBridge.shared.artwork = "data:image/png;base64," + (artworkImage.pngData()?.base64EncodedString() ?? "")
         defer { SpicyLyricsPlaybackBridge.shared.artwork = previousArtwork }
-        SpicyLyricsEmbeddedSurfaces.install { enabled }
+        SpicyLyricsEmbeddedSurfaces.install { QALyricsPreference.enabled }
         let width = min(360, root.view.bounds.width - 32)
         let card = QACardContentView(frame: CGRect(x: 0, y: 40, width: width - 32, height: 320))
         card.backgroundColor = UIColor(red: 0.50, green: 0.38, blue: 0.56, alpha: 1)
@@ -633,7 +640,7 @@ struct QAFailure: Error { let message: String }
         guard nativeExpandCount == 0 else { throw QAFailure(message: "native zoom action fired") }
         SpicyLyricsFullscreenCoordinator.shared.close()
         try await Task.sleep(nanoseconds: 500_000_000)
-        enabled = false
+        QALyricsPreference.enabled = false
         card.setNeedsLayout(); card.layoutIfNeeded()
         inline.setNeedsLayout(); inline.layoutIfNeeded()
         header.setNeedsLayout(); header.layoutIfNeeded()
@@ -803,9 +810,14 @@ struct QAFailure: Error { let message: String }
             _ = try await evaluateTransitionScript(String(contentsOf: file, encoding: .utf8) + "\n;true")
         }
         var rows = [[String: Any]]()
-        let phases = baseline ? ["inline", "card"] : ["inline", "card", "background", "highlight", "card-layout"]
+        let desktopPhases = ["interlude", "paint", "motion", "emphasis", "type", "layout", "contrast"]
+            .flatMap { phase in ["fullscreen", "card", "inline"].map { "desktop-\(phase)-\($0)" } }
+            + ["desktop-shuffle-fullscreen", "desktop-backdrop-fullscreen"]
+        let phases = baseline ? ["inline", "card"]
+            : ["inline", "card", "background", "highlight", "card-layout"] + desktopPhases
         for phase in phases {
-            web.frame.size.height = phase == "inline" ? 52 : (phase == "background" ? 640 : (phase == "card-layout" ? 392 : 320))
+            web.frame.size.height = phase == "inline" || phase.hasSuffix("-inline") ? 52
+                : (phase == "background" || phase.hasSuffix("-fullscreen") ? 640 : (phase == "card-layout" ? 392 : 320))
             try await Task.sleep(nanoseconds: 100_000_000)
             // Explicit completion avoids selecting the fire-and-forget Void
             // overload; await the JavaScript promise and preserve its result.

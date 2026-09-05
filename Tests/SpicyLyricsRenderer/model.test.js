@@ -67,6 +67,9 @@ assert.equal(model.commandObserved("play", paused, playing), true);
 assert.equal(model.commandObserved("next", playing, session({ generation: "2", trackId: "track-b" })), true);
 assert.equal(model.commandObserved("previous", playing, session({ positionMs: 100, sequence: "2" })), true);
 assert.equal(model.commandObserved("toggleShuffle", playing, session({ shuffleEnabled: true, sequence: "2" })), true);
+const smart = session({shuffleMode:"smart",shuffleEnabled:true,smartShuffleAvailable:true});
+assert.equal(model.commandObserved("toggleShuffle", smart, session({shuffleMode:"shuffle",sequence:"2"})), false);
+assert.equal(model.commandObserved("toggleShuffle", smart, session({shuffleMode:"off",sequence:"3"})), true);
 assert.equal(model.commandObserved("cycleRepeat", playing, session({ repeatMode: "context", sequence: "2" })), true);
 assert.equal(model.commandObserved("pause", playing, session({ sequence: "2" })), false);
 

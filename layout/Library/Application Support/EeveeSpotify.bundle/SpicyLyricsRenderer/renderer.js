@@ -4,6 +4,8 @@
   const RENDERER_PROTOCOL_VERSION = 5;
   const model = window.SpicyLyricsModel;
   if (!model) throw new Error("Spicy Lyrics renderer model is missing");
+  const effects = window.SpicyLyricsEffects;
+  if (!effects) throw new Error("Spicy Lyrics renderer effects are missing");
 
   const $ = (selector) => document.querySelector(selector);
   const dom = {
@@ -64,6 +66,8 @@
     cardScroll: null,
     hasPositionedLyrics: false,
     lastLyricPosition: null,
+    lastEffectsTime: null,
+    effectsMoving: false,
     followLyrics: true,
     draggingSeek: false,
     dragPositionMs: 0,
@@ -136,6 +140,7 @@
       pending.button?.classList.remove("pending");
       pending.button?.removeAttribute("aria-busy");
     }
+    if (pending.type === "toggleShuffle") applyControls();
   }
 
   function acknowledgeCommand(payload) {
@@ -153,6 +158,7 @@
         || ["close", "retryLyrics", "setPreference", "resync"].includes(pending.type)) {
       settleCommand(requestId);
     }
+    if (pending.accepted) reconcileCommands();
   }
 
   function reconcileCommands() {
@@ -338,13 +344,17 @@
     dom.previous.disabled = !session.canGoPrevious;
     dom.next.disabled = !session.canGoNext;
     dom.shuffle.disabled = !session.canToggleShuffle;
-    dom.shuffle.dataset.mode = session.shuffleMode;
-    dom.shuffle.classList.toggle("active", session.shuffleMode !== "off");
-    dom.shuffle.setAttribute("aria-pressed", String(session.shuffleMode !== "off"));
+    const shuffleCommand = [...state.pendingCommands.values()].find(command => command.type === "toggleShuffle"
+      && command.baseline?.generation === session.generation && command.baseline?.trackId === session.trackId);
+    const shuffleMode = shuffleCommand && !model.commandObserved("toggleShuffle", shuffleCommand.baseline, session)
+      ? shuffleCommand.baseline.shuffleMode : session.shuffleMode;
+    dom.shuffle.dataset.mode = shuffleMode;
+    dom.shuffle.classList.toggle("active", shuffleMode !== "off");
+    dom.shuffle.setAttribute("aria-pressed", String(shuffleMode !== "off"));
     dom.shuffle.setAttribute(
       "aria-label",
-      session.shuffleMode === "smart" ? "Smart Shuffle on. Change shuffle mode"
-        : (session.shuffleMode === "shuffle"
+      shuffleMode === "smart" ? "Smart Shuffle on. Change shuffle mode"
+        : (shuffleMode === "shuffle"
           ? (session.smartShuffleAvailable ? "Shuffle on. Change shuffle mode" : "Turn shuffle off")
           : "Turn shuffle on")
     );
@@ -462,26 +472,48 @@
 
       if (line.kind === "interlude") {
         element.setAttribute("aria-hidden", "true");
+        const group = document.createElement("span");
+        group.className = "dot-group";
         for (let dot = 0; dot < 3; dot++) {
           const marker = document.createElement("span");
           marker.className = "dot";
-          element.appendChild(marker);
+          marker.textContent = "•";
+          group.appendChild(marker);
         }
+        element.appendChild(group);
       } else if (line.tokens.length) {
         const lineText = document.createElement("span");
         lineText.className = "line-text";
         model.groupTokens(line.tokens).forEach((group) => {
           const word = document.createElement("span");
           word.className = "word-group";
-          if (group.spaceBefore) lineText.appendChild(document.createTextNode(" "));
-          group.tokens.forEach((token) => {
+          if (group.spaceBefore) {
+            const space = document.createElement("span");
+            space.className = "word-space";
+            space.textContent = " ";
+            lineText.appendChild(space);
+          }
+          group.tokens.forEach((token, tokenIndex) => {
             const tokenElement = document.createElement("span");
             tokenElement.className = "token";
+            tokenElement.classList.toggle("joins-next", Boolean(token.joinsNext));
+            tokenElement.classList.toggle("joins-previous", Boolean(group.tokens[tokenIndex - 1]?.joinsNext));
             const transliteration = String(token.transliterated || "").trim();
             const text = state.preferences.romanized && transliteration
               ? transliteration
               : token.text;
-            tokenElement.textContent = text;
+            token.letters = effects.letters(text, token.start, token.end, model.isRTL(text));
+            if (token.letters.length) {
+              tokenElement.classList.add("emphasis");
+              token.letters.forEach(letter => {
+                const glyph = document.createElement("span");
+                glyph.className = "letter";
+                if (!letter.text.trim()) glyph.classList.add("space-letter");
+                glyph.textContent = letter.text;
+                letter.element = glyph;
+                tokenElement.appendChild(glyph);
+              });
+            } else tokenElement.textContent = text;
             tokenElement.dataset.text = text;
             token.element = tokenElement;
             word.appendChild(tokenElement);
@@ -556,6 +588,9 @@
 
   function stopEmbeddedMotion() {
     cancelCaptionMotion();
+    state.lines.forEach(line => { line.dotEntrance?.cancel(); line.dotEntrance = null; });
+    state.lastEffectsTime = null;
+    state.effectsMoving = false;
     state.cardScroll = null;
     if (state.surface === "card") {
       const top = dom.scroller.scrollTop;
@@ -608,26 +643,35 @@
   function layoutCaption(line, position, beforePageChange) {
     const text = line?.element?.querySelector(".line-text");
     if (!text) return;
-    const available = Math.max(1, dom.scroller.clientHeight - 6);
+    // Leave room for the desktop word/letter lift in the fixed native slot.
+    // Fit the phrase instead of clipping or suppressing its spring motion.
+    const available = Math.max(1, dom.scroller.clientHeight - 12);
     const key = `${dom.scroller.clientWidth}:${available}:${state.preferences.fontSize}`;
+    const showGroups = visible => {
+      text.querySelectorAll(".word-group").forEach(group => {
+        group.hidden = !visible.includes(group);
+        const space = group.previousElementSibling;
+        if (space?.classList.contains("word-space")) {
+          space.hidden = group.hidden || group === visible[0];
+        }
+      });
+    };
     if (line.captionLayout?.key !== key) {
       const groups = [...text.querySelectorAll(".word-group")];
       line.element.style.setProperty("--inline-fit", "1");
-      groups.forEach(g => { g.hidden = false; });
+      showGroups(groups);
       const pages = [];
       // Keep full phrases when they fit; otherwise use word-boundary pages,
       // selected by the provider's actual token time, never an invented timer.
       if (text.offsetHeight > available && groups.length > 1) {
-        groups.forEach(g => { g.hidden = true; });
+        showGroups([]);
         let page = [];
         for (const group of groups) {
-          group.hidden = false;
+          showGroups([...page, group]);
           if (page.length && text.offsetHeight > available) {
-            group.hidden = true;
             pages.push(page);
-            page.forEach(g => { g.hidden = true; });
             page = [];
-            group.hidden = false;
+            showGroups([group]);
           }
           page.push(group);
         }
@@ -643,7 +687,7 @@
     if (layout.page >= 0) beforePageChange?.();
     layout.page = pageIndex;
     const current = layout.pages[pageIndex];
-    text.querySelectorAll(".word-group").forEach(g => { g.hidden = !current.includes(g); });
+    showGroups(current);
     // A line-timed lyric (or one very long provider token) has no finer timing.
     // Fit the complete text, without ellipsis or fabricated syllable timing.
     line.element.style.setProperty("--inline-fit", "1");
@@ -670,10 +714,41 @@
     return nextIsNear ? index : -1;
   }
 
+  function paintEffects(owner, element, kind, progress, dt, snap, override) {
+    owner.effects ||= effects.create(kind);
+    const target = override || effects.targets(kind, progress);
+    if (reduceMotion()) Object.assign(target, { scale: 1, y: 0, glow: 0 });
+    const value = effects.step(owner.effects, target, dt, snap);
+    state.effectsMoving ||= value.moving;
+    const glow = Math.max(0, value.glow);
+    const paint = {
+      "--text-shadow-blur-radius": `${(4 + (kind === "dot" ? 6 : kind === "line" ? 8 : kind === "letter" ? 12 : 2) * glow).toFixed(3)}px`,
+      "--text-shadow-opacity": Math.min(1, glow * (kind === "dot" ? .9 : kind === "line" ? .5 : kind === "letter" ? 1.85 : .35)).toFixed(4)
+    };
+    if (value.scale !== undefined) {
+      paint["--effect-scale"] = value.scale.toFixed(5);
+      paint["--effect-y"] = (value.y * (kind === "letter" ? 2 : 1)).toFixed(5);
+    }
+    if (value.opacity !== undefined) paint["--effect-opacity"] = value.opacity.toFixed(4);
+    owner.effectsPaint ||= {};
+    for (const [key, current] of Object.entries(paint)) {
+      if (owner.effectsPaint[key] === current) continue;
+      owner.effectsPaint[key] = current;
+      element.style.setProperty(key, current);
+    }
+  }
+
   function updateLyrics(rawPosition, forceScroll = false) {
     if (!state.lines.length) return;
     const position = rawPosition - state.preferences.playbackOffset;
-    if (!forceScroll && position === state.lastLyricPosition) return;
+    const now = performance.now();
+    const elapsed = state.lastEffectsTime === null ? 0 : (now - state.lastEffectsTime) / 1000;
+    state.lastEffectsTime = now;
+    if (!forceScroll && position === state.lastLyricPosition && !state.effectsMoving) return;
+    const snapEffects = forceScroll || reduceMotion() || elapsed > .25
+      || state.draggingSeek || Boolean(state.seekPreview);
+    const dt = Math.max(0, Math.min(.05, elapsed));
+    state.effectsMoving = false;
     state.lastLyricPosition = position;
     const activeIndex = model.findActiveLine(state.lines, position);
     const heldIndex = previewHeldLine(position, activeIndex);
@@ -686,6 +761,13 @@
     state.lines.forEach((line, index) => {
       const visualState = model.lineVisualState(line, index, activeIndex, position);
       const active = visualState === "active";
+      if (activeIndex >= 0) {
+        const blur = active ? "0px" : `${Math.min(1.25 * Math.abs(index - activeIndex), 6.83125)}px`;
+        if (line.paintBlur !== blur) {
+          line.paintBlur = blur;
+          line.element.style.setProperty("--line-blur", blur);
+        }
+      }
       if (line.previewHeld !== (index === heldIndex)) {
         line.previewHeld = index === heldIndex;
         line.element?.classList.toggle("preview-held", line.previewHeld);
@@ -698,6 +780,23 @@
         if (line.kind === "lead" && line.element) {
           if (active) line.element.setAttribute("aria-current", "true");
           else line.element.removeAttribute("aria-current");
+        }
+        if (line.kind === "interlude") {
+          line.dotEntrance?.cancel();
+          line.dotEntrance = null;
+          if (active && !reduceMotion() && !forceScroll && position < line.end - 500) {
+            line.dotEntrance = line.element.querySelector(".dot-group").animate(
+              [{ scale: "0" }, { scale: "1" }], { duration: 300, easing: "ease" }
+            );
+          }
+        }
+      }
+      if (line.kind === "interlude") {
+        const exiting = active && position > line.end - 500;
+        if (line.dotExiting !== exiting) {
+          line.dotExiting = exiting;
+          if (exiting) { line.dotEntrance?.cancel(); line.dotEntrance = null; }
+          line.element.classList.toggle("pre-hidden", exiting);
         }
       }
       if (state.surface === "inline" && line.captionVisible !== (index === inlineIndex)) {
@@ -732,9 +831,20 @@
     const endIndex = Math.min(state.lines.length, Math.max(paintIndex + 7, 10));
     for (let index = startIndex; index < endIndex; index++) {
       const line = state.lines[index];
+      if (line.kind === "lead" && !line.tokens.length) {
+        const progress = model.tokenProgress(line, position);
+        const gradient = `${(position < line.start ? -20 : progress * 100).toFixed(2)}%`;
+        if (line.paintGradient !== gradient) {
+          line.paintGradient = gradient;
+          line.element.style.setProperty("--gradient-position", gradient);
+        }
+        if (Number.isFinite(line.start)) {
+          paintEffects(line, line.element.querySelector(".line-text"), "line", progress, dt, snapEffects);
+        }
+      }
       if (line.kind === "interlude") {
-        const dots = line.element?.children || [];
-        const segment = Math.max(1, (line.end - line.start) / 3);
+        const dots = line.element?.querySelectorAll(".dot") || [];
+        const segment = Math.max(1, (line.end - line.start - 550) / 3);
         [...dots].forEach((dot, dotIndex) => {
           const progress = model.clamp(
             (position - (line.start + dotIndex * segment)) / segment
@@ -744,22 +854,31 @@
             dot.spicyFill = fill;
             dot.style.setProperty("--fill-number", fill);
           }
+          paintEffects(dot, dot, "dot", progress, dt, snapEffects);
         });
       }
       (line.tokens || []).forEach((token) => {
         if (!token.element) return;
         const progress = model.tokenProgress(token, position);
-        const pulse = progress > 0 && progress < 1 ? Math.sin(progress * Math.PI) : 0;
         const fill = `${(progress * 100).toFixed(2)}%`;
-        const lift = reduceMotion() || state.surface !== "fullscreen" ? "0" : pulse.toFixed(3);
+        const gradient = `${(-20 + progress * 120).toFixed(2)}%`;
         if (token.paintFill !== fill) {
           token.paintFill = fill;
           token.element.style.setProperty("--fill", fill);
+          token.element.style.setProperty("--gradient-position", gradient);
         }
-        if (token.paintPulse !== lift) {
-          token.paintPulse = lift;
-          token.element.style.setProperty("--pulse", lift);
-        }
+        const motionProgress = token.letters.length
+          ? (position - token.start) / (token.end - token.start - 250) : progress;
+        paintEffects(token, token.element, "word", motionProgress, dt, snapEffects);
+        token.letters.forEach((letter, letterIndex) => {
+          const target = effects.letterTargets(letterIndex, token.letters.length, motionProgress);
+          const letterGradient = `${target.gradient.toFixed(2)}%`;
+          if (letter.paintGradient !== letterGradient) {
+            letter.paintGradient = letterGradient;
+            letter.element.style.setProperty("--gradient-position", letterGradient);
+          }
+          paintEffects(letter, letter.element, "letter", 0, dt, snapEffects, target);
+        });
       });
     }
   }
@@ -769,11 +888,11 @@
     const element = state.lines[index]?.element;
     if (!element) return;
     state.hasPositionedLyrics = true;
-    const target = dom.scroller.scrollTop + element.getBoundingClientRect().top
+    const bounds = element.getBoundingClientRect();
+    const target = dom.scroller.scrollTop + bounds.top
       - dom.scroller.getBoundingClientRect().top
-      - dom.scroller.clientHeight * (state.surface === "card" ? .28 : .42)
-      + element.offsetHeight * .5;
-    const immediate = reduceMotion() || state.draggingSeek || Boolean(state.seekPreview);
+      - (dom.scroller.clientHeight * .5 - 30) + bounds.height * .5;
+    const immediate = snap || reduceMotion() || state.draggingSeek || Boolean(state.seekPreview);
     if (state.surface === "card") {
       const to = model.clamp(target, 0, Math.max(0, dom.scroller.scrollHeight - dom.scroller.clientHeight));
       dom.scroller.style.scrollBehavior = "auto";
@@ -922,7 +1041,16 @@
           );
         }
         document.body.classList.toggle("native-reduce-motion", state.nativeReduceMotion);
+        document.body.classList.toggle("native-high-contrast", Boolean(payload.highContrast));
         applyPreferences();
+        break;
+      case "accessibility":
+        state.nativeReduceMotion = Boolean(payload.reduceMotion);
+        document.body.classList.toggle("native-reduce-motion", state.nativeReduceMotion);
+        document.body.classList.toggle("native-high-contrast", Boolean(payload.highContrast));
+        applyPreferences();
+        state.lastLyricPosition = null;
+        updateLyrics(positionNow(), true);
         break;
       case "layout":
         applyContentFrame(payload.contentFrame);
@@ -1197,6 +1325,11 @@
     });
   }
   addEventListener("resize", resizeLyrics, { passive: true });
+  // Native card slots and surface bootstrapping can reflow independently of
+  // the window. Re-anchor after the actual viewport size has settled.
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(resizeLyrics).observe(dom.scroller);
+  }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopEmbeddedMotion();

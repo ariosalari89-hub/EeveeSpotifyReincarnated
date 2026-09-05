@@ -65,7 +65,9 @@ QA_VIDEO_PID=$!
 xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 # Include the conditional 21-second healthy-recovery setup in the suite budget;
 # individual app, rotation, close and screenshot assertions keep their deadlines.
-for iteration in {1..120}; do
+# The desktop-parity phases add independent three-surface motion/paint checks;
+# only the overall suite budget grows, not any assertion's sampling deadline.
+for iteration in {1..200}; do
   if [ -f "$CONTAINER/Documents/qa-screen-ready.txt" ] && [ ! -f "$CONTAINER/Documents/qa-screen-done.txt" ]; then
     xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/qa-landscape-screen.png"
     touch "$CONTAINER/Documents/qa-screen-done.txt"

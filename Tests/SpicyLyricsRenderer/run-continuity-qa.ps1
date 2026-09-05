@@ -32,7 +32,7 @@ try {
     await new Promise(requestAnimationFrame);
     const active=document.querySelector('.lyric-line.active');
     const wanted=Math.max(0,Math.min(scroller.scrollHeight-scroller.clientHeight,
-      active.offsetTop-scroller.clientHeight*.42+active.offsetHeight*.5));
+      active.offsetTop-(window.SpicyLyricsEffects ? scroller.clientHeight/2-30 : scroller.clientHeight*.42)+active.offsetHeight*.5));
     errors.push(Math.abs(scroller.scrollTop-wanted));
   }
   seek.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true}));
@@ -78,7 +78,12 @@ try {
 (async () => {
   SpicyQA.scenario('line',{positionMs:4500,isPlaying:false,isPaused:true,isAdvancing:false});
   await new Promise(requestAnimationFrame);
-  const lineWhite=getComputedStyle(document.querySelector('.lyric-line.active')).color==='rgb(255, 255, 255)';
+  const active=document.querySelector('.lyric-line.active');
+  const lineWhite=window.SpicyLyricsEffects
+    ? getComputedStyle(active.querySelector('.line-text')).backgroundImage.includes('linear-gradient(')
+      && getComputedStyle(active.querySelector('.line-text')).getPropertyValue('--gradient-degrees').trim()==='180deg'
+      && !active.querySelector('.token')
+    : getComputedStyle(active).color==='rgb(255, 255, 255)';
   SpicyQA.scenario('static',{positionMs:4500,isPlaying:false,isPaused:true,isAdvancing:false});
   await new Promise(requestAnimationFrame);
   return JSON.stringify({pass:lineWhite&&!document.querySelector('.lyric-line.active')

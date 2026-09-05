@@ -119,9 +119,9 @@ try {
 (async () => {
   SpicyQA.lyrics.karaoke.Content=[{Type:'Interlude',StartTime:0,EndTime:9},{Type:'Vocal',Lead:{StartTime:10,EndTime:12,Syllables:[{Text:'End',StartTime:10,EndTime:12}]}}];
   SpicyQA.scenario('karaoke',{positionMs:7500,isPlaying:false,isPaused:true,isAdvancing:false});
-  await new Promise(requestAnimationFrame);
+  await new Promise(r=>setTimeout(r,450));
   const rects=[...document.querySelectorAll('.inline-visible .dot')].map(e=>e.getBoundingClientRect());
-  return JSON.stringify({pass:rects.length===3&&rects.every(r=>r.left>=4&&r.right<=innerWidth-4&&r.top>=0&&r.bottom<=innerHeight),
+  return JSON.stringify({pass:rects.length===3&&rects.every(r=>r.width>0&&r.height>0&&r.left>=4&&r.right<=innerWidth-4&&r.top>=0&&r.bottom<=innerHeight),
     rects:rects.map(r=>({left:r.left,right:r.right,top:r.top,bottom:r.bottom}))});
 })()
 '@)

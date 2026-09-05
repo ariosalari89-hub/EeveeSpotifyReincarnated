@@ -139,8 +139,30 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
                 queue: .main
             ) { [weak self] _ in
                 self?.resynchronizeAfterForeground()
+            },
+            NotificationCenter.default.addObserver(
+                forName: UIAccessibility.darkerSystemColorsStatusDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.publishAccessibility()
+            },
+            NotificationCenter.default.addObserver(
+                forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.publishAccessibility()
             }
         ]
+    }
+
+    private func publishAccessibility() {
+        guard isReady, !isDetached else { return }
+        emit(type: "accessibility", payload: [
+            "reduceMotion": UIAccessibility.isReduceMotionEnabled,
+            "highContrast": UIAccessibility.isDarkerSystemColorsEnabled
+        ])
     }
 
     private func installRenderer(pageURL: URL) {
@@ -318,6 +340,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
             "platform": "ios",
             "surface": surface.rawValue,
             "reduceMotion": UIAccessibility.isReduceMotionEnabled,
+            "highContrast": UIAccessibility.isDarkerSystemColorsEnabled,
             "boldText": UIAccessibility.isBoldTextEnabled,
             "preferences": rendererPreferences()
         ])
@@ -524,6 +547,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
 
     private func resynchronizeAfterForeground() {
         guard isReady, !isDetached else { return }
+        publishAccessibility()
         foregroundTimers.forEach { $0.invalidate() }
         foregroundTimers.removeAll()
         SpicyLyricsPlaybackBridge.shared.resumeAwaitingObservation()

@@ -178,7 +178,10 @@
         || (finite(baseline.positionMs) > 1500
           && finite(current.positionMs) + 1000 < finite(baseline.positionMs));
     case "toggleShuffle":
-      return current.shuffleMode !== baseline.shuffleMode;
+      // Native Smart Shuffle may report ordinary Shuffle while disabling its
+      // recommendation context. Only the requested final mode confirms it.
+      return current.shuffleMode === (baseline.shuffleMode === "off" ? "shuffle"
+        : baseline.shuffleMode === "shuffle" && baseline.smartShuffleAvailable ? "smart" : "off");
     case "cycleRepeat":
       return current.repeatMode !== baseline.repeatMode;
     default:
