@@ -66,4 +66,35 @@ let partialPass = partial["title"] as? String == "Current song"
     && partial["artwork"] as? String == "https://i.scdn.co/image/0123456789abcdef"
 print("\(partialPass ? "PASS" : "FAIL") partial metadata updates retain known details only for the current song")
 print("title=\(partial["title"] ?? "nil") artist=\(partial["artist"] ?? "nil") album=\(partial["album"] ?? "nil") artwork=\(partial["artwork"] ?? "nil")")
-exit(partialPass ? 0 : 1)
+guard partialPass else { exit(1) }
+
+let emptyNext = MetadataTrack(id: "metadata-b", metadata: [:])
+player.state = MetadataState(track: emptyNext)
+capturedTrackId = "metadata-a"
+capturedTrackTitle = "Stale captured song"
+capturedArtistName = "Stale captured artist"
+let next = bridge.sessionPayload()?["track"] as? [String: Any] ?? [:]
+let nextPass = next["id"] as? String == "metadata-b"
+    && next["title"] as? String == "Unknown track"
+    && next["artist"] as? String == "Unknown artist"
+    && next["artwork"] as? String == ""
+print("\(nextPass ? "PASS" : "FAIL") a new song never inherits the prior song's cached or captured details")
+guard nextPass else { exit(1) }
+
+emptyNext.metadata = ["title": "Next song", "artist_name": "Next artist", "image_url": "https://i.scdn.co/image/next"]
+player.state.timestamp = NSDate()
+let late = bridge.sessionPayload()?["track"] as? [String: Any] ?? [:]
+let latePass = late["title"] as? String == "Next song"
+    && late["artist"] as? String == "Next artist"
+    && late["artwork"] as? String == "https://i.scdn.co/image/next"
+print("\(latePass ? "PASS" : "FAIL") late-arriving current-song metadata replaces the unavailable state")
+guard latePass else { exit(1) }
+
+emptyNext.metadata = ["title": "Corrected song title", "artist_name": "Corrected artist", "image_url": "https://i.scdn.co/image/replaced"]
+player.state.timestamp = NSDate()
+let corrected = bridge.sessionPayload()?["track"] as? [String: Any] ?? [:]
+let correctedPass = corrected["title"] as? String == "Corrected song title"
+    && corrected["artist"] as? String == "Corrected artist"
+    && corrected["artwork"] as? String == "https://i.scdn.co/image/replaced"
+print("\(correctedPass ? "PASS" : "FAIL") real current-song corrections replace the cached presentation")
+exit(correctedPass ? 0 : 1)

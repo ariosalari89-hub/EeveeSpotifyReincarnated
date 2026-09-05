@@ -39,6 +39,9 @@ final class SpicyLyricsPlaybackBridge {
     private var lastDiagnosticGeneration: UInt64 = 0
     private var loggedABIFailure = false
     private var lifecycleSuspended = false
+    // Main-thread presentation cache, limited to the current track identity.
+    private var presentedTrackID = ""
+    private var presentedTrackFields: [String: String] = [:]
 
     private init() {}
 
@@ -417,24 +420,38 @@ final class SpicyLyricsPlaybackBridge {
         for expectedTrackID: String, duration: Double, state: AnyObject?
     ) -> [String: Any] {
         precondition(Thread.isMainThread)
+        if presentedTrackID != expectedTrackID {
+            presentedTrackID = expectedTrackID
+            presentedTrackFields = [:]
+        }
         let nowPlaying = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         // The observer can supply the supported player before the legacy
         // Now Playing service is captured. Read display data from the very
         // same SPTPlayerState used for this session's identity and clock.
         let stateTrack = safeRead(state, key: "track") as AnyObject?
-        let legacyTrack = statefulPlayer?.currentTrack() as AnyObject?
-        let track = [stateTrack, legacyTrack].compactMap { $0 }.first {
+        let legacyTrack = safeRead(statefulPlayer as AnyObject?, key: "currentTrack") as AnyObject?
+        let tracks = [stateTrack, legacyTrack].compactMap { $0 }.filter {
             extractURI(from: $0).flatMap(spotifyTrackID) == expectedTrackID
         }
-        let metadata = safeRead(track, key: "metadata") as? [String: String] ?? [:]
-        let trackTitle = nonEmpty(safeRead(track, key: "trackTitle") as? String)
-        let trackArtist = nonEmpty(safeRead(track, key: "artistName") as? String)
+        func trackField(_ key: String) -> String? {
+            tracks.lazy.compactMap { self.nonEmpty(self.safeRead($0, key: key) as? String) }.first
+        }
+        var metadata: [String: String] = [:]
+        for track in tracks.reversed() {
+            for (key, value) in safeRead(track, key: "metadata") as? [String: String] ?? [:] {
+                if let value = nonEmpty(value) { metadata[key] = value }
+            }
+        }
+        let trackTitle = trackField("trackTitle")
+        let trackArtist = trackField("artistName")
         let capturedMatches = capturedTrackId == expectedTrackID
         let nowPlayingTitle = nonEmpty(nowPlaying[MPMediaItemPropertyTitle] as? String)
         let nowPlayingArtist = nonEmpty(nowPlaying[MPMediaItemPropertyArtist] as? String)
         let knownTitle = trackTitle
+            ?? nonEmpty(presentedTrackFields["title"])
             ?? (capturedMatches ? nonEmpty(capturedTrackTitle) : nil)
         let knownArtist = trackArtist
+            ?? nonEmpty(presentedTrackFields["artist"])
             ?? (capturedMatches ? nonEmpty(capturedArtistName) : nil)
         // MPNowPlayingInfoCenter can lag one turn behind a rapid skip. Only
         // borrow its optional fields when its title/artist agree with the
@@ -443,25 +460,29 @@ final class SpicyLyricsPlaybackBridge {
             && knownArtist != nil
             && nowPlayingTitle == knownTitle
             && nowPlayingArtist == knownArtist
-        let title = trackTitle
-            ?? (capturedMatches ? nonEmpty(capturedTrackTitle) : nil)
-            ?? (nowPlayingMatches ? nowPlayingTitle : nil)
-            ?? "Unknown track"
-        let artist = trackArtist
-            ?? (capturedMatches ? nonEmpty(capturedArtistName) : nil)
-            ?? (nowPlayingMatches ? nowPlayingArtist : nil)
-            ?? "Unknown artist"
-        let album = nonEmpty(safeRead(track, key: "albumTitle") as? String)
+        let title = knownTitle ?? "Unknown track"
+        let artist = knownArtist ?? "Unknown artist"
+        let album = trackField("albumTitle")
             ?? nonEmpty(metadata["album_title"])
             ?? (nowPlayingMatches
                 ? nonEmpty(nowPlaying[MPMediaItemPropertyAlbumTitle] as? String)
                 : nil)
+            ?? nonEmpty(presentedTrackFields["album"])
             ?? ""
         let artwork = normalizedArtworkURL(from: metadata)
             ?? (nowPlayingMatches
                 ? artworkDataURL(from: nowPlaying[MPMediaItemPropertyArtwork] as? MPMediaItemArtwork)
                 : nil)
+            ?? nonEmpty(presentedTrackFields["artwork"])
             ?? ""
+        let color = trackField("extractedColorHex")
+            ?? nonEmpty(presentedTrackFields["dominantColor"]) ?? ""
+        // Partial observations may improve one field without repeating every
+        // other field. Never cache fallback labels or borrow from another URI.
+        presentedTrackFields = [
+            "title": knownTitle ?? "", "artist": knownArtist ?? "", "album": album,
+            "artwork": artwork, "dominantColor": color
+        ]
 
         return [
             "id": expectedTrackID,
@@ -471,7 +492,7 @@ final class SpicyLyricsPlaybackBridge {
             "album": album,
             "durationMs": Int((max(0, duration) * 1000).rounded()),
             "artwork": artwork,
-            "dominantColor": safeRead(track, key: "extractedColorHex") as? String ?? ""
+            "dominantColor": color
         ]
     }
 

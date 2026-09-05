@@ -46,4 +46,17 @@ try {
     $result = ($landscape | ConvertFrom-Json) | ConvertFrom-Json
     Write-Host ($result | ConvertTo-Json -Compress -Depth 5)
     if (!$ReportOnly -and !$result.pass) { throw 'Landscape artwork removal failed' }
+    $fallback = @'
+(async () => {
+  SpicyQA.scenario('next', {isPlaying:false,isPaused:true,isAdvancing:false});
+  await new Promise(requestAnimationFrame);
+  const cover = document.querySelector('#cover');
+  return JSON.stringify({name:'a song without artwork has no previous image or stale artwork description',
+    alt:cover.alt,pass:!cover.hasAttribute('src') && cover.alt === ''
+      && getComputedStyle(document.querySelector('#artwork-backdrop')).backgroundImage === 'none'});
+})()
+'@ | & agent-browser --session $session eval --stdin
+    $result = ($fallback | ConvertFrom-Json) | ConvertFrom-Json
+    Write-Host ($result | ConvertTo-Json -Compress -Depth 5)
+    if (!$ReportOnly -and !$result.pass) { throw 'Missing-artwork fallback failed' }
 } finally { & agent-browser --session $session close | Out-Null }

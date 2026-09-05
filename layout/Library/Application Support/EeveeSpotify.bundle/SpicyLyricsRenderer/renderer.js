@@ -290,10 +290,9 @@
     const artist = String(track?.artist || "Unknown artist");
     const album = String(track?.album || "");
     const artwork = String(track?.artwork || "");
-    const dominantColor = String(track?.dominantColor || "");
     // Playback observations are frequent; metadata and artwork are not. Avoid
-    // decoding/sampling the same image and rebuilding five labels per heartbeat.
-    const key = JSON.stringify([title, artist, album, artwork, dominantColor, state.surface]);
+    // decoding the same image and rebuilding five labels per heartbeat.
+    const key = JSON.stringify([title, artist, album, artwork, state.surface]);
     if (state.trackPresentationKey === key) return;
     state.trackPresentationKey = key;
     dom.title.textContent = title;
@@ -320,6 +319,8 @@
       dom.miniCover.src = artwork;
       dom.miniCover.alt = "";
     } else {
+      dom.cover.classList.remove("ready");
+      dom.cover.alt = "";
       dom.cover.removeAttribute("src");
       dom.miniCover.removeAttribute("src");
     }
