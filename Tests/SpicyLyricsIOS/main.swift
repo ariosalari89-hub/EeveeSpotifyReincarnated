@@ -401,6 +401,21 @@ struct QAFailure: Error { let message: String }
                   preparing.rootViewController?.view.subviews.count == 2 else {
                 throw QAFailure(message: "entry must cover native lyrics before renderer loading")
             }
+            preparing.layoutIfNeeded()
+            guard let entry = preparing.rootViewController?.view.subviews.first(where: { !($0 is WKWebView) }),
+                  let snapshot = entry.subviews.first(where: { !($0 is UIButton) }) else {
+                throw QAFailure(message: "entry must preserve the previous screen while preparing")
+            }
+            let entryBounds = entry.convert(entry.bounds, to: preparing)
+            let snapshotBounds = snapshot.convert(snapshot.bounds, to: preparing)
+            guard abs(entryBounds.width - preparing.bounds.width) < 1,
+                  abs(entryBounds.height - preparing.bounds.height) < 1,
+                  abs(snapshotBounds.width - preparing.bounds.width) < 1,
+                  abs(snapshotBounds.height - preparing.bounds.height) < 1,
+                  abs(snapshotBounds.minX) < 1, abs(snapshotBounds.minY) < 1 else {
+                throw QAFailure(message: "entry zoomed before reveal: window=\(preparing.bounds), cover=\(entryBounds), snapshot=\(snapshotBounds)")
+            }
+            checks.append("preparation preserves the source screen at 1:1 size before reveal")
             try await waitFor("initial lyrics loaded", "document.querySelector('#lyrics').textContent.includes('track-1')")
             try await Task.sleep(nanoseconds: 500_000_000)
             guard webView()?.alpha == 1, webView()?.transform == .identity,
