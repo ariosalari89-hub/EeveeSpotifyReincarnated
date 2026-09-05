@@ -298,11 +298,11 @@ window.runSpicyTransitionChecks = async function (phase) {
     const futureText = textRGB('.line-timed.not-sung > .line-text');
     const highlightSeparation = (brightness(currentText) + .05) / (brightness(futureText) + .05);
     check('fullscreen unsung text is distinctly quieter than the white active lyric',
-      currentText.every(c => c === 255) && highlightSeparation >= 2,
+      currentText.every(c => c === 255) && highlightSeparation >= 3,
       {currentText, futureText, highlightSeparation});
     const coverBlur = Number(getComputedStyle(document.querySelector('#artwork-backdrop')).filter.match(/blur\(([\d.]+)px\)/)?.[1]);
     check('fullscreen cover retains a gentle blur with slightly more artwork definition',
-      coverBlur >= 24 && coverBlur <= 30, {blurPx:coverBlur});
+      coverBlur >= 10 && coverBlur <= 16, {blurPx:coverBlur});
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
     const context = canvas.getContext('2d'); context.fillStyle = '#466a91';context.fillRect(0,0,16,16);
     const artwork = canvas.toDataURL();
@@ -356,6 +356,61 @@ window.runSpicyTransitionChecks = async function (phase) {
     check('dynamic-background preference can leave a static blurred cover',
       getComputedStyle(backdrop).animationPlayState === 'paused'
         && getComputedStyle(backdrop).backgroundImage.includes(artwork));
+    const fullscreenFilter = getComputedStyle(backdrop).filter;
+    const fullscreenVeil = getComputedStyle(document.querySelector('.contrast-veil')).backgroundImage;
+    SpicyQA.send('bootstrap',{surface:'card',preferences:{dynamicBackground:true},reduceMotion:false});
+    observe({isPlaying:true,isPaused:false,isAdvancing:true});
+    for (const deadline = performance.now()+3000;performance.now()<deadline;) {
+      await frame(); if(getComputedStyle(backdrop).backgroundImage.includes(artwork)) break;
+    }
+    check('preview uses the same current cover, blur and contrast veil as fullscreen',
+      getComputedStyle(backdrop).display !== 'none'
+        && getComputedStyle(backdrop).backgroundImage.includes(artwork)
+        && getComputedStyle(backdrop).filter === fullscreenFilter
+        && getComputedStyle(document.querySelector('.contrast-veil')).display !== 'none'
+        && getComputedStyle(document.querySelector('.contrast-veil')).backgroundImage === fullscreenVeil);
+    const previewStart = getComputedStyle(backdrop).transform;
+    await wait(200);
+    check('preview cover follows the same enabled playback motion',
+      getComputedStyle(backdrop).animationPlayState === 'running'
+        && getComputedStyle(backdrop).transform !== previewStart);
+    SpicyQA.send('lifecycle',{state:'hidden'});
+    await frame(); await frame();
+    const coveredPreview = getComputedStyle(backdrop).transform;
+    await wait(120);
+    check('fullscreen-covered preview freezes its cover movement',
+      getComputedStyle(backdrop).animationPlayState === 'paused'
+        && getComputedStyle(backdrop).transform === coveredPreview);
+    SpicyQA.send('lifecycle',{state:'visible'});
+    observe(paused);
+    await frame();
+    check('paused preview keeps its current cover still and visible',
+      getComputedStyle(backdrop).animationPlayState === 'paused'
+        && getComputedStyle(backdrop).backgroundImage.includes(artwork));
+    SpicyQA.send('bootstrap',{surface:'card',preferences:{dynamicBackground:true},reduceMotion:true});
+    observe({isPlaying:true,isPaused:false,isAdvancing:true});
+    await frame();
+    check('reduced-motion preview keeps artwork without animation',
+      getComputedStyle(backdrop).display !== 'none' && getComputedStyle(backdrop).animationName === 'none'
+        && getComputedStyle(backdrop).backgroundImage.includes(artwork));
+    SpicyQA.send('bootstrap',{surface:'card',preferences:{dynamicBackground:false},reduceMotion:false});
+    await frame();
+    check('preview respects the static-background preference',
+      getComputedStyle(backdrop).animationPlayState === 'paused'
+        && getComputedStyle(backdrop).backgroundImage.includes(artwork));
+    SpicyQA.scenario('next',paused);
+    await frame();
+    check('preview clears the prior cover when the skipped-to song has none',
+      getComputedStyle(backdrop).backgroundImage === 'none'
+        && getComputedStyle(backdrop).backgroundColor === 'rgb(8, 8, 8)');
+    SpicyQA.send('bootstrap',{surface:'inline',preferences:{dynamicBackground:true},reduceMotion:false});
+    observe({isPlaying:true,isPaused:false,isAdvancing:true});
+    await frame();
+    check('above-title caption stays transparent without a cover layer',
+      getComputedStyle(backdrop).display === 'none' && getComputedStyle(backdrop).backgroundImage === 'none'
+        && getComputedStyle(document.querySelector('.contrast-veil')).display === 'none'
+        && getComputedStyle(document.body).backgroundColor === 'rgba(0, 0, 0, 0)');
+    bootstrap('fullscreen');
     SpicyQA.scenario('next',paused);
     await frame();
     check('new track with no cover clears the previous background',

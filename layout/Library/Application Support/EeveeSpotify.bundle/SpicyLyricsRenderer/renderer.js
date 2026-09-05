@@ -185,7 +185,7 @@
 
     syncMotion() {
       this.layer.classList.toggle("is-animated", this.ready && this.enabled && this.playing
-        && state.surface === "fullscreen" && state.lifecyclePhase === "visible"
+        && state.surface !== "inline" && state.lifecyclePhase === "visible"
         && !document.hidden && !reduceMotion());
     }
 
@@ -324,7 +324,7 @@
       dom.cover.removeAttribute("src");
       dom.miniCover.removeAttribute("src");
     }
-    ambient.setArtwork(state.surface === "fullscreen" ? artwork : "");
+    ambient.setArtwork(state.surface !== "inline" ? artwork : "");
   }
 
   function applyControls() {
@@ -845,7 +845,7 @@
       "--lyric-scale",
       String(state.preferences.fontSize / 100)
     );
-    ambient.setEnabled(state.surface === "fullscreen" && state.preferences.dynamicBackground && !reduceMotion());
+    ambient.setEnabled(state.surface !== "inline" && state.preferences.dynamicBackground && !reduceMotion());
     if (rerender && state.rawLyrics) {
       renderLyrics(state.rawLyrics, state.lyricsTrackId, state.lyricsGeneration);
     } else if (state.lines.length) {

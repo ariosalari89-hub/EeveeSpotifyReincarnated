@@ -57,5 +57,11 @@ try {
     & agent-browser --session $session a11y --json | Write-Host
     & agent-browser --session $session find role button click --name 'Close settings' | Out-Null
     & agent-browser --session $session a11y --json | Write-Host
+    foreach ($size in @(@(360,320),@(280,240))) {
+        & agent-browser --session $session set viewport $size[0] $size[1] | Out-Null
+        $null = Eval-Visual "(async()=>{SpicyQA.send('bootstrap',{surface:'card',preferences:{fontSize:100,dynamicBackground:false}});SpicyQA.sendSession({trackId:'qa-line',positionMs:62000,durationMs:221000,isPlaying:false,isPaused:true,isAdvancing:false,track:{id:'qa-line',title:'make you mine',artist:'Madison Beer',artwork:'$artwork'}});await new Promise(r=>setTimeout(r,650));return JSON.stringify({ready:true});})()"
+        & agent-browser --session $session screenshot (Join-Path $EvidenceDir "preview-$($size[0])x$($size[1]).png") | Out-Null
+        & agent-browser --session $session a11y --json | Write-Host
+    }
     & agent-browser --session $session errors | Write-Host
 } finally { & agent-browser --session $session close | Out-Null }

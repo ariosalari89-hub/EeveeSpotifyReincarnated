@@ -176,6 +176,13 @@ private final class SpicyLyricsEmbeddedHost {
         updating = true
         defer { updating = false }
         UIView.performWithoutAnimation {
+            // A track refresh can clear the native container's children while
+            // keeping the container and this associated host alive. Restore
+            // our existing view before hiding the new native lyric children;
+            // otherwise neither caption is visible after fullscreen closes.
+            if controller.view.superview !== container {
+                container.addSubview(controller.view)
+            }
             // Card taps belong to the replacement. A native ancestor tap
             // must not also start Spotify's zoom behind the new window.
             if surface == .card || surface == .inline {

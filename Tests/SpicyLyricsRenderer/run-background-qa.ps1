@@ -23,7 +23,8 @@ try {
   const result = {name:'fullscreen displays the blurred song cover edge-to-edge',
     opacity:Number(style.opacity),filter:style.filter,
     pass:style.backgroundImage.includes(artwork) && Number(style.opacity) >= .9
-      && parseFloat(style.filter.match(/blur\(([^)]+)/)?.[1] || '0') >= 30
+      && parseFloat(style.filter.match(/blur\(([^)]+)/)?.[1] || '0') >= 10
+      && parseFloat(style.filter.match(/blur\(([^)]+)/)?.[1] || '0') <= 16
       && bounds.left <= 0 && bounds.top <= 0 && bounds.right >= innerWidth && bounds.bottom >= innerHeight};
   return JSON.stringify(result);
 })()

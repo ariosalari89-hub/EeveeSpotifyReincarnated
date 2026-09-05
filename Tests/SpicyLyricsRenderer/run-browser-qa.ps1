@@ -371,6 +371,39 @@ try {
     Require-Qa "lyric and metadata contrast against worst-case white artwork" $contrast
     Test-QaAccessibility "portrait karaoke"
 
+    & agent-browser --session $session set viewport 280 240 | Out-Null
+    $previewStyles = Invoke-QaEval @'
+(async () => {
+  SpicyQA.send('bootstrap',{surface:'card',preferences:{fontSize:82,dynamicBackground:false}});
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 8;
+  const context = canvas.getContext('2d'); context.fillStyle = 'white'; context.fillRect(0,0,8,8);
+  const artwork = canvas.toDataURL();
+  SpicyQA.sendSession({positionMs:6500,isPlaying:false,isPaused:true,isAdvancing:false,
+    track:{...SpicyQA.tracks.karaoke,artwork}});
+  await new Promise(r=>setTimeout(r,350));
+  if (!getComputedStyle(document.querySelector('#artwork-backdrop')).backgroundImage.includes(artwork)) throw new Error('Preview white cover did not load');
+  const color = selector => getComputedStyle(document.querySelector(selector)).color.match(/[\d.]+/g).map(Number);
+  const opaqueLines = [...document.querySelectorAll('.lyric-line')].every(e=>getComputedStyle(e).opacity==='1');
+  document.querySelector('#app').style.visibility = 'hidden';
+  return JSON.stringify({colors:{inactive:color('.lead.not-sung .token'),artist:color('#artist'),
+    timeline:color('.timeline'),backgroundVocal:color('.background .token')},opaqueLines,
+    fontPx:parseFloat(getComputedStyle(document.querySelector('.lead.not-sung')).fontSize),
+    backgroundFontPx:parseFloat(getComputedStyle(document.querySelector('.background')).fontSize)});
+})()
+'@
+    $previewBackground = Join-Path $artifactDirectory 'preview-worst-case-white-background.png'
+    & agent-browser --session $session screenshot $previewBackground | Out-Null
+    $previewContrastRaw = & python (Join-Path $PSScriptRoot 'check-contrast.py') $previewBackground ($previewStyles | ConvertTo-Json -Compress -Depth 5)
+    if ($LASTEXITCODE -ne 0) { throw 'Preview pixel contrast measurement failed' }
+    $previewContrast = $previewContrastRaw | ConvertFrom-Json
+    if ($previewContrast.ratios.inactive -lt 5 -or $previewContrast.ratios.backgroundVocal -lt 5) {
+        throw "Minimum-size preview lyrics fail normal-text contrast: $previewContrastRaw"
+    }
+    Require-Qa "minimum-size preview contrast against worst-case white artwork" $previewContrast
+    Write-Host "PASS preview text sizes measured at $($previewStyles.fontPx)px and $($previewStyles.backgroundFontPx)px"
+    $null = Invoke-QaEval "(()=>{document.querySelector('#app').style.visibility='';SpicyQA.send('bootstrap',{surface:'fullscreen',preferences:{fontSize:126}});return JSON.stringify({restored:true});})()"
+    & agent-browser --session $session set viewport 393 852 | Out-Null
+
     $portraitOutput = & agent-browser --session $session screenshot (Join-Path $artifactDirectory "portrait-karaoke.png")
     $portraitOutput | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Could not capture portrait baseline" }
