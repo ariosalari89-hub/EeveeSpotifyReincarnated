@@ -328,7 +328,7 @@ try {
         {Text:"Aye, ",StartTime:15,EndTime:18},
         {Text:"Panini",StartTime:18,EndTime:21},
         {Text:"don't you be a meanie",StartTime:21,EndTime:30}
-      ]}}
+      ]},Background:[{StartTime:18,EndTime:21,Syllables:[{Text:'Additional vocal',StartTime:18,EndTime:21}]}]}
     ]
   }});
   window.SpicyQA.send("bootstrap", {preferences:{fontSize:126}});
@@ -345,6 +345,7 @@ try {
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 8;
   const context = canvas.getContext('2d'); context.fillStyle = 'white';context.fillRect(0,0,8,8);
   const artwork = canvas.toDataURL();
+  SpicyQA.send('bootstrap',{preferences:{fontSize:82}});
   SpicyQA.sendSession({positionMs:6500,isPlaying:false,isPaused:true,isAdvancing:false,
     track:{...SpicyQA.tracks.karaoke,artwork}});
   for (let i=0;i<120&&!getComputedStyle(document.querySelector('#artwork-backdrop')).backgroundImage.includes(artwork);i++) {
@@ -354,7 +355,9 @@ try {
   const color = selector => getComputedStyle(document.querySelector(selector)).color.match(/[\d.]+/g).map(Number);
   const opaqueLines = [...document.querySelectorAll('.lyric-line')].every(e=>getComputedStyle(e).opacity==='1');
   document.querySelector('#app').style.visibility = 'hidden';
-  return JSON.stringify({colors:{inactive:color('.token'),artist:color('#artist'),timeline:color('.timeline')},opaqueLines});
+  return JSON.stringify({colors:{inactive:color('.token'),artist:color('#artist'),timeline:color('.timeline'),
+    backgroundVocal:color('.background .token')},opaqueLines,
+    backgroundFontPx:parseFloat(getComputedStyle(document.querySelector('.background')).fontSize)});
 })()
 '@
     $whiteBackground = Join-Path $artifactDirectory 'worst-case-white-background.png'
@@ -362,7 +365,9 @@ try {
     $contrastRaw = & python (Join-Path $PSScriptRoot 'check-contrast.py') $whiteBackground ($contrastStyles | ConvertTo-Json -Compress -Depth 5)
     if ($LASTEXITCODE -ne 0) { throw 'Pixel contrast measurement failed' }
     $contrast = $contrastRaw | ConvertFrom-Json
-    $null = Invoke-QaEval "(()=>{document.querySelector('#app').style.visibility='';return JSON.stringify({restored:true});})()"
+    if ($contrast.ratios.backgroundVocal -lt 5) { throw 'Small background vocals fail conservative normal-text contrast' }
+    Write-Host "PASS minimum-size background vocal contrast $($contrast.ratios.backgroundVocal) at $($contrastStyles.backgroundFontPx)px"
+    $null = Invoke-QaEval "(()=>{document.querySelector('#app').style.visibility='';SpicyQA.send('bootstrap',{preferences:{fontSize:126}});return JSON.stringify({restored:true});})()"
     Require-Qa "lyric and metadata contrast against worst-case white artwork" $contrast
     Test-QaAccessibility "portrait karaoke"
 

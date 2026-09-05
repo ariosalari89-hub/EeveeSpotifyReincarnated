@@ -285,7 +285,24 @@ window.runSpicyTransitionChecks = async function (phase) {
   }
   if (phase === 'background') {
     bootstrap('fullscreen');
-    SpicyQA.scenario('line', paused);
+    SpicyQA.lyrics.line.Content = [
+      {Type:'Vocal',Text:'Current fullscreen phrase',StartTime:0,EndTime:2},
+      {Type:'Vocal',Text:'Upcoming fullscreen phrase',StartTime:2,EndTime:4}
+    ];
+    SpicyQA.scenario('line', { ...paused, positionMs: 1500 });
+    await wait(280);
+    const textRGB = selector => getComputedStyle(document.querySelector(selector)).webkitTextFillColor.match(/[\d.]+/g).slice(0,3).map(Number);
+    const brightness = rgb => rgb.map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
+      .reduce((sum,c,i) => sum + c * [.2126,.7152,.0722][i], 0);
+    const currentText = textRGB('.line-timed.active > .line-text');
+    const futureText = textRGB('.line-timed.not-sung > .line-text');
+    const highlightSeparation = (brightness(currentText) + .05) / (brightness(futureText) + .05);
+    check('fullscreen unsung text is distinctly quieter than the white active lyric',
+      currentText.every(c => c === 255) && highlightSeparation >= 2,
+      {currentText, futureText, highlightSeparation});
+    const coverBlur = Number(getComputedStyle(document.querySelector('#artwork-backdrop')).filter.match(/blur\(([\d.]+)px\)/)?.[1]);
+    check('fullscreen cover retains a gentle blur with slightly more artwork definition',
+      coverBlur >= 24 && coverBlur <= 30, {blurPx:coverBlur});
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
     const context = canvas.getContext('2d'); context.fillStyle = '#466a91';context.fillRect(0,0,16,16);
     const artwork = canvas.toDataURL();
