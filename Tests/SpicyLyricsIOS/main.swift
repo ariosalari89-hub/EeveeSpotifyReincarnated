@@ -499,10 +499,20 @@ struct QAFailure: Error { let message: String }
         SpicyLyricsFullscreenCoordinator.shared.open(from: root)
         let preparingWindow = scene.keyWindow
         SpicyLyricsFullscreenCoordinator.shared.close()
-        try await Task.sleep(nanoseconds: 500_000_000)
-        guard preparingWindow?.isHidden == true, scene.keyWindow?.rootViewController === root else {
-            throw QAFailure(message: "canceling during preparation must restore the player")
+        // Match the existing close test's observable three-second completion
+        // bound. A fixed 500ms sample raced the compositor: the window really
+        // closed at 767ms on the cold simulator, after that sample had failed.
+        let cancelStarted = ProcessInfo.processInfo.systemUptime
+        while ProcessInfo.processInfo.systemUptime - cancelStarted < 3 {
+            if preparingWindow?.isHidden == true, preparingWindow?.rootViewController == nil,
+               scene.keyWindow?.rootViewController === root { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
         }
+        guard preparingWindow?.isHidden == true, preparingWindow?.rootViewController == nil,
+              scene.keyWindow?.rootViewController === root else {
+            throw QAFailure(message: "canceling during preparation must dispose its window and restore the player within 3 seconds")
+        }
+        checks.append("canceling during preparation disposes its window and restores the player in \(ProcessInfo.processInfo.systemUptime - cancelStarted)s")
         SpicyLyricsFullscreenCoordinator.shared.open(from: root)
         try await waitFor("reopen after interrupted preparation loads current lyrics", "document.querySelector('#lyrics').textContent.includes('track-6')")
         SpicyLyricsFullscreenCoordinator.shared.close()
