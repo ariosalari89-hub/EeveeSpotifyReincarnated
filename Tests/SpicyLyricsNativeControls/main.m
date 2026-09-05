@@ -146,6 +146,39 @@ int main(void) {
         require([swiftControls[@"smartShuffleEnabled"] isEqual:@NO]
                 && [swiftControls[@"smartShuffleAvailable"] isEqual:@YES],
                 @"opening the song page must read native Swift controls without aborting");
+        for (NSNumber *expected in @[@1, @2, @0]) {
+            require(EeveeSpicyPerformControl(@"toggleShuffle", state) == 1,
+                    @"native Swift shuffle dispatch must succeed");
+            require(swiftSmart.mode == expected.integerValue, @"native Swift shuffle must cycle through all three modes");
+            require([EeveeSpicyReadControls(state)[@"smartShuffleEnabled"] isEqual:@(expected.integerValue == 2)],
+                    @"native Swift shuffle observation must confirm its actual mode");
+        }
+        require(!swiftSmart.offeredPicker && swiftSmart.explicitCalls == 3,
+                @"native Swift mode setter must preserve direct, picker-free dispatch");
+        actions.smartUnavailable = YES;
+        require(EeveeSpicyPerformControl(@"toggleShuffle", state) == 1 && swiftSmart.mode == 1,
+                @"native Swift handler must allow normal shuffle in unsupported contexts");
+        require(EeveeSpicyPerformControl(@"toggleShuffle", state) == 1 && swiftSmart.mode == 0,
+                @"native Swift handler must not select unsupported Smart Shuffle");
+        actions.smartUnavailable = NO;
+        swiftSmart.rejectChange = YES;
+        require(EeveeSpicyPerformControl(@"toggleShuffle", state) == 1 && swiftSmart.mode == 0,
+                @"native Swift rejection must not be interpreted as a successful state change");
+        require([EeveeSpicyReadControls(state)[@"smartShuffleEnabled"] isEqual:@NO],
+                @"rejected native Swift mode must stay unselected");
+        swiftSmart.rejectChange = NO;
+        state.contextURI = nil;
+        require(!EeveeSpicyReadControls(state)[@"smartShuffleEnabled"]
+                && EeveeSpicyPerformControl(@"toggleShuffle", state) == -1,
+                @"missing context must leave Smart Shuffle unknown and unavailable");
+        state.contextURI = [NSURL URLWithString:@"spotify:playlist:test"];
+        actions.smartShuffleHandler = nil;
+        require(!EeveeSpicyReadControls(state)[@"smartShuffleEnabled"]
+                && EeveeSpicyPerformControl(@"toggleShuffle", state) == -1,
+                @"missing native handler must remain nonfatal and unavailable");
+        require([EeveeSpicyReadControls(state)[@"canPause"] isEqual:@YES],
+                @"missing optional shuffle handler must not break other controls");
+        NSLog(@"PASS native Swift read, three-state shuffle, unsupported context, rejection and missing handler");
 
         BoolOptions *options = [BoolOptions new];
         for (NSNumber *value in @[@YES, @NO, @YES]) {
