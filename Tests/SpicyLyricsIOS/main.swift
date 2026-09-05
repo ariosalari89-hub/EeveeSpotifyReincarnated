@@ -15,6 +15,36 @@ final class QALegacyLyricsView: UIView {}
 final class QACardHeaderView: UIView {
     lazy var expandButtonContainerView: UIView = UIView()
 }
+@objc(_TtC22Lyrics_CardElementImpl8CardView)
+final class QACardView: UIView {
+    let headerView: UIView
+    let contentView: UIView
+    let stackView = UIView()
+    let gradientLayer = CAGradientLayer()
+    init(frame: CGRect, header: UIView, content: UIView) {
+        headerView = header
+        contentView = content
+        super.init(frame: frame)
+        backgroundColor = UIColor(red: 0.34, green: 0.49, blue: 0.62, alpha: 1)
+        gradientLayer.colors = [backgroundColor!.cgColor, backgroundColor!.cgColor]
+        layer.insertSublayer(gradientLayer, at: 0)
+        layer.cornerRadius = 18
+        clipsToBounds = true
+        stackView.clipsToBounds = true
+        content.clipsToBounds = true
+        stackView.addSubview(header)
+        stackView.addSubview(content)
+        addSubview(stackView)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        gradientLayer.frame = bounds
+        stackView.frame = bounds.insetBy(dx: 16, dy: 16)
+        headerView.frame = CGRect(x: 0, y: 0, width: stackView.bounds.width, height: 40)
+        contentView.frame = CGRect(x: 0, y: 40, width: stackView.bounds.width, height: stackView.bounds.height - 40)
+    }
+}
 
 // Only Spotify and its network service are simulated. The full-screen owner,
 // WebKit host, renderer and UIKit lifecycle below are the shipping sources.
@@ -214,19 +244,19 @@ struct QAFailure: Error { let message: String }
         var enabled = true
         SpicyLyricsEmbeddedSurfaces.install { enabled }
         let width = min(360, root.view.bounds.width - 32)
-        let card = QACardContentView(frame: CGRect(x: 16, y: 220, width: width, height: 320))
+        let card = QACardContentView(frame: CGRect(x: 0, y: 40, width: width - 32, height: 320))
         card.backgroundColor = UIColor(red: 0.50, green: 0.38, blue: 0.56, alpha: 1)
         let original = UILabel(frame: card.bounds)
         original.text = "ORIGINAL NATIVE LYRICS MUST NOT FLASH"
         card.addSubview(original)
         let originalTap = UITapGestureRecognizer()
         card.addGestureRecognizer(originalTap)
-        let header = QACardHeaderView(frame: CGRect(x: 16, y: 180, width: width, height: 40))
+        let header = QACardHeaderView(frame: CGRect(x: 0, y: 0, width: width - 32, height: 40))
         let heading = UILabel(frame: CGRect(x: 8, y: 0, width: 220, height: 40))
         heading.text = "Lyrics · native share"
         heading.textColor = .white
         header.addSubview(heading)
-        header.expandButtonContainerView.frame = CGRect(x: width - 44, y: 0, width: 44, height: 40)
+        header.expandButtonContainerView.frame = CGRect(x: width - 32 - 44, y: 0, width: 44, height: 40)
         let nativeExpand = UIButton(type: .system)
         nativeExpand.frame = header.expandButtonContainerView.bounds
         nativeExpand.setTitle("↗", for: .normal)
@@ -234,8 +264,9 @@ struct QAFailure: Error { let message: String }
         nativeExpand.addAction(UIAction { _ in nativeExpandCount += 1 }, for: .touchUpInside)
         header.expandButtonContainerView.addSubview(nativeExpand)
         header.addSubview(header.expandButtonContainerView)
-        root.view.addSubview(header)
-        root.view.addSubview(card)
+        let cardShell = QACardView(frame: CGRect(x: 16, y: 180, width: width, height: 392), header: header, content: card)
+        root.view.addSubview(cardShell)
+        cardShell.setNeedsLayout(); cardShell.layoutIfNeeded()
         let inline = QAInlineLyricsView(frame: CGRect(x: 24, y: 120, width: width - 16, height: 52))
         let originalInline = UILabel(frame: inline.bounds)
         originalInline.text = "OLD CAPTION"
@@ -273,6 +304,23 @@ struct QAFailure: Error { let message: String }
             throw QAFailure(message: details.joined(separator: "\n"))
         }
         try await waitForBoth("track-3")
+        for _ in 0..<30 {
+            if cardWeb.alpha > 0.99 { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard cardWeb.alpha > 0.99 else { throw QAFailure(message: "preview was not revealed before the full-card check") }
+        let fullCardImage = UIGraphicsImageRenderer(bounds: root.view.bounds).image { _ in
+            root.view.drawHierarchy(in: root.view.bounds, afterScreenUpdates: true)
+        }
+        try fullCardImage.pngData()?.write(to: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("qa-card-bleed.png"))
+        let paintedCard = cardWeb.convert(cardWeb.bounds, to: cardShell)
+        guard abs(paintedCard.minX) < 1, abs(paintedCard.minY) < 1,
+              abs(paintedCard.width - cardShell.bounds.width) < 1,
+              abs(paintedCard.height - cardShell.bounds.height) < 1 else {
+            throw QAFailure(message: "preview artwork leaves the native card frame exposed: renderer=\(paintedCard), card=\(cardShell.bounds)")
+        }
+        checks.append("preview renderer reaches the entire native rounded card without changing content bounds")
         let startupRestarts = QADiagnostics.snapshot().components(separatedBy: restartMarker).count - restartsBeforeSetup
         if startupRestarts > 0 {
             // A cold simulator may already have used the host's two permitted
@@ -494,7 +542,7 @@ struct QAFailure: Error { let message: String }
               !header.expandButtonContainerView.subviews.contains(where: { $0.accessibilityIdentifier == "spicy-preview-expand" }) else {
             throw QAFailure(message: "embedded detach did not restore native content and clean up WebKit")
         }
-        card.removeFromSuperview(); inline.removeFromSuperview(); header.removeFromSuperview()
+        cardShell.removeFromSuperview(); inline.removeFromSuperview()
         checks.append("embedded detach restores native content and removes WebKit/child controllers")
         SpicyLyricsFullscreenCoordinator.shared.open(from: root)
         let preparingWindow = scene.keyWindow

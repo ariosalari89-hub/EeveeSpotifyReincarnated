@@ -114,6 +114,7 @@ jobs:
             ${{ runner.temp }}/qa-card.png
             ${{ runner.temp }}/qa-inline.png
             ${{ runner.temp }}/qa-embedded-context.png
+            ${{ runner.temp }}/qa-card-bleed.png
             ${{ runner.temp }}/qa-caption-after-skip.png
             ${{ runner.temp }}/qa-session.mp4
           if-no-files-found: warn
