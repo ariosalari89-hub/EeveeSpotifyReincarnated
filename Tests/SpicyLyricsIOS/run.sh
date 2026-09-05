@@ -3,6 +3,7 @@ set -euo pipefail
 QA_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/spicy-ios-qa.XXXXXX")
 QA_APP="$QA_DIR/SpicyLyricsQA.app"
 mkdir -p "$QA_APP"
+xcrun swiftc Tests/SpicyLyricsIOS/VerifyAvailabilityCapture.swift -o "$QA_DIR/verify-availability-capture"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
 xcrun swiftc -swift-version 5 -target "$ARCH-apple-ios17.0-simulator" -sdk "$SDK" \
@@ -70,7 +71,12 @@ xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 for iteration in {1..200}; do
   if [ -f "$CONTAINER/Documents/qa-availability-ready.txt" ] && [ ! -f "$CONTAINER/Documents/qa-availability-done.txt" ]; then
     xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/qa-availability-screen.png"
-    touch "$CONTAINER/Documents/qa-availability-done.txt"
+    # A ready DOM/alpha=1 can precede the cold simulator's first composited
+    # frame. Keep the fixture alive until both native slots really paint.
+    # The app's existing 60-second capture deadline is unchanged.
+    if "$QA_DIR/verify-availability-capture" "$RUNNER_TEMP/qa-availability-screen.png"; then
+      touch "$CONTAINER/Documents/qa-availability-done.txt"
+    fi
   fi
   if [ -f "$CONTAINER/Documents/qa-screen-ready.txt" ] && [ ! -f "$CONTAINER/Documents/qa-screen-done.txt" ]; then
     xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/qa-landscape-screen.png"
