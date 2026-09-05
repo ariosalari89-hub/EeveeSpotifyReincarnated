@@ -174,7 +174,13 @@ struct QAFailure: Error { let message: String }
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         try "landscape".write(to: documents.appendingPathComponent("qa-screen-ready.txt"),
                               atomically: true, encoding: .utf8)
-        for _ in 0..<150 {
+        // This deadline belongs to the external simctl screenshot process, not
+        // the app's response time. On a cold CI host capture alone took 14.3s,
+        // exhausting the former 15s allowance before the shell could acknowledge.
+        // Keep every app/viewport deadline unchanged and still require the actual
+        // completed display capture before advancing to another screen.
+        let captureDeadline = ProcessInfo.processInfo.systemUptime + 60
+        while ProcessInfo.processInfo.systemUptime < captureDeadline {
             if FileManager.default.fileExists(atPath: documents.appendingPathComponent("qa-screen-done.txt").path) {
                 checks.append("actual simulator landscape display captured by simctl")
                 return
