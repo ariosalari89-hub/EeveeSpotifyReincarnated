@@ -58,11 +58,11 @@ The user has authorized implementation without another approval round.
 - [x] Add native redraw/mask/child insertion and non-Canvas hook integration regressions.
 - [x] Add header expand routing test with a native action counter (must stay zero).
 - [x] Add caption segment/dot bounds and landscape duplicate-visibility tests.
-- [ ] Run all model, bundle, browser, clock, C control, and UIKit/WK host tests.
-- [ ] Inspect portrait/landscape/card/inline screenshots, errors and interactions.
-- [ ] Full native build; package against preserved corrected base; archive/payload/hash
+- [x] Run all model, bundle, browser, clock, C control, and UIKit/WK host tests.
+- [x] Inspect portrait/landscape/card/inline screenshots, errors and interactions.
+- [x] Full native build; package against preserved corrected base; archive/payload/hash
   checks; preserve v5.3. No uninstall, data reset, account/signing changes or phone install.
-- [ ] Deliver one IPA with simple update-over-current Sideloadly instructions and honest
+- [x] Prepare one verified IPA handoff with update-over-current Sideloadly instructions and honest
   distinction between automated coverage and actual physical Spotify verification.
 
 No acceptance test may assume a capability/property just because the implementation
@@ -113,3 +113,35 @@ The test now resolves the live child view on each wait instead of checking a
 detached renderer. A deliberate WKNavigationDelegate termination callback test
 requires both views to be replaced and to recover current lyrics. No wait bound
 or assertion is removed, and no production timeout is relaxed to conceal this.
+
+### Final verification and handoff
+
+Production source is unchanged since `e1779a3ab654de209f8e7debf022906adac393a9`.
+Full release run `33933245204` at `7e34e5124ec264686de811da34004ab944217f0d`
+passed all native tests and compiled the ARM64 package. Supplemental native/UI
+run `33933806443` at `5026befa09919f82b720ec31ff5815b8cfee6f7e` passed the same
+production code with stronger settled-rotation checks and an actual simulator-screen
+capture. Only test files/workflow capture outputs differ between these commits.
+
+One earlier uninstrumented run `33932353482` failed initial loading. Its exact cause
+was not captured; four later native runs passed without changing production code.
+This is recorded transparently rather than calling that failure a proven app fix.
+
+Visual QA added a requirement for five consecutive matching native/visual viewport
+samples after rotation. UIKit hierarchy screenshots omitted some composited controls;
+the final real simulator-display screenshot verifies the complete settled UI. The
+caption and preview screenshots use fixture data, not the user's Spotify session.
+
+Verified artifact: `outputs/EeveeSpotify-9.1.76-SpicyLyrics-v5.4-Sideloadly.ipa`
+in the outer workspace, 133,965,959 bytes, SHA-256
+`2eb33358249c4266dd2ce5282264af5829c8acd2f430b08ba6d8a1d16eedd613`.
+Archive validation passes: exact fresh 46-file replacement payload, tested renderer
+bytes, CRC/unique entries, ARM64/load commands, and 1,013 unchanged base entries.
+The preserved v5.3 rollback hash is unchanged. No phone app, cache, save data,
+account or signing setting was changed. Install over the existing app in Sideloadly
+with the same settings, then close/reopen once. Physical Spotify verification remains
+the next user-side check; simulator/test-double coverage is not a phone guarantee.
+
+Evidence is in `outputs/EeveeSpotify-9.1.76-SpicyLyrics-v5.4-Evidence` in the outer
+workspace, including source/build provenance, test output, untouched screenshots,
+archive-verification.json and installation instructions.
