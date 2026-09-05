@@ -517,8 +517,9 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         for delay in [0.12, 0.45] {
             let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] timer in
                 guard let self, !self.isDetached else { return }
-                _ = self.publishSession(reason: "foreground-followup")
-                self.emit(type: "lifecycle", payload: ["state": "visible"])
+                if self.publishSession(reason: "foreground-followup") {
+                    self.emit(type: "lifecycle", payload: ["state": "visible"])
+                }
                 self.foregroundTimers.removeAll { $0 === timer }
             }
             foregroundTimers.append(timer)
