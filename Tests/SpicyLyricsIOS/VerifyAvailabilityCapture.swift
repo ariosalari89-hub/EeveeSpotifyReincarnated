@@ -5,7 +5,8 @@ import Foundation
 // The availability fixture has a black background and white/gray lyric glyphs.
 // Both native slots must actually paint before the fixture is allowed to detach.
 guard CommandLine.arguments.count == 2,
-      let image = NSBitmapImageRep(contentsOfFile: CommandLine.arguments[1]),
+      let png = try? Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])),
+      let image = NSBitmapImageRep(data: png),
       image.pixelsWide > 0, image.pixelsHigh > image.pixelsWide else {
     fputs("Availability capture is missing or not portrait\n", stderr)
     exit(1)
@@ -21,7 +22,7 @@ func paintedPixels(x: Double, y: Double, width: Double, height: Double) -> Int {
     var count = 0
     for row in top..<bottom {
         for column in left..<right {
-            guard let color = image.colorAt(x: column, y: row)?.usingColorSpace(.deviceRGB) else { continue }
+            guard let color = image.colorAt(x: column, y: row)?.usingColorSpace(NSColorSpace.deviceRGB) else { continue }
             if min(color.redComponent, min(color.greenComponent, color.blueComponent)) > 0.16,
                color.alphaComponent > 0.8 {
                 count += 1
