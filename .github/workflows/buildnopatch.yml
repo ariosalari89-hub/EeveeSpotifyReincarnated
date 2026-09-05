@@ -115,6 +115,7 @@ jobs:
             ${{ runner.temp }}/spicy-ios-qa-result.txt
             ${{ runner.temp }}/qa-portrait.png
             ${{ runner.temp }}/qa-landscape.png
+            ${{ runner.temp }}/qa-landscape-window.png
             ${{ runner.temp }}/qa-card.png
             ${{ runner.temp }}/qa-inline.png
             ${{ runner.temp }}/qa-embedded-context.png

@@ -142,6 +142,46 @@ struct QAFailure: Error { let message: String }
         try png.write(to: path)
     }
 
+    func waitForSettledLandscape() async throws {
+        var stableSamples = 0
+        for _ in 0..<100 {
+            if let window = scene.keyWindow, let web = webView(),
+               window.rootViewController?.transitionCoordinator == nil,
+               scene.interfaceOrientation.isLandscape,
+               web.transform == .identity,
+               abs(web.bounds.width - window.bounds.width) < 1,
+               abs(web.bounds.height - window.bounds.height) < 1,
+               let metrics = try await evaluate("[innerWidth,innerHeight,visualViewport.width,visualViewport.height]") as? [NSNumber],
+               metrics.count == 4,
+               abs(metrics[0].doubleValue - Double(web.bounds.width)) < 1,
+               abs(metrics[1].doubleValue - Double(web.bounds.height)) < 1,
+               abs(metrics[2].doubleValue - metrics[0].doubleValue) < 1,
+               abs(metrics[3].doubleValue - metrics[1].doubleValue) < 1 {
+                stableSamples += 1
+                if stableSamples >= 5 {
+                    checks.append("settled landscape native and visual viewport agree: \(metrics)")
+                    return
+                }
+            } else { stableSamples = 0 }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        throw QAFailure(message: "landscape native/visual viewport did not settle")
+    }
+
+    func snapshotWindow(_ name: String) throws {
+        guard let window = scene.keyWindow else { throw QAFailure(message: "snapshot has no native window") }
+        var complete = false
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            complete = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        guard complete, let png = image.pngData() else {
+            throw QAFailure(message: "native window snapshot was incomplete")
+        }
+        let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(name + ".png")
+        try png.write(to: path)
+    }
+
     func failureDiagnostics() async -> String {
         var details = ["scene activation=\(scene.activationState.rawValue) generation=\(SpicyLyricsPlaybackBridge.shared.generation)"]
         for window in scene.windows {
@@ -400,7 +440,9 @@ struct QAFailure: Error { let message: String }
               return !title.getClientRects().length && document.querySelector('#mini-title').textContent==='Track 3'
                 && document.querySelector('.mini-track').getBoundingClientRect().height > 0; })()
             """)
+            try await waitForSettledLandscape()
             try await snapshot("qa-landscape")
+            try snapshotWindow("qa-landscape-window")
             let overlay = scene.windows.first(where: { $0.isKeyWindow })
             _ = try await evaluate("document.querySelector('#close-button').click()")
             try await Task.sleep(nanoseconds: 500_000_000)
