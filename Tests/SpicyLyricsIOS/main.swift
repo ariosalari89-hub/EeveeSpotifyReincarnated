@@ -366,6 +366,26 @@ struct QAFailure: Error { let message: String }
             throw QAFailure(message: "covered lyric views still request playback: expected 1 visible consumer, got \(visibleReads)")
         }
         checks.append("covered caption and preview stop requesting playback while fullscreen owns the scene")
+        for embeddedWeb in [cardWeb, inlineWeb] {
+            _ = try await embeddedWeb.evaluateJavaScript("""
+            window.qaVisibleEvents = 0;
+            (() => { const receive = SpicyNative.receive.bind(SpicyNative);
+              SpicyNative.receive = message => {
+                if (message.type === 'lifecycle' && message.payload.state === 'visible') window.qaVisibleEvents++;
+                return receive(message);
+              }; })();
+            """)
+        }
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        try await Task.sleep(nanoseconds: 700_000_000)
+        for embeddedWeb in [cardWeb, inlineWeb] {
+            let visibleEvents = try await embeddedWeb.evaluateJavaScript("window.qaVisibleEvents") as? Int
+            guard visibleEvents == 0 else {
+                throw QAFailure(message: "foreground followups woke a covered renderer: visible events=\(String(describing: visibleEvents))")
+            }
+        }
+        checks.append("foreground followups leave covered renderers suspended")
         SpicyLyricsPlaybackBridge.shared.position = 22_000
         NotificationCenter.default.post(name: .spicyLyricsPlaybackStateDidChange, object: nil)
         try await waitFor("visible fullscreen keeps receiving playback while embedded views sleep", "Number(document.querySelector('#seek').value) === 22000")
