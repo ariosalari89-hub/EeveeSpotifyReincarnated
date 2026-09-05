@@ -57,6 +57,7 @@
     lyricsType: "unknown",
     lines: [],
     activeLine: -1,
+    lastLyricPosition: null,
     followLyrics: true,
     draggingSeek: false,
     dragPositionMs: 0,
@@ -256,8 +257,9 @@
 
     frame(timestamp) {
       const frameInterval = reduceMotion() ? 1000 : 33;
-      if (timestamp - this.lastFrame >= frameInterval) {
-        this.phase += (timestamp - this.lastFrame) * .000045 * (this.playing ? 1 : .12);
+      if (this.enabled && this.playing && state.lifecyclePhase === "visible"
+          && !document.hidden && timestamp - this.lastFrame >= frameInterval) {
+        this.phase += Math.min(100, timestamp - this.lastFrame) * .000045;
         this.lastFrame = timestamp;
         this.draw();
       }
@@ -517,6 +519,7 @@
   }
 
   function renderLyrics(raw, trackId, generation) {
+    state.lastLyricPosition = null;
     state.rawLyrics = raw;
     state.lyricsTrackId = String(trackId || "");
     state.lyricsGeneration = String(generation || "");
@@ -621,6 +624,7 @@
   }
 
   function fitWordGroups() {
+    state.lastLyricPosition = null;
     if (state.surface === "inline") {
       state.lines.forEach(line => { delete line.captionLayout; });
       updateLyrics(positionNow());
@@ -692,19 +696,27 @@
   function updateLyrics(rawPosition, forceScroll = false) {
     if (!state.lines.length) return;
     const position = rawPosition - state.preferences.playbackOffset;
+    if (!forceScroll && position === state.lastLyricPosition) return;
+    state.lastLyricPosition = position;
     const activeIndex = model.findActiveLine(state.lines, position);
-    const inlineIndex = activeIndex >= 0 ? activeIndex : state.lines.findIndex(
-      (line) => line.kind !== "interlude" && line.kind !== "background");
+    const inlineIndex = state.surface === "inline"
+      ? model.findCaptionLine(state.lines, position, activeIndex) : -1;
     state.lines.forEach((line, index) => {
       const visualState = model.lineVisualState(line, index, activeIndex, position);
       const active = visualState === "active";
-      line.element?.classList.toggle("active", active);
-      line.element?.classList.toggle("sung", visualState === "sung");
-      line.element?.classList.toggle("not-sung", visualState === "not-sung");
-      if (state.surface === "inline") line.element?.classList.toggle("inline-visible", index === inlineIndex);
-      if (line.kind === "lead" && line.element) {
-        if (active) line.element.setAttribute("aria-current", "true");
-        else line.element.removeAttribute("aria-current");
+      if (line.visualState !== visualState) {
+        line.visualState = visualState;
+        line.element?.classList.toggle("active", active);
+        line.element?.classList.toggle("sung", visualState === "sung");
+        line.element?.classList.toggle("not-sung", visualState === "not-sung");
+        if (line.kind === "lead" && line.element) {
+          if (active) line.element.setAttribute("aria-current", "true");
+          else line.element.removeAttribute("aria-current");
+        }
+      }
+      if (state.surface === "inline" && line.captionVisible !== (index === inlineIndex)) {
+        line.captionVisible = index === inlineIndex;
+        line.element?.classList.toggle("inline-visible", line.captionVisible);
       }
     });
 
@@ -728,15 +740,27 @@
           const progress = model.clamp(
             (position - (line.start + dotIndex * segment)) / segment
           );
-          dot.style.setProperty("--fill-number", progress.toFixed(3));
+          const fill = progress.toFixed(3);
+          if (dot.spicyFill !== fill) {
+            dot.spicyFill = fill;
+            dot.style.setProperty("--fill-number", fill);
+          }
         });
       }
       (line.tokens || []).forEach((token) => {
         if (!token.element) return;
         const progress = model.tokenProgress(token, position);
         const pulse = progress > 0 && progress < 1 ? Math.sin(progress * Math.PI) : 0;
-        token.element.style.setProperty("--fill", `${(progress * 100).toFixed(2)}%`);
-        token.element.style.setProperty("--pulse", reduceMotion() ? "0" : pulse.toFixed(3));
+        const fill = `${(progress * 100).toFixed(2)}%`;
+        const lift = reduceMotion() || state.surface !== "fullscreen" ? "0" : pulse.toFixed(3);
+        if (token.paintFill !== fill) {
+          token.paintFill = fill;
+          token.element.style.setProperty("--fill", fill);
+        }
+        if (token.paintPulse !== lift) {
+          token.paintPulse = lift;
+          token.element.style.setProperty("--pulse", lift);
+        }
       });
     }
   }
@@ -760,21 +784,24 @@
   }
 
   function animationFrame() {
+    requestAnimationFrame(animationFrame);
+    if (state.lifecyclePhase !== "visible" || document.hidden) return;
     const position = positionNow();
     const duration = Math.max(1, state.session?.durationMs || 1);
     updateLyrics(position);
     if (!state.draggingSeek) {
-      dom.seek.max = String(duration);
+      if (dom.seek.max !== String(duration)) dom.seek.max = String(duration);
       dom.seek.value = String(model.clamp(position, 0, duration));
       dom.seek.style.setProperty(
         "--seek-progress",
         `${model.clamp(position / duration) * 100}%`
       );
-      dom.elapsed.textContent = formatTime(position);
+      const elapsed = formatTime(position);
+      if (dom.elapsed.textContent !== elapsed) dom.elapsed.textContent = elapsed;
     }
-    dom.duration.textContent = formatTime(duration);
+    const formattedDuration = formatTime(duration);
+    if (dom.duration.textContent !== formattedDuration) dom.duration.textContent = formattedDuration;
     reconcileCommands();
-    requestAnimationFrame(animationFrame);
   }
 
   function savePreferences() {

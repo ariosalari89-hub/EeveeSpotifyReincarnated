@@ -202,4 +202,17 @@ assert.equal(model.renderedPosition({ session: playing, now: 1400, seekPreview: 
 assert.equal(model.renderedPosition({ session: paused, now: 1400, seekPreview: flowingPreview }), 70_000);
 assert.equal(model.renderedPosition({ session: playing, now: 1400, seekPreview: flowingPreview,
   lifecycleFrozen: true, frozenPositionMs: 22_000 }), 22_000, "background freeze outranks pending preview");
+const captionGapLines = [
+  {kind:"lead",start:1000,end:2000},
+  {kind:"lead",start:4000,end:5000},
+  {kind:"background",start:4000,end:5200},
+  {kind:"lead",start:5800,end:7000}
+];
+assert.equal(model.findCaptionLine(captionGapLines, 5500), 1, "short gaps retain the current verse, not the introduction");
+assert.equal(model.findCaptionLine(captionGapLines, 0), 0);
+assert.equal(model.findCaptionLine(captionGapLines, 8000), 3);
+assert.equal(model.findCaptionLine(captionGapLines, 6000), 3);
+assert.equal(model.findCaptionLine([], 1000), -1);
+assert.equal(model.findCaptionLine([{kind:"lead",text:"Untimed"}], 1000), 0);
+assert.equal(model.findCaptionLine([{kind:"interlude",start:0,end:4000},...captionGapLines], 500), 0);
 console.log("Spicy Lyrics renderer model tests passed");

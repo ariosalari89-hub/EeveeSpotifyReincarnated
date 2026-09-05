@@ -457,6 +457,19 @@
     return activeInterlude;
   }
 
+  function findCaptionLine(lines, positionMs, activeIndex = findActiveLine(lines, positionMs)) {
+    if (activeIndex >= 0) return activeIndex;
+    let previous = -1;
+    let first = -1;
+    (lines || []).forEach((line, index) => {
+      if (line.kind === "background" || line.kind === "interlude") return;
+      if (first < 0) first = index;
+      if (Number.isFinite(line.start) && line.start <= positionMs
+          && (previous < 0 || line.start >= lines[previous].start)) previous = index;
+    });
+    return previous >= 0 ? previous : first;
+  }
+
   function lineVisualState(line, index, activeIndex, positionMs) {
     if (!Number.isFinite(line?.start) || !Number.isFinite(line?.end)) return "static";
     const position = finite(positionMs);
@@ -499,6 +512,7 @@
     textFromTokens,
     normalizeLyrics,
     findActiveLine,
+    findCaptionLine,
     lineVisualState,
     tokenProgress,
     shouldAcceptLyrics
