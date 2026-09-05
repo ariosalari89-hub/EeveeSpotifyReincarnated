@@ -18,7 +18,20 @@ final class QACardHeaderView: UIView {
 
 // Only Spotify and its network service are simulated. The full-screen owner,
 // WebKit host, renderer and UIKit lifecycle below are the shipping sources.
-func writeDebugLog(_ message: String) { print(message) }
+private enum QADiagnostics {
+    static let lock = NSLock()
+    static var messages = [String]()
+    static func append(_ message: String) {
+        lock.lock(); defer { lock.unlock() }
+        messages.append(message)
+        if messages.count > 180 { messages.removeFirst() }
+    }
+    static func snapshot() -> String {
+        lock.lock(); defer { lock.unlock() }
+        return messages.joined(separator: "\n")
+    }
+}
+func writeDebugLog(_ message: String) { QADiagnostics.append(message); print(message) }
 
 final class BundleHelper {
     static let shared = BundleHelper()
@@ -179,7 +192,14 @@ struct QAFailure: Error { let message: String }
                    (try await inlineWeb.evaluateJavaScript(js)) as? Bool == true { return }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
-            throw QAFailure(message: "embedded lyric generations did not converge")
+            var details = ["embedded lyric generations did not converge for \(track)"]
+            for (name, view, cachedWeb) in [("card", card, cardWeb), ("inline", inline, inlineWeb)] as [(String, UIView, WKWebView)] {
+                let current = findWeb(view)
+                let content = try? await current?.evaluateJavaScript("JSON.stringify({ready:!!window.SpicyNative,text:document.querySelector('#lyrics')?.textContent,busy:document.querySelector('#app')?.getAttribute('aria-busy'),width:innerWidth,height:innerHeight})")
+                details.append("\(name) frame=\(view.frame) alpha=\(view.alpha) hidden=\(view.isHidden) root=\(root.view.bounds) window=\(String(describing: view.window?.bounds)) sameWeb=\(current === cachedWeb) content=\(String(describing: content))")
+            }
+            details.append(QADiagnostics.snapshot())
+            throw QAFailure(message: details.joined(separator: "\n"))
         }
         try await waitForBoth("track-3")
         header.setNeedsLayout(); header.layoutIfNeeded()
