@@ -145,3 +145,49 @@ the next user-side check; simulator/test-double coverage is not a phone guarante
 Evidence is in `outputs/EeveeSpotify-9.1.76-SpicyLyrics-v5.4-Evidence` in the outer
 workspace, including source/build provenance, test output, untouched screenshots,
 archive-verification.json and installation instructions.
+
+### Physical v5.4 regression and v5.5 repair
+
+The subsequent on-phone test failed: opening the main Now Playing page aborted
+before expanding lyrics. Two new physical crash reports show the same native
+Swift unrecognized-selector termination. Their Eevee UUID matches the shipped
+v5.4 library; the return address follows its `methodSignatureForSelector:` call
+in the control reader. These reports are retained locally, not uploaded.
+
+The Smart Shuffle handler is a native Swift root, not an NSObject subclass. The
+v5.4 `contextURI` repair exposed the previously dormant handler lookup; the old
+NSObject-based test double incorrectly supplied the reflection method. A new
+native Swift fixture reproduces the exact termination against unchanged v5.4
+production code in run `33948734955` (exit 134). Earlier run `33948695634` was a
+test-fixture compile failure, not the reproduction.
+
+Repair `83c88e1` constructs NSMethodSignature from the concrete runtime Method's
+type encoding instead of sending that unsupported selector. It preserves ABI,
+argument-count and selector checks. It is the only production change from
+v5.4; renderer, captions, preview, presentation, seeking and clock code remain
+unchanged. Added public-boundary tests cover Swift handler reads, all three
+shuffle states, rejected/unavailable operations and absent context/handler.
+
+QA-only run `33949268516` at `e481cce` passes all checks. Full build run
+`33949361556` at the same commit passes all tests and package compilation.
+Two prior runs passed the native crash test but failed the external simulator
+screenshot acknowledgement deadline. Their valid images and failed result files
+are preserved. Test-only `e481cce` gives that external capture a 60-second
+monotonic I/O deadline without altering app response or viewport readiness tests.
+All three existing browser QA scripts also pass with the unchanged renderer.
+
+The native Swift test executes on macOS Foundation; UIKit/WebKit integration
+uses a simulator with fixture Spotify classes/player. This proves the reproduced
+failure is repaired and covers regressions, but is not an on-phone installation
+claim. The replacement must be installed over the current app and checked on
+the user's phone without deleting Spotify or resetting its data.
+
+Delivered v5.5: `outputs/EeveeSpotify-9.1.76-SpicyLyrics-v5.5-Sideloadly.ipa`
+in the outer workspace, 133,965,921 bytes, SHA-256
+`6abd94ea28e662d95ce1b026968dca5c877907c97fa55dab1699036da57c584f`.
+Fresh 46-file payload, tested renderer bytes, archive structure/CRC/permissions,
+ARM64/single load commands and 1,013 unchanged base entries all verify. The new
+native dylib UUID is `31ac4278-a47d-3535-85ad-802524c0c1fb`. Prior IPA hashes are
+unchanged. Full evidence and install instructions are under the outer workspace's
+`outputs/EeveeSpotify-9.1.76-SpicyLyrics-v5.5-Evidence` directory. Physical
+post-update confirmation remains pending; no further feature change was made.
