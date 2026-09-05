@@ -23,7 +23,7 @@ private enum QADiagnostics {
     static var messages = [String]()
     static func append(_ message: String) {
         lock.lock(); defer { lock.unlock() }
-        messages.append(message)
+        messages.append("\(Date().timeIntervalSince1970) \(message)")
         if messages.count > 180 { messages.removeFirst() }
     }
     static func snapshot() -> String {
@@ -140,6 +140,19 @@ struct QAFailure: Error { let message: String }
         let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(name + ".png")
         try png.write(to: path)
+    }
+
+    func failureDiagnostics() async -> String {
+        var details = ["scene activation=\(scene.activationState.rawValue) generation=\(SpicyLyricsPlaybackBridge.shared.generation)"]
+        for window in scene.windows {
+            details.append("window key=\(window.isKeyWindow) hidden=\(window.isHidden) frame=\(window.frame) root=\(String(describing: window.rootViewController))")
+            for web in window.rootViewController?.view.subviews.compactMap({ $0 as? WKWebView }) ?? [] {
+                let content = try? await web.evaluateJavaScript("JSON.stringify({ready:!!window.SpicyNative,state:document.readyState,text:document.querySelector('#lyrics')?.textContent,busy:document.querySelector('#app')?.getAttribute('aria-busy'),width:innerWidth,height:innerHeight})")
+                details.append("web loading=\(web.isLoading) alpha=\(web.alpha) frame=\(web.frame) url=\(String(describing: web.url)) content=\(String(describing: content))")
+            }
+        }
+        details.append(QADiagnostics.snapshot())
+        return details.joined(separator: "\n")
     }
 
     func testEmbeddedSurfaces() async throws {
@@ -396,7 +409,7 @@ struct QAFailure: Error { let message: String }
             try await testEmbeddedSurfaces()
             finish(result: "PASS")
         } catch {
-            finish(result: "FAIL: \(error)")
+            finish(result: "FAIL: \(error)\n\(await failureDiagnostics())")
         }
     }
     func finish(result: String) {
