@@ -752,6 +752,9 @@
     state.lastLyricPosition = position;
     const activeIndex = model.findActiveLine(state.lines, position);
     const heldIndex = previewHeldLine(position, activeIndex);
+    const paintIndex = heldIndex >= 0 ? heldIndex : activeIndex;
+    const startIndex = Math.max(0, paintIndex - 5);
+    const endIndex = Math.min(state.lines.length, Math.max(paintIndex + 7, 10));
     const inlineIndex = state.surface === "inline"
       ? model.findCaptionLine(state.lines, position, activeIndex) : -1;
     let captionGhost = null;
@@ -759,6 +762,13 @@
       captionGhost = snapshotCaption(state.lines[state.captionIndex]);
     }
     state.lines.forEach((line, index) => {
+      // The desktop promotes its mounted lyric window to compositor layers.
+      // Bound that hint here: the mobile DOM retains off-screen rows for seeking.
+      const nearEffects = index >= startIndex && index < endIndex && Number.isFinite(line.start);
+      if (line.nearEffects !== nearEffects) {
+        line.nearEffects = nearEffects;
+        line.element.classList.toggle("effects-near", nearEffects);
+      }
       const visualState = model.lineVisualState(line, index, activeIndex, position);
       const active = visualState === "active";
       if (activeIndex >= 0) {
@@ -826,9 +836,6 @@
 
     // Complete the held line's last token using its real provider timestamp,
     // even when a gap occurs beyond the initial token-rendering window.
-    const paintIndex = heldIndex >= 0 ? heldIndex : activeIndex;
-    const startIndex = Math.max(0, paintIndex - 5);
-    const endIndex = Math.min(state.lines.length, Math.max(paintIndex + 7, 10));
     for (let index = startIndex; index < endIndex; index++) {
       const line = state.lines[index];
       if (line.kind === "lead" && !line.tokens.length) {

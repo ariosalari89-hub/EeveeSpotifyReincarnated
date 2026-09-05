@@ -270,6 +270,11 @@ window.runSpicyTransitionChecks = async function (phase) {
     };
     check(`${surface}: lead and backing vocals use the desktop soft sweep and separate brightness`,
       actual.lead===expected.lead && actual.backing===expected.backing,{actual,expected});
+    const underpaint = [...document.querySelectorAll('.lyric-line.active > .line-text')]
+      .map(e=>({gradient:getComputedStyle(e).backgroundImage,clip:getComputedStyle(e).backgroundClip}));
+    const underpaintExpected=gradient('linear-gradient(180deg,rgba(255,255,255,.85) -20%,rgba(255,255,255,.35) 0%)');
+    check(`${surface}: active syllables retain the desktop glyph-clipped row underpaint`,
+      underpaint.length>0 && underpaint.every(s=>s.gradient===underpaintExpected&&s.clip==='text'),underpaint);
     SpicyQA.observe({...paused,positionMs:0});await frame();await frame();
     const initial=getComputedStyle(lead).backgroundImage;
     check(`${surface}: desktop sweep starts before the glyph edge`,
