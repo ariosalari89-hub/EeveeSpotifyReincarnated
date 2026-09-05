@@ -168,18 +168,20 @@ struct QAFailure: Error { let message: String }
         throw QAFailure(message: "landscape native/visual viewport did not settle")
     }
 
-    func snapshotWindow(_ name: String) throws {
-        guard let window = scene.keyWindow else { throw QAFailure(message: "snapshot has no native window") }
-        var complete = false
-        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-            complete = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+    func captureSimulatorScreen() async throws {
+        // UIKit's hierarchy snapshot can omit composited WebKit controls.
+        // Ask the outer harness for a screenshot of the real simulator display.
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        try "landscape".write(to: documents.appendingPathComponent("qa-screen-ready.txt"),
+                              atomically: true, encoding: .utf8)
+        for _ in 0..<150 {
+            if FileManager.default.fileExists(atPath: documents.appendingPathComponent("qa-screen-done.txt").path) {
+                checks.append("actual simulator landscape display captured by simctl")
+                return
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)
         }
-        guard complete, let png = image.pngData() else {
-            throw QAFailure(message: "native window snapshot was incomplete")
-        }
-        let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(name + ".png")
-        try png.write(to: path)
+        throw QAFailure(message: "outer simulator display capture did not acknowledge")
     }
 
     func failureDiagnostics() async -> String {
@@ -442,7 +444,7 @@ struct QAFailure: Error { let message: String }
             """)
             try await waitForSettledLandscape()
             try await snapshot("qa-landscape")
-            try snapshotWindow("qa-landscape-window")
+            try await captureSimulatorScreen()
             let overlay = scene.windows.first(where: { $0.isKeyWindow })
             _ = try await evaluate("document.querySelector('#close-button').click()")
             try await Task.sleep(nanoseconds: 500_000_000)

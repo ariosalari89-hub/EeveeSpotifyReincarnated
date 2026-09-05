@@ -36,6 +36,10 @@ xcrun simctl install "$DEVICE" "$QA_APP"
 xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 CONTAINER=$(xcrun simctl get_app_container "$DEVICE" local.spicylyrics.qa data)
 for iteration in {1..90}; do
+  if [ -f "$CONTAINER/Documents/qa-screen-ready.txt" ] && [ ! -f "$CONTAINER/Documents/qa-screen-done.txt" ]; then
+    xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/qa-landscape-screen.png"
+    touch "$CONTAINER/Documents/qa-screen-done.txt"
+  fi
   if [ -f "$CONTAINER/Documents/qa-result.txt" ]; then
     cp "$CONTAINER/Documents/qa-result.txt" "$RUNNER_TEMP/spicy-ios-qa-result.txt"
     for image in "$CONTAINER/Documents/qa-"*.png; do
