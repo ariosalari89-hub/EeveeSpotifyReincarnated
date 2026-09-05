@@ -20,13 +20,20 @@ window.runSpicyTransitionChecks = async function (phase) {
   await wait(500);
   SpicyQA.observe({ ...paused, positionMs: 2100 });
   const opacity = [];
+  let overlappingCaptionFrames = 0;
   for (const deadline = performance.now() + 400; performance.now() < deadline;) {
     await frame();
     const line = document.querySelector('#lyrics .inline-visible');
     opacity.push(Number(getComputedStyle(line).opacity));
+    const outgoing = document.querySelector('.caption-outgoing');
+    if (outgoing) {
+      const a = line.getBoundingClientRect(), b = outgoing.getBoundingClientRect();
+      if (Math.min(a.bottom,b.bottom) - Math.max(a.top,b.top) > .5) overlappingCaptionFrames++;
+    }
   }
   check('caption changes blend through real intermediate frames',
     opacity.some(o => o > .05 && o < .95) && opacity.at(-1) > .99, opacity);
+  check('incoming and outgoing caption text never superimpose', overlappingCaptionFrames === 0, overlappingCaptionFrames);
   check('caption has one semantic current phrase after its transition',
     document.querySelectorAll('#lyrics .inline-visible').length === 1
       && document.querySelector('#lyrics .inline-visible').textContent === 'Second phrase'

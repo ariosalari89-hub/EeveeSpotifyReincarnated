@@ -702,10 +702,15 @@
     if (!ghost) return;
     if (!line?.element || reduceMotion()) { ghost.remove(); return; }
     const options = { duration: 180, easing: "ease-out" };
+    const distance = Math.max(ghost.offsetHeight, line.element.offsetHeight) + 2;
     const motion = {
       ghost,
-      incoming: line.element.animate([{ opacity: 0 }, { opacity: 1 }], options),
-      outgoing: ghost.animate([{ opacity: 1 }, { opacity: 0 }], options)
+      incoming: line.element.animate([
+        { opacity: 0, transform: `translateY(${distance}px)` }, { opacity: 1, transform: "translateY(0)" }
+      ], options),
+      outgoing: ghost.animate([
+        { opacity: 1, transform: "translateY(0)" }, { opacity: 0, transform: `translateY(${-distance}px)` }
+      ], options)
     };
     state.captionMotion = motion;
     motion.incoming.onfinish = () => {

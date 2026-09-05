@@ -540,10 +540,18 @@ struct QAFailure: Error { let message: String }
         web.scrollView.contentInsetAdjustmentBehavior = .never
         root.view.addSubview(web)
         defer { web.removeFromSuperview() }
+        func evaluateTransitionScript(_ script: String) async throws -> Any? {
+            try await withCheckedThrowingContinuation { continuation in
+                web.evaluateJavaScript(script) { value, error in
+                    if let error = error { continuation.resume(throwing: error) }
+                    else { continuation.resume(returning: value) }
+                }
+            }
+        }
         web.loadFileURL(page, allowingReadAccessTo: page.deletingLastPathComponent())
         var ready = false
         for _ in 0..<100 {
-            if (try? await web.evaluateJavaScript("Boolean(window.SpicyNative)")) as? Bool == true { ready = true; break }
+            if (try? await evaluateTransitionScript("Boolean(window.SpicyNative)")) as? Bool == true { ready = true; break }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
         guard ready else { throw QAFailure(message: "transition renderer not ready") }
@@ -551,13 +559,20 @@ struct QAFailure: Error { let message: String }
             guard let file = Bundle.main.url(forResource: name, withExtension: "js") else {
                 throw QAFailure(message: "missing isolated transition test")
             }
-            _ = try await web.evaluateJavaScript(String(contentsOf: file, encoding: .utf8) + "\n;true")
+            _ = try await evaluateTransitionScript(String(contentsOf: file, encoding: .utf8) + "\n;true")
         }
         var rows = [[String: Any]]()
         for phase in ["inline", "card"] {
             web.frame.size.height = phase == "inline" ? 52 : 320
             try await Task.sleep(nanoseconds: 100_000_000)
-            let result = try await web.callAsyncJavaScript("return JSON.stringify(await runSpicyTransitionChecks(phase))", arguments: ["phase": phase], in: nil, in: .page)
+            // Explicit completion avoids selecting the fire-and-forget Void
+            // overload; await the JavaScript promise and preserve its result.
+            let result: Any = try await withCheckedThrowingContinuation { continuation in
+                web.callAsyncJavaScript("return JSON.stringify(await runSpicyTransitionChecks(phase))",
+                                        arguments: ["phase": phase], in: nil, in: .page) {
+                    continuation.resume(with: $0)
+                }
+            }
             guard let text = result as? String,
                   let data = text.data(using: .utf8),
                   let phaseRows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
