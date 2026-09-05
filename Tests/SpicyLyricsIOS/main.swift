@@ -1,6 +1,14 @@
 import UIKit
 import WebKit
 
+@objc(SPTPlayerTrack) final class QALyricsAvailabilityTrack: NSObject {
+    let original: NSDictionary = ["has_lyrics": "false", "title": "Availability fixture", "artist_name": "Unchanged artist"]
+    let uri: NSURL
+    init(_ uri: String) { self.uri = NSURL(string: uri)! }
+    @objc dynamic func metadata() -> NSDictionary { original }
+    @objc dynamic func URI() -> NSURL { uri }
+}
+
 @objc(_TtC22Lyrics_CardElementImpl15CardContentView)
 final class QACardContentView: UIView {}
 @objc(_TtC17Canvas_CommonImpl26CanvasNowPlayingLyricsView)
@@ -85,18 +93,19 @@ final class SpicyLyricsPlaybackBridge {
     var onSkip: (() -> Void)?
     var payloadReads = 0
     var artwork = ""
+    var trackIDOverride: String?
 
     func sessionPayload() -> [String: Any]? {
         payloadReads += 1
         sequence += 1
         return [
             "generation": String(generation), "sequence": String(sequence),
-            "trackId": "track-\(generation)", "positionMs": position, "durationMs": 180_000,
+            "trackId": trackIDOverride ?? "track-\(generation)", "positionMs": position, "durationMs": 180_000,
             "isPlaying": !paused, "isPaused": paused, "isAdvancing": false,
             "playbackRate": 1, "requiresFreshObservation": false,
             "shuffleEnabled": shuffle != 0, "shuffleMode": ["off", "shuffle", "smart"][shuffle],
             "smartShuffleAvailable": true, "repeatMode": ["off", "context", "track"][repeatMode],
-            "track": ["id": "track-\(generation)", "title": "Track \(generation)", "artist": "Lyric layout sample", "artwork": artwork]
+            "track": ["id": trackIDOverride ?? "track-\(generation)", "title": "Track \(generation)", "artist": "Lyric layout sample", "artwork": artwork]
         ]
     }
 
@@ -146,6 +155,60 @@ struct QAFailure: Error { let message: String }
     let scene: UIWindowScene
     var checks: [String] = []
     init(source: UIViewController, scene: UIWindowScene) { self.source = source; self.scene = scene }
+
+    func testNativeAvailability() async throws {
+        let trackID = "3N1zlgIGnFcnNiTuDaeYzy"
+        let track = QALyricsAvailabilityTrack("spotify:track:" + trackID)
+        SpicyLyricsEmbeddedSurfaces.install { true }
+        SpicyLyricsPlaybackBridge.shared.trackIDOverride = trackID
+        let card = QACardContentView(frame: CGRect(x: 16, y: 200, width: 340, height: 320))
+        let caption = QAInlineLyricsView(frame: CGRect(x: 24, y: 140, width: 320, height: 52))
+        // Spotify's native availability gate is the external boundary: it
+        // reads has_lyrics before revealing either lyrics entry surface.
+        let nativeAvailable = (track.metadata()["has_lyrics"] as? String) == "true"
+        card.isHidden = !nativeAvailable
+        caption.isHidden = !nativeAvailable
+        source.view.addSubview(card); source.view.addSubview(caption)
+        defer {
+            card.removeFromSuperview(); caption.removeFromSuperview()
+            SpicyLyricsPlaybackBridge.shared.trackIDOverride = nil
+            SpicyLyricsEmbeddedSurfaces.install { false }
+        }
+        func findWeb(_ view: UIView) -> WKWebView? {
+            if let web = view as? WKWebView { return web }
+            return view.subviews.compactMap(findWeb).first
+        }
+        var loaded = false
+        for _ in 0..<80 {
+            let script = "document.querySelector('#lyrics')?.textContent.includes('\(trackID)') === true"
+            if let cardWeb = findWeb(card), let captionWeb = findWeb(caption),
+               (try? await cardWeb.evaluateJavaScript(script)) as? Bool == true,
+               (try? await captionWeb.evaluateJavaScript(script)) as? Bool == true {
+                loaded = true; break
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let screenshot = UIGraphicsImageRenderer(bounds: source.view.bounds).image { _ in
+            source.view.drawHierarchy(in: source.view.bounds, afterScreenUpdates: true)
+        }
+        try screenshot.pngData()?.write(to: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("qa-availability.png"))
+        guard nativeAvailable, loaded, !card.isHidden, !caption.isHidden else {
+            throw QAFailure(message: "Spotify has_lyrics=false prevents provider lookup and both mobile lyric surfaces: nativeAvailable=\(nativeAvailable), loaded=\(loaded)")
+        }
+        guard track.original["has_lyrics"] as? String == "false",
+              track.metadata()["title"] as? String == "Availability fixture",
+              track.metadata()["artist_name"] as? String == "Unchanged artist",
+              QALyricsAvailabilityTrack("spotify:episode:3N1zlgIGnFcnNiTuDaeYzy").metadata()["has_lyrics"] as? String == "false",
+              QALyricsAvailabilityTrack("spotify:local:artist:album:song:123").metadata()["has_lyrics"] as? String == "false" else {
+            throw QAFailure(message: "lyrics availability changed stored metadata or a non-music URI")
+        }
+        SpicyLyricsEmbeddedSurfaces.install { false }
+        guard track.metadata()["has_lyrics"] as? String == "false" else {
+            throw QAFailure(message: "disabled Spicy Lyrics still overrides native availability")
+        }
+        checks.append("native has_lyrics=false music track loads the provider in visible card and caption; original metadata, podcasts, local tracks and disabled behavior are preserved")
+    }
 
     func webView() -> WKWebView? {
         for window in scene.windows where !window.isHidden {
@@ -608,6 +671,7 @@ struct QAFailure: Error { let message: String }
     }
     func run() async {
         do {
+            try await testNativeAvailability()
             // Keep the isolated renderer assertions independent of the later
             // external display-capture handshake and native lifecycle fixtures.
             try await testRendererTransitions(baseline: true)
