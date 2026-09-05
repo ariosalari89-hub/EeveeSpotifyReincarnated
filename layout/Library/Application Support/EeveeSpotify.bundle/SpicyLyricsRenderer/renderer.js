@@ -733,6 +733,12 @@
     owner.effectsPaint ||= {};
     for (const [key, current] of Object.entries(paint)) {
       if (owner.effectsPaint[key] === current) continue;
+      // Match the desktop's costly-shadow repaint thresholds. Springs still
+      // advance each frame; a settled/explicitly snapped state paints exactly.
+      const epsilon = key === "--text-shadow-blur-radius" ? .5
+        : key === "--text-shadow-opacity" ? .01 : 0;
+      if (!snap && value.moving && epsilon
+          && Math.abs(parseFloat(owner.effectsPaint[key]) - parseFloat(current)) <= epsilon) continue;
       owner.effectsPaint[key] = current;
       element.style.setProperty(key, current);
     }

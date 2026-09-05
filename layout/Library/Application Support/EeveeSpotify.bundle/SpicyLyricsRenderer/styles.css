@@ -143,7 +143,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .lyric-line.effects-near { will-change: transform, opacity, text-shadow, scale, filter; backface-visibility: hidden; }
 .lyric-line.effects-near :is(.token, .letter, .dot) { will-change: transform, opacity, text-shadow, scale; backface-visibility: hidden; }
 .lyric-line:active { transform: scale(.975); }
-.line-text { display: block; min-width: 0; max-width: 100%; transition: color .18s ease, text-shadow .18s ease; }
+.line-text { display: block; min-width: 0; max-width: 100%; transition: color .18s ease; }
 /* The desktop active row paints beneath its individually animated glyphs.
    Keep this clipped to text, without a shadowed duplicate or rectangular layer. */
 .lyric-line.active:not(.line-timed):not(.interlude):not(.static) > .line-text {

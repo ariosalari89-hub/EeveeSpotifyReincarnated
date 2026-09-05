@@ -290,6 +290,9 @@ window.runSpicyTransitionChecks = async function (phase) {
     check(`${surface}: line-only lyrics use the desktop whole-line gradient, not invented word timing`,
       wholeLine===gradient('linear-gradient(180deg,rgba(255,255,255,.85) 50%,rgba(255,255,255,.35) 70%)')
         && !document.querySelector('.line-timed .token'),wholeLine);
+    const lineTransition = getComputedStyle(document.querySelector('.line-timed.active > .line-text')).transitionProperty;
+    check(`${surface}: the desktop spring owns glyph glow without an additional CSS shadow transition`,
+      !lineTransition.split(',').map(value=>value.trim()).some(value=>value==='text-shadow'||value==='all'),lineTransition);
     reference.remove();
   }
   if (phase.startsWith('desktop-interlude-')) {
