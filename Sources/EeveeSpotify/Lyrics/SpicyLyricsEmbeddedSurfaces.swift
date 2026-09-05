@@ -10,6 +10,7 @@ enum SpicyLyricsEmbeddedSurfaces {
 
     static func install(isEnabled: @escaping () -> Bool) {
         enabled = isEnabled
+        SpicyLyricsAvailability.install(isEnabled: isEnabled)
         guard !installed else { return }
         installed = true
         let targets: [(String, SpicyLyricsSurface)] = [
