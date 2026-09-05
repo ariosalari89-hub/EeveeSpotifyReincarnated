@@ -23,7 +23,13 @@ static BOOL isBool(const char *type) {
 
 static NSInvocation *invocation(id target, SEL selector, NSUInteger count) {
     if (!target || ![target respondsToSelector:selector]) return nil;
-    NSMethodSignature *signature = [target methodSignatureForSelector:selector];
+    // Native Swift root classes expose Objective-C methods without NSObject's
+    // methodSignatureForSelector:. Sending it aborts inside SwiftObject (not a
+    // catchable NSException). Obtain the ABI from the concrete runtime method.
+    Method method = class_getInstanceMethod(object_getClass(target), selector);
+    const char *types = method ? method_getTypeEncoding(method) : NULL;
+    if (!types || !*types) return nil;
+    NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:types];
     if (!signature || signature.numberOfArguments != count + 2) return nil;
     NSInvocation *call = [NSInvocation invocationWithMethodSignature:signature];
     call.target = target;
