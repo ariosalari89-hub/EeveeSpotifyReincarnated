@@ -173,6 +173,7 @@ button { -webkit-tap-highlight-color: transparent; }
 #seek-control { height: 44px; min-width: 0; cursor: pointer; touch-action: none; }
 #seek-control, #seek { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 #seek { display: block; pointer-events: none; }
+#seek-control.pointer-input #seek { outline: none; }
 #seek::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, #fff 0 var(--seek-progress), rgba(255,255,255,.28) var(--seek-progress) 100%); }
 #seek::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.28); }
 .transport { justify-self: end; display: flex; align-items: center; gap: 6px; }
@@ -309,6 +310,15 @@ html[data-surface="card"] { --dim: rgba(0,0,0,.78); }
 html[data-surface="card"] #lyrics-scroller { padding: 28% 16px 60%; overflow-y: hidden; }
 html[data-surface="card"] #lyrics { gap: 20px; }
 html[data-surface="card"] .lyric-line { font-size: calc(clamp(20px, 7vw, 27px) * var(--lyric-scale)); line-height: 1.18; }
+html[data-surface="card"] .lyric-line,
+html[data-surface="card"] .lyric-line.line-timed,
+html[data-surface="card"] .lyric-line.line-timed > .line-text,
+html[data-surface="inline"] .lyric-line.line-timed,
+html[data-surface="inline"] .lyric-line.line-timed > .line-text { -webkit-text-fill-color: currentColor; }
+html[data-surface="card"] .lyric-line,
+html[data-surface="card"] .token { transition: color .22s ease; }
+html[data-surface="card"] .lyric-line.line-timed > .line-text { color: inherit; transition: none; }
+html[data-surface="card"] .token::after { transition: opacity .22s ease; }
 html[data-surface="card"] .lyric-line.sung, html[data-surface="card"] .lyric-line.sung .token { color: rgba(255,255,255,.75); }
 html[data-surface="card"] .lyric-line.background { font-size: calc(18px * var(--lyric-scale)); }
 html[data-surface="inline"] { --dim: rgba(255,255,255,.62); }
@@ -317,6 +327,7 @@ html[data-surface="inline"] #lyrics-scroller { padding: 3px 4px; overflow: hidde
 html[data-surface="inline"] #lyrics { height: 100%; gap: 0; justify-content: center; }
 html[data-surface="inline"] .lyric-line { display: none; font-size: calc(clamp(17px, 5.3vw, 21px) * var(--lyric-scale) * var(--inline-fit, 1)); line-height: 1.18; min-height: 0; padding: 0 1px; }
 html[data-surface="inline"] .lyric-line.inline-visible { display: flex; align-items: center; min-height: 0; max-height: 100%; }
+html[data-surface="inline"] .caption-outgoing { transition: none; }
 html[data-surface="inline"] .line-text { display: block; width: 100%; white-space: normal; overflow: visible; text-overflow: clip; }
 html[data-surface="inline"] .word-group,
 html[data-surface="inline"] .word-group.breakable { display: inline; white-space: normal; }

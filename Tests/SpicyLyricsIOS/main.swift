@@ -523,15 +523,16 @@ struct QAFailure: Error { let message: String }
             guard overlay?.isHidden == true else { throw QAFailure(message: "close must dispose persistent window") }
             checks.append("close restores original window")
             try await testEmbeddedSurfaces()
-            try await testRendererTransitions()
+            try await testRendererTransitions(baseline: true)
+            try await testRendererTransitions(baseline: false)
             finish(result: "PASS")
         } catch {
             finish(result: "FAIL: \(error)\n\(await failureDiagnostics())")
         }
     }
-    func testRendererTransitions() async throws {
+    func testRendererTransitions(baseline: Bool) async throws {
         guard let root = scene.keyWindow?.rootViewController,
-              let page = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "SpicyLyricsRenderer") else {
+              let page = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: baseline ? "SpicyLyricsBefore" : "SpicyLyricsRenderer") else {
             throw QAFailure(message: "transition fixture has no root or renderer")
         }
         let web = WKWebView(frame: CGRect(x: 0, y: 100, width: 360, height: 320))
@@ -550,18 +551,33 @@ struct QAFailure: Error { let message: String }
             guard let file = Bundle.main.url(forResource: name, withExtension: "js") else {
                 throw QAFailure(message: "missing isolated transition test")
             }
-            _ = try await web.evaluateJavaScript(String(contentsOf: file, encoding: .utf8))
+            _ = try await web.evaluateJavaScript(String(contentsOf: file, encoding: .utf8) + "\n;true")
         }
-        let result = try await web.callAsyncJavaScript("return await runSpicyTransitionChecks()", arguments: [:], in: nil, in: .page)
-        guard let rows = result as? [[String: Any]], !rows.isEmpty else { throw QAFailure(message: "no transition results") }
+        var rows = [[String: Any]]()
+        for phase in ["inline", "card"] {
+            web.frame.size.height = phase == "inline" ? 52 : 320
+            try await Task.sleep(nanoseconds: 100_000_000)
+            let result = try await web.callAsyncJavaScript("return JSON.stringify(await runSpicyTransitionChecks(phase))", arguments: ["phase": phase], in: nil, in: .page)
+            guard let text = result as? String,
+                  let data = text.data(using: .utf8),
+                  let phaseRows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                throw QAFailure(message: "no transition results")
+            }
+            rows += phaseRows
+        }
         var failures = [String]()
         for row in rows {
             let name = row["name"] as? String ?? "unnamed"
             let passed = row["pass"] as? Bool == true
-            checks.append("\(passed ? "PASS" : "FAIL") WKWebView \(name): \(row["detail"] ?? "")")
+            checks.append("\(baseline ? "BASELINE" : "CURRENT") \(passed ? "PASS" : "FAIL") WKWebView \(name): \(row["detail"] ?? "")")
             if !passed { failures.append(name) }
         }
-        guard failures.isEmpty else { throw QAFailure(message: failures.joined(separator: "; ")) }
+        if baseline {
+            guard failures.contains("caption changes blend through real intermediate frames"),
+                  failures.contains("line-timed preview highlight fades rather than switching instantly") else {
+                throw QAFailure(message: "historical renderer did not reproduce transition defects")
+            }
+        } else if !failures.isEmpty { throw QAFailure(message: failures.joined(separator: "; ")) }
     }
 
     func finish(result: String) {

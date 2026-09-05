@@ -1,6 +1,6 @@
 // Test-only public bridge and rendered-frame probes. Loaded in Chromium and
 // in an isolated iOS WKWebView with the same production renderer resources.
-window.runSpicyTransitionChecks = async function () {
+window.runSpicyTransitionChecks = async function (phase) {
   const results = [];
   const frame = () => new Promise(requestAnimationFrame);
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -9,6 +9,7 @@ window.runSpicyTransitionChecks = async function () {
   const bootstrap = (surface, reduceMotion = false) => SpicyQA.send('bootstrap', {
     surface, reduceMotion, preferences: { fontSize: 100, playbackOffset: 0, dynamicBackground: false }
   });
+  if (phase === 'inline') {
   bootstrap('inline');
   SpicyQA.lyrics.line.Content = [
     { Type: 'Vocal', Text: 'First phrase', StartTime: 0, EndTime: 2 },
@@ -19,7 +20,7 @@ window.runSpicyTransitionChecks = async function () {
   await wait(500);
   SpicyQA.observe({ ...paused, positionMs: 2100 });
   const opacity = [];
-  for (let i = 0; i < 24; i++) {
+  for (const deadline = performance.now() + 400; performance.now() < deadline;) {
     await frame();
     const line = document.querySelector('#lyrics .inline-visible');
     opacity.push(Number(getComputedStyle(line).opacity));
@@ -45,6 +46,22 @@ window.runSpicyTransitionChecks = async function () {
       && Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity) === 1
       && !document.querySelector('.caption-outgoing'));
 
+  bootstrap('inline');
+  SpicyQA.lyrics.karaoke.Content = [{ Type: 'Vocal', Lead: { StartTime: 0, EndTime: 20,
+    Syllables: Array.from({length: 20}, (_,i) => ({Text: `Pageword${i} `,StartTime:i,EndTime:i+1})) }}];
+  SpicyQA.scenario('karaoke', { ...paused, positionMs: 500 });
+  await wait(350);
+  SpicyQA.observe({ ...paused, positionMs: 15500 });
+  const pageOpacity = [];
+  for (const deadline = performance.now() + 350; performance.now() < deadline;) {
+    await frame(); pageOpacity.push(Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity));
+  }
+  const currentWord = [...document.querySelectorAll('#lyrics .inline-visible .token')].find(e=>e.textContent==='Pageword15 ');
+  check('caption word-boundary pages blend and keep the actual timed word visible',
+    pageOpacity.some(o=>o>.05&&o<.95) && currentWord.getClientRects().length>0 && !document.querySelector('.caption-outgoing'),pageOpacity);
+  }
+
+  if (phase === 'card') {
   bootstrap('card');
   SpicyQA.lyrics.line.Content = Array.from({ length: 30 }, (_, i) => ({
     Type: 'Vocal', Text: `Preview phrase ${i}`, StartTime: i * 2, EndTime: i * 2 + 2
@@ -55,7 +72,7 @@ window.runSpicyTransitionChecks = async function () {
   const start = scroller.scrollTop;
   SpicyQA.observe({ ...paused, positionMs: 4100, durationMs: 60000 });
   const positions = [], colors = [];
-  for (let i = 0; i < 32; i++) {
+  for (const deadline = performance.now() + 450; performance.now() < deadline;) {
     await frame();
     positions.push(scroller.scrollTop);
     colors.push(getComputedStyle(document.querySelector('.line-timed.active .line-text')).webkitTextFillColor);
@@ -87,5 +104,6 @@ window.runSpicyTransitionChecks = async function () {
   await wait(500);
   const active = document.querySelector('.active').getBoundingClientRect();
   check('returning preview follows the fresh lyric', active.top >= 0 && active.bottom <= innerHeight);
+  }
   return results;
 };

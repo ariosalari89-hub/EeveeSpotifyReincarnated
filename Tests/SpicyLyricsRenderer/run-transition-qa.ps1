@@ -9,9 +9,14 @@ try {
     & agent-browser --session $session set viewport 360 320
     Get-Content (Join-Path $PSScriptRoot 'browser-fixture.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Write-Host
     Get-Content (Join-Path $PSScriptRoot 'transition-checks.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
-    $raw = 'runSpicyTransitionChecks().then(JSON.stringify)' | & agent-browser --session $session eval --stdin
-    if ($LASTEXITCODE -ne 0) { throw "Evaluation failed: $raw" }
-    $results = ($raw | ConvertFrom-Json) | ConvertFrom-Json
+    $results = @()
+    foreach ($phase in @('inline','card')) {
+        $height = if ($phase -eq 'inline') { 52 } else { 320 }
+        & agent-browser --session $session set viewport 360 $height
+        $raw = "runSpicyTransitionChecks('$phase').then(JSON.stringify)" | & agent-browser --session $session eval --stdin
+        if ($LASTEXITCODE -ne 0) { throw "Evaluation failed: $raw" }
+        $results += ($raw | ConvertFrom-Json) | ConvertFrom-Json
+    }
     foreach ($result in $results) {
         $prefix = if ($result.pass) { 'PASS' } else { 'FAIL' }
         Write-Host "$prefix $($result.name) $($result.detail | ConvertTo-Json -Depth 5 -Compress)"

@@ -1,5 +1,5 @@
 #requires -Version 7.0
-param([switch]$ReportOnly)
+param([switch]$ReportOnly, [int]$Width = 393, [int]$Height = 852)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $page = Join-Path $repo 'layout\Library\Application Support\EeveeSpotify.bundle\SpicyLyricsRenderer\index.html'
@@ -32,7 +32,7 @@ function Reset-Qa {
 }
 try {
     & agent-browser --session $session open ([Uri]$page).AbsoluteUri
-    & agent-browser --session $session set viewport 393 852
+    & agent-browser --session $session set viewport $Width $Height
     Get-Content (Join-Path $PSScriptRoot 'browser-fixture.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Write-Host
     $stream = & agent-browser --session $session stream status --json | ConvertFrom-Json
     $port = $stream.data.port
@@ -52,6 +52,10 @@ try {
 '@)
     # Start inside the accessible target but above the tiny painted thumb.
     Touch-Qa touchStart ($r.x+5) ($r.y-16)
+    Check-Qa 'touch hold does not draw a rectangular focus box' (Eval-Qa @'
+(() => { const s=getComputedStyle(document.querySelector('#seek'));
+  return JSON.stringify({pass:s.outlineStyle==='none'||parseFloat(s.outlineWidth)===0,outline:s.outline}); })()
+'@)
     Check-Qa 'holding the thumb touch target does not jump or leak playback updates' (Eval-Qa @'
 (async () => { SpicyQA.observe({positionMs:17000,isPlaying:false,isPaused:true,isAdvancing:false});
   await new Promise(r=>setTimeout(r,650)); const value=Number(document.querySelector('#seek').value);
@@ -95,11 +99,20 @@ try {
   return JSON.stringify({pass:Math.abs(value-2000)<100&&!SpicyQA.messages.some(m=>m.type==='seek'),value,messages:SpicyQA.messages}); })()
 '@)
     $r = Reset-Qa
+    Touch-Qa touchStart ($r.left-25) $r.y
+    Touch-Qa touchMove ($r.right-20) $r.y
+    Touch-Qa touchEnd
+    Check-Qa 'touch beginning on elapsed text cannot become a seek' (Eval-Qa @'
+(() => { const value=Number(document.querySelector('#seek').value);
+  return JSON.stringify({pass:value===10000&&!SpicyQA.messages.some(m=>m.type==='seek'),value}); })()
+'@)
+    $r = Reset-Qa
     & agent-browser --session $session focus '#seek'
     & agent-browser --session $session press ArrowRight
     Check-Qa 'keyboard still changes the semantic slider and commits' (Eval-Qa @'
 (() => { const e=document.querySelector('#seek'),seeks=SpicyQA.messages.filter(m=>m.type==='seek');
-  return JSON.stringify({pass:seeks.length===1&&seeks[0].positionMs>10000&&document.activeElement===e,seeks}); })()
+  return JSON.stringify({pass:seeks.length===1&&seeks[0].positionMs>10000&&document.activeElement===e
+    &&parseFloat(getComputedStyle(e).outlineWidth)>=2,seeks,outline:getComputedStyle(e).outline}); })()
 '@)
     $errors = & agent-browser --session $session errors
     if (($errors | Out-String).Trim()) { throw "Browser errors: $errors" }

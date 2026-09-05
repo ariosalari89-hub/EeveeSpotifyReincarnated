@@ -59,6 +59,9 @@
     lyricsType: "unknown",
     lines: [],
     activeLine: -1,
+    captionIndex: -1,
+    captionMotion: null,
+    cardScroll: null,
     lastLyricPosition: null,
     followLyrics: true,
     draggingSeek: false,
@@ -357,6 +360,7 @@
   }
 
   function showLoading() {
+    stopEmbeddedMotion();
     dom.app.setAttribute("aria-busy", "true");
     dom.lyrics.replaceChildren();
     for (const width of [72, 91, 62, 84, 54]) {
@@ -377,6 +381,7 @@
   }
 
   function showLyricsState(message, retry) {
+    stopEmbeddedMotion();
     dom.app.setAttribute("aria-busy", "false");
     dom.lyrics.replaceChildren();
     dom.lyricState.hidden = false;
@@ -529,6 +534,8 @@
   }
 
   function renderLyrics(raw, trackId, generation) {
+    stopEmbeddedMotion();
+    state.captionIndex = -1;
     state.lastLyricPosition = null;
     state.rawLyrics = raw;
     state.lyricsTrackId = String(trackId || "");
@@ -651,7 +658,62 @@
     oversized.forEach((group) => group.classList.add("breakable"));
   }
 
-  function layoutCaption(line, position) {
+  function cancelCaptionMotion() {
+    const motion = state.captionMotion;
+    state.captionMotion = null;
+    if (!motion) return;
+    motion.incoming.cancel();
+    motion.outgoing.cancel();
+    motion.ghost.remove();
+  }
+
+  function stopEmbeddedMotion() {
+    cancelCaptionMotion();
+    state.cardScroll = null;
+    if (state.surface === "card") {
+      const top = dom.scroller.scrollTop;
+      dom.scroller.style.scrollBehavior = "auto";
+      dom.scroller.scrollTo({ top, behavior: "auto" });
+    }
+  }
+
+  function snapshotCaption(line) {
+    cancelCaptionMotion();
+    if (!line?.element || reduceMotion() || state.lifecyclePhase !== "visible" || document.hidden) return null;
+    const rect = line.element.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const parent = dom.scroller.parentElement;
+    const bounds = parent.getBoundingClientRect();
+    const ghost = line.element.cloneNode(true);
+    ghost.classList.add("caption-outgoing");
+    ghost.removeAttribute("aria-current");
+    ghost.setAttribute("aria-hidden", "true");
+    ghost.inert = true;
+    ghost.tabIndex = -1;
+    Object.assign(ghost.style, {
+      position: "absolute", left: `${rect.left - bounds.left}px`, top: `${rect.top - bounds.top}px`,
+      width: `${rect.width}px`, height: `${rect.height}px`, margin: "0", pointerEvents: "none"
+    });
+    parent.appendChild(ghost);
+    return ghost;
+  }
+
+  function blendCaption(ghost, line) {
+    if (!ghost) return;
+    if (!line?.element || reduceMotion()) { ghost.remove(); return; }
+    const options = { duration: 180, easing: "ease-out" };
+    const motion = {
+      ghost,
+      incoming: line.element.animate([{ opacity: 0 }, { opacity: 1 }], options),
+      outgoing: ghost.animate([{ opacity: 1 }, { opacity: 0 }], options)
+    };
+    state.captionMotion = motion;
+    motion.incoming.onfinish = () => {
+      if (state.captionMotion === motion) cancelCaptionMotion();
+    };
+  }
+
+  function layoutCaption(line, position, beforePageChange) {
     const text = line?.element?.querySelector(".line-text");
     if (!text) return;
     const available = Math.max(1, dom.scroller.clientHeight - 6);
@@ -686,6 +748,7 @@
     const group = token?.element?.parentElement;
     const pageIndex = Math.max(0, layout.pages.findIndex(page => page.includes(group)));
     if (layout.page === pageIndex) return;
+    if (layout.page >= 0) beforePageChange?.();
     layout.page = pageIndex;
     const current = layout.pages[pageIndex];
     text.querySelectorAll(".word-group").forEach(g => { g.hidden = !current.includes(g); });
@@ -711,6 +774,10 @@
     const activeIndex = model.findActiveLine(state.lines, position);
     const inlineIndex = state.surface === "inline"
       ? model.findCaptionLine(state.lines, position, activeIndex) : -1;
+    let captionGhost = null;
+    if (state.surface === "inline" && state.captionIndex !== inlineIndex && !forceScroll) {
+      captionGhost = snapshotCaption(state.lines[state.captionIndex]);
+    }
     state.lines.forEach((line, index) => {
       const visualState = model.lineVisualState(line, index, activeIndex, position);
       const active = visualState === "active";
@@ -730,13 +797,21 @@
       }
     });
 
-    if (state.surface === "inline") layoutCaption(state.lines[inlineIndex], position);
+    if (state.surface === "inline") {
+      const line = state.lines[inlineIndex];
+      layoutCaption(line, position, () => {
+        if (!forceScroll && state.captionIndex === inlineIndex) captionGhost = snapshotCaption(line);
+      });
+      state.captionIndex = inlineIndex;
+      blendCaption(captionGhost, line);
+    }
 
     if (activeIndex !== state.activeLine) {
+      const firstLine = state.activeLine < 0;
       state.activeLine = activeIndex;
-      if (state.followLyrics && activeIndex >= 0) scrollToLine(activeIndex);
+      if (state.followLyrics && activeIndex >= 0) scrollToLine(activeIndex, firstLine || forceScroll);
     } else if (forceScroll && state.followLyrics && activeIndex >= 0) {
-      scrollToLine(activeIndex);
+      scrollToLine(activeIndex, true);
     }
 
     const startIndex = Math.max(0, activeIndex - 5);
@@ -775,7 +850,7 @@
     }
   }
 
-  function scrollToLine(index) {
+  function scrollToLine(index, snap = false) {
     if (state.surface === "inline") return;
     const element = state.lines[index]?.element;
     if (!element) return;
@@ -784,6 +859,17 @@
       - dom.scroller.clientHeight * (state.surface === "card" ? .28 : .42)
       + element.offsetHeight * .5;
     const immediate = reduceMotion() || state.draggingSeek || Boolean(state.seekPreview);
+    if (state.surface === "card") {
+      const to = model.clamp(target, 0, Math.max(0, dom.scroller.scrollHeight - dom.scroller.clientHeight));
+      dom.scroller.style.scrollBehavior = "auto";
+      if (immediate || snap || state.lifecyclePhase !== "visible") {
+        state.cardScroll = null;
+        dom.scroller.scrollTo({ top: to, behavior: "auto" });
+      } else if (Math.abs(to - dom.scroller.scrollTop) > 1) {
+        state.cardScroll = { from: dom.scroller.scrollTop, to, started: performance.now() };
+      }
+      return;
+    }
     dom.scroller.style.scrollBehavior = immediate ? "auto" : "smooth";
     dom.scroller.scrollTo({
       top: Math.max(0, target),
@@ -799,6 +885,13 @@
     const position = positionNow();
     const duration = Math.max(1, state.session?.durationMs || 1);
     updateLyrics(position);
+    if (state.cardScroll) {
+      const scroll = state.cardScroll;
+      const progress = model.clamp((performance.now() - scroll.started) / 320);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      dom.scroller.scrollTo({ top: scroll.from + (scroll.to - scroll.from) * eased, behavior: "auto" });
+      if (progress === 1) state.cardScroll = null;
+    }
     if (!state.draggingSeek) {
       if (dom.seek.max !== String(duration)) dom.seek.max = String(duration);
       dom.seek.value = String(model.clamp(position, 0, duration));
@@ -808,6 +901,8 @@
       );
       const elapsed = formatTime(position);
       if (dom.elapsed.textContent !== elapsed) dom.elapsed.textContent = elapsed;
+      const valueText = `${elapsed} of ${formatTime(duration)}`;
+      if (dom.seek.getAttribute("aria-valuetext") !== valueText) dom.seek.setAttribute("aria-valuetext", valueText);
     }
     const formattedDuration = formatTime(duration);
     if (dom.duration.textContent !== formattedDuration) dom.duration.textContent = formattedDuration;
@@ -821,6 +916,7 @@
   }
 
   function applyPreferences({ rerender = false } = {}) {
+    if (reduceMotion()) stopEmbeddedMotion();
     dom.romanized.checked = state.preferences.romanized;
     dom.translations.checked = state.preferences.translations;
     dom.background.checked = state.preferences.dynamicBackground;
@@ -874,6 +970,7 @@
       const payload = event.payload || {};
       switch (event.type) {
       case "bootstrap":
+        stopEmbeddedMotion();
         state.surface = ["card", "inline"].includes(payload.surface) ? payload.surface : "fullscreen";
         document.documentElement.dataset.surface = state.surface;
         state.nativeReduceMotion = Boolean(payload.reduceMotion);
@@ -909,6 +1006,7 @@
         break;
       case "lifecycle":
         if (payload.state === "hidden" || payload.state === "resuming") {
+          stopEmbeddedMotion();
           cancelSeekDrag();
           state.frozenPositionMs = positionNow();
           state.lifecyclePhase = payload.state;
@@ -985,7 +1083,7 @@
   // Compact previews are followers, not a second manually browsable lyric
   // screen. Native parent scrolling must never disable their hidden follow UI.
   dom.scroller.addEventListener("scroll", () => {
-    if (state.surface === "card" && state.activeLine >= 0) {
+    if (state.surface === "card" && state.activeLine >= 0 && !state.cardScroll) {
       const active = state.lines[state.activeLine]?.element;
       const rect = active?.getBoundingClientRect();
       const bounds = dom.scroller.getBoundingClientRect();
@@ -1024,9 +1122,6 @@
     paintSeekDrag(position);
   }
 
-  // The wrapper owns the entire touch target. WebKit's range thumb hit testing
-  // and default drag cannot compete with this gesture; the actual range stays
-  // focusable and adjustable by keyboard and assistive technology.
   dom.seekControl.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !event.isPrimary || seekDrag || !state.session?.canSeek
         || state.lifecyclePhase !== "visible") return;
@@ -1052,6 +1147,7 @@
     updateFollowButton();
     dom.seekControl.setPointerCapture(event.pointerId);
     dom.seek.focus({ preventScroll: true });
+    dom.seekControl.classList.add("pointer-input");
     moveSeekDrag(event);
   });
   dom.seekControl.addEventListener("pointermove", moveSeekDrag);
@@ -1083,6 +1179,7 @@
   dom.seek.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); cancelSeekDrag(); }
   });
+  dom.seek.addEventListener("focus", () => dom.seekControl.classList.remove("pointer-input"));
 
   dom.romanized.addEventListener("change", () => {
     state.preferences.romanized = dom.romanized.checked;
@@ -1125,6 +1222,7 @@
   }));
 
   addEventListener("keydown", (event) => {
+    dom.seekControl.classList.remove("pointer-input");
     const settingsOpen = !dom.settingsSheet.hidden;
     if (event.key === "Escape" && settingsOpen) {
       event.preventDefault();
@@ -1149,6 +1247,7 @@
   let resizeFrame = 0;
   addEventListener("resize", () => {
     cancelSeekDrag();
+    stopEmbeddedMotion();
     cancelAnimationFrame(resizeFrame);
     resizeFrame = requestAnimationFrame(() => {
       fitWordGroups();
@@ -1157,6 +1256,7 @@
   }, { passive: true });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      stopEmbeddedMotion();
       cancelSeekDrag();
       state.frozenPositionMs = positionNow();
       state.lifecyclePhase = "hidden";

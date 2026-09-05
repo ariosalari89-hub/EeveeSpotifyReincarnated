@@ -14,6 +14,12 @@ xcrun swiftc -swift-version 5 -target "$ARCH-apple-ios17.0-simulator" -sdk "$SDK
   Tests/SpicyLyricsIOS/main.swift -o "$QA_APP/SpicyLyricsQA"
 cp -R "layout/Library/Application Support/EeveeSpotify.bundle/SpicyLyricsRenderer" "$QA_APP/"
 cp Tests/SpicyLyricsRenderer/browser-fixture.js Tests/SpicyLyricsRenderer/transition-checks.js "$QA_APP/"
+# Isolated historical renderer: demonstrate the reported transition defects in
+# WebKit before testing the repaired resources. Never included in the .deb/IPA.
+mkdir "$QA_APP/SpicyLyricsBefore"
+for resource in index.html styles.css renderer.js renderer-model.js; do
+  git show "18a0220:layout/Library/Application Support/EeveeSpotify.bundle/SpicyLyricsRenderer/$resource" > "$QA_APP/SpicyLyricsBefore/$resource"
+done
 python3 - "$QA_APP/Info.plist" <<'PY'
 import plistlib, sys
 with open(sys.argv[1], "wb") as output:
