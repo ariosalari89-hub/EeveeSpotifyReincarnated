@@ -658,12 +658,25 @@
     }
   }
 
+  function previewHeldLine(position, activeIndex) {
+    if (state.surface !== "card" || activeIndex >= 0) return -1;
+    const index = model.findCaptionLine(state.lines, position, activeIndex);
+    const line = state.lines[index];
+    if (line?.kind !== "lead" || !Number.isFinite(line.end) || position < line.end) return -1;
+    // Hold only the finished lead's appearance across a short handoff gap.
+    // Pre-roll, post-roll and interludes keep their existing timing/state.
+    const nextIsNear = state.lines.some(next => next.kind === "lead"
+      && next.start > position && next.start - line.end < 3000);
+    return nextIsNear ? index : -1;
+  }
+
   function updateLyrics(rawPosition, forceScroll = false) {
     if (!state.lines.length) return;
     const position = rawPosition - state.preferences.playbackOffset;
     if (!forceScroll && position === state.lastLyricPosition) return;
     state.lastLyricPosition = position;
     const activeIndex = model.findActiveLine(state.lines, position);
+    const heldIndex = previewHeldLine(position, activeIndex);
     const inlineIndex = state.surface === "inline"
       ? model.findCaptionLine(state.lines, position, activeIndex) : -1;
     let captionGhost = null;
@@ -673,6 +686,10 @@
     state.lines.forEach((line, index) => {
       const visualState = model.lineVisualState(line, index, activeIndex, position);
       const active = visualState === "active";
+      if (line.previewHeld !== (index === heldIndex)) {
+        line.previewHeld = index === heldIndex;
+        line.element?.classList.toggle("preview-held", line.previewHeld);
+      }
       if (line.visualState !== visualState) {
         line.visualState = visualState;
         line.element?.classList.toggle("active", active);
@@ -699,7 +716,7 @@
     }
 
     if (activeIndex !== state.activeLine) {
-      // A brief untimed gap clears the active highlight, not the preview's
+      // A brief untimed gap clears the actual active line, not the preview's
       // established scroll position. Only its first placement should snap.
       const firstLine = !state.hasPositionedLyrics;
       state.activeLine = activeIndex;
@@ -708,8 +725,11 @@
       scrollToLine(activeIndex, true);
     }
 
-    const startIndex = Math.max(0, activeIndex - 5);
-    const endIndex = Math.min(state.lines.length, Math.max(activeIndex + 7, 10));
+    // Complete the held line's last token using its real provider timestamp,
+    // even when a gap occurs beyond the initial token-rendering window.
+    const paintIndex = heldIndex >= 0 ? heldIndex : activeIndex;
+    const startIndex = Math.max(0, paintIndex - 5);
+    const endIndex = Math.min(state.lines.length, Math.max(paintIndex + 7, 10));
     for (let index = startIndex; index < endIndex; index++) {
       const line = state.lines[index];
       if (line.kind === "interlude") {

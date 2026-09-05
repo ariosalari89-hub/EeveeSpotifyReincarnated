@@ -331,6 +331,8 @@ html[data-surface="card"] .token { transition: color .22s ease; }
 html[data-surface="card"] .lyric-line.line-timed > .line-text { color: inherit; transition: none; }
 html[data-surface="card"] .token::after { transition: opacity .22s ease; }
 html[data-surface="card"] .lyric-line.sung, html[data-surface="card"] .lyric-line.sung .token { color: rgba(255,255,255,.75); }
+html[data-surface="card"] .lyric-line.preview-held { color: #fff; }
+html[data-surface="card"] .lyric-line.preview-held .token::after { opacity: 1; }
 html[data-surface="card"] .lyric-line.background { font-size: calc(18px * var(--lyric-scale)); }
 html[data-surface="inline"] { --dim: rgba(255,255,255,.62); }
 html[data-surface="inline"] .lyrics-pane { mask-image: none; -webkit-mask-image: none; }

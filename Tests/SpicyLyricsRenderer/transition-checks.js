@@ -128,7 +128,14 @@ window.runSpicyTransitionChecks = async function (phase) {
   SpicyQA.scenario('line', { ...paused, positionMs: 2500, durationMs: 60000 });
   await wait(400);
   SpicyQA.observe({ ...paused, positionMs: 3900, durationMs: 60000 });
-  await frame(); await frame();
+  const gapColors = [];
+  const finishedPhrase = document.querySelectorAll('.line-timed > .line-text')[1];
+  for (const deadline = performance.now() + 280; performance.now() < deadline;) {
+    await frame(); gapColors.push(getComputedStyle(finishedPhrase).webkitTextFillColor);
+  }
+  check('preview stays white between a line ending and the next line starting',
+    gapColors.length >= 4 && gapColors.every(color => color === 'rgb(255, 255, 255)')
+      && !document.querySelector('#lyrics [aria-current]'), gapColors);
   const gapCadence = await waitForSteadyFrames();
   const gapStart = scroller.scrollTop;
   SpicyQA.observe({ ...paused, positionMs: 4100, durationMs: 60000 });
@@ -176,9 +183,109 @@ window.runSpicyTransitionChecks = async function (phase) {
   await wait(500);
   const active = document.querySelector('.active').getBoundingClientRect();
   check('returning preview follows the fresh lyric', active.top >= 0 && active.bottom <= innerHeight);
+
+  SpicyQA.lyrics.karaoke.Content = Array.from({ length: 30 }, (_, i) => ({ Type: 'Vocal',
+    Lead: { StartTime: i * 2, EndTime: i * 2 + 1.7, Syllables: [
+      { Text: `Word ${i} `, StartTime: i * 2, EndTime: i * 2 + .8 },
+      { Text: 'finishes', StartTime: i * 2 + .8, EndTime: i * 2 + 1.7 }
+    ] }
+  }));
+  SpicyQA.scenario('karaoke', { ...paused, positionMs: 25400, durationMs: 60000 });
+  await wait(350);
+  const wordLine = document.querySelectorAll('.lyric-line.lead')[12];
+  const nextWordLine = document.querySelectorAll('.lyric-line.lead')[13];
+  const wordScroll = scroller.scrollTop;
+  SpicyQA.observe({ ...paused, positionMs: 25900, durationMs: 60000 });
+  const wordGapFrames = [];
+  for (const deadline = performance.now() + 280; performance.now() < deadline;) {
+    await frame();
+    wordGapFrames.push([...wordLine.querySelectorAll('.token')].map(token => ({
+      fill: token.style.getPropertyValue('--fill'), opacity: Number(getComputedStyle(token, '::after').opacity)
+    })));
+  }
+  check('word-timed preview completes and holds white through a gap beyond the first ten lines',
+    wordGapFrames.length >= 4 && wordGapFrames.every(tokens => tokens.every(token =>
+      token.fill === '100.00%' && token.opacity === 1)), wordGapFrames);
+  check('holding a finished preview never starts future words or changes timing and scroll',
+    [...nextWordLine.querySelectorAll('.token')].every(token => token.style.getPropertyValue('--fill') === '0.00%')
+      && !document.querySelector('#lyrics [aria-current]') && scroller.scrollTop === wordScroll);
+  SpicyQA.observe({ ...paused, positionMs: 26000, durationMs: 60000 });
+  await wait(280);
+  check('the old preview dims only once the next timed lyric takes over',
+    [...wordLine.querySelectorAll('.token')].every(token => Number(getComputedStyle(token, '::after').opacity) === 0)
+      && nextWordLine.getAttribute('aria-current') === 'true'
+      && [...nextWordLine.querySelectorAll('.token')].every(token => token.style.getPropertyValue('--fill') === '0.00%'));
+  SpicyQA.observe({ ...paused, positionMs: 24900, durationMs: 60000 });
+  await wait(280);
+  check('rewinding into a held line restores real partial word progress',
+    wordLine.getAttribute('aria-current') === 'true'
+      && [...wordLine.querySelectorAll('.token')].some(token => {
+        const fill = parseFloat(token.style.getPropertyValue('--fill'));
+        return fill > 0 && fill < 100 && Number(getComputedStyle(token, '::after').opacity) === 1;
+      }));
+  const seekHolds = [];
+  for (const [positionMs, index] of [[21900,10], [31900,15]]) {
+    SpicyQA.observe({ ...paused, positionMs, durationMs: 60000 });
+    await wait(280);
+    const leads = [...document.querySelectorAll('.lyric-line.lead')];
+    const bright = leads.filter(line => [...line.querySelectorAll('.token')].every(token =>
+      token.style.getPropertyValue('--fill') === '100.00%' && Number(getComputedStyle(token, '::after').opacity) === 1));
+    seekHolds.push(bright.length === 1 && bright[0] === leads[index] && !document.querySelector('#lyrics [aria-current]'));
+  }
+  check('backward and forward gap observations hold only the correct preview line', seekHolds.every(Boolean), seekHolds);
+
+  SpicyQA.lyrics.line.Content = [
+    {Type:'Vocal',Text:'First timed phrase',StartTime:1,EndTime:2.7},
+    {Type:'Vocal',Text:'Second timed phrase',StartTime:3,EndTime:4.7},
+    {Type:'Vocal',Text:'After the instrumental',StartTime:8,EndTime:9.7}
+  ];
+  SpicyQA.scenario('line', { ...paused, positionMs: 500, durationMs: 12000 });
+  await wait(280);
+  const leadText = () => [...document.querySelectorAll('.line-timed > .line-text')];
+  const noWhiteLead = () => leadText().every(text => getComputedStyle(text).webkitTextFillColor !== 'rgb(255, 255, 255)');
+  check('preview does not pre-highlight lyrics before the first timestamp', noWhiteLead() && !document.querySelector('#lyrics [aria-current]'));
+  bootstrap('card', true);
+  SpicyQA.observe({ ...paused, positionMs: 2500, durationMs: 12000 });
+  await wait(280);
+  SpicyQA.observe({ ...paused, positionMs: 2900, durationMs: 12000 });
+  await frame(); await frame();
+  check('reduced-motion preview also stays white throughout a short gap',
+    getComputedStyle(leadText()[0]).webkitTextFillColor === 'rgb(255, 255, 255)'
+      && !document.querySelector('#lyrics [aria-current]'));
+  SpicyQA.observe({ ...paused, positionMs: 6000, durationMs: 12000 });
+  await wait(280);
+  check('instrumental interludes do not retain an obsolete white preview',
+    noWhiteLead() && Boolean(document.querySelector('.interlude.active')));
+  SpicyQA.observe({ ...paused, positionMs: 10000, durationMs: 12000 });
+  await wait(280);
+  check('preview does not keep the final lyric white after its timing ends', noWhiteLead() && !document.querySelector('#lyrics [aria-current]'));
+  SpicyQA.observe({ ...paused, positionMs: 2900, durationMs: 12000 });
+  await wait(280);
+  SpicyQA.scenario('next', { ...paused, positionMs: 500 });
+  await wait(280);
+  check('changing songs clears the previous preview hold and lyric text',
+    !document.querySelector('.preview-held') && !document.querySelector('#lyrics').textContent.includes('First timed phrase'));
+  SpicyQA.scenario('static', { ...paused, positionMs: 500 });
+  await frame(); await frame();
+  check('static lyrics never acquire timed preview holds',
+    document.querySelector('#lyrics').dataset.timing === 'static'
+      && !document.querySelector('.preview-held') && !document.querySelector('#lyrics [aria-current]'));
+  bootstrap('fullscreen');
+  SpicyQA.scenario('line', { ...paused, positionMs: 2500, durationMs: 12000 });
+  await wait(280);
+  SpicyQA.observe({ ...paused, positionMs: 2900, durationMs: 12000 });
+  await wait(280);
+  check('fullscreen retains its original timed highlight behavior',
+    noWhiteLead() && !document.querySelector('.preview-held') && !document.querySelector('#lyrics [aria-current]'));
+  bootstrap('inline');
+  SpicyQA.observe({ ...paused, positionMs: 2900, durationMs: 12000 });
+  await frame(); await frame();
+  check('inline caption retains its own phrase handoff without preview styling',
+    document.querySelector('.inline-visible')?.textContent === 'First timed phrase' && !document.querySelector('.preview-held'));
   }
   if (phase === 'background') {
     bootstrap('fullscreen');
+    SpicyQA.scenario('line', paused);
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
     const context = canvas.getContext('2d'); context.fillStyle = '#466a91';context.fillRect(0,0,16,16);
     const artwork = canvas.toDataURL();
