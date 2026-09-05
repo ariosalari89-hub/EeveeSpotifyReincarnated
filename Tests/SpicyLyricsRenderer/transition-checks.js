@@ -6,6 +6,21 @@ window.runSpicyTransitionChecks = async function (phase) {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const paused = { isPlaying: false, isPaused: true, isAdvancing: false };
   const check = (name, pass, detail) => results.push({ name, pass, detail });
+  const waitForSteadyFrames = async () => {
+    // A cold simulator can still be migrating system data after boot. Require
+    // an observable starting cadence, not an arbitrary extra sleep or a lower
+    // intermediate-frame threshold. Keep actual sample times in the result.
+    let previous = await frame();
+    const deltas = [];
+    for (const deadline = performance.now() + 5000; performance.now() < deadline;) {
+      const now = await frame(), delta = now - previous;
+      previous = now;
+      if (!document.hidden && delta > 0 && delta <= 40) deltas.push(delta);
+      else deltas.length = 0;
+      if (deltas.length >= 6) return deltas;
+    }
+    throw new Error('No six-frame starting cadence within 5 seconds for motion sampling');
+  };
   const waitForPaintedCaption = async text => {
     // A timer is not evidence that a newly attached/resized WKWebView has
     // painted its starting phrase. Establish that precondition in real frames.
@@ -92,6 +107,7 @@ window.runSpicyTransitionChecks = async function (phase) {
   }));
   SpicyQA.scenario('line', { ...paused, positionMs: 2100, durationMs: 60000 });
   await wait(700);
+  await waitForSteadyFrames();
   const scroller = document.querySelector('#lyrics-scroller');
   const start = scroller.scrollTop;
   SpicyQA.observe({ ...paused, positionMs: 4100, durationMs: 60000 });
@@ -113,17 +129,19 @@ window.runSpicyTransitionChecks = async function (phase) {
   await wait(400);
   SpicyQA.observe({ ...paused, positionMs: 3900, durationMs: 60000 });
   await frame(); await frame();
+  const gapCadence = await waitForSteadyFrames();
   const gapStart = scroller.scrollTop;
   SpicyQA.observe({ ...paused, positionMs: 4100, durationMs: 60000 });
-  const gapPositions = [];
+  const gapPositions = [], gapFrameTimes = [], gapStarted = performance.now();
   for (const deadline = performance.now() + 450; performance.now() < deadline;) {
-    await frame(); gapPositions.push(scroller.scrollTop);
+    await frame(); gapPositions.push(scroller.scrollTop); gapFrameTimes.push(performance.now() - gapStarted);
   }
   const gapEnd = gapPositions.at(-1);
   check('preview glides into the next line after a short silent gap',
     gapEnd > gapStart + 10
       && new Set(gapPositions.filter(p => p > gapStart + 1 && p < gapEnd - 1)).size >= 4,
-    { start: gapStart, positions: gapPositions });
+    { start: gapStart, positions: gapPositions, frameTimes: gapFrameTimes, cadenceBeforeMs: gapCadence });
+  await waitForSteadyFrames();
   const refreshSession = SpicyQA.observe({ ...paused, positionMs: 6100, durationMs: 60000 });
   await wait(50);
   const refreshStart = scroller.scrollTop;
@@ -176,11 +194,21 @@ window.runSpicyTransitionChecks = async function (phase) {
       getComputedStyle(backdrop).backgroundImage.includes(artwork)
         && Number(getComputedStyle(backdrop).opacity) >= .9
         && getComputedStyle(backdrop).filter.includes('blur('));
+    const backgroundCadence = await waitForSteadyFrames();
     const movingStart = getComputedStyle(backdrop).transform;
-    await wait(250);
+    const movingSamples = [], movingStarted = performance.now();
+    for (const deadline = movingStarted + 500; performance.now() < deadline;) {
+      await frame();
+      const style = getComputedStyle(backdrop);
+      movingSamples.push({ elapsedMs: performance.now() - movingStarted,
+        transform: style.transform, playState: style.animationPlayState });
+    }
     check('enabled background moves slowly during playback',
       getComputedStyle(backdrop).animationPlayState === 'running'
-        && getComputedStyle(backdrop).transform !== movingStart);
+        && movingSamples.some(sample => sample.transform !== movingStart),
+      { start: movingStart, samples: movingSamples, cadenceBeforeMs: backgroundCadence,
+        className: backdrop.className, animationName: getComputedStyle(backdrop).animationName,
+        hidden: document.hidden });
     SpicyQA.send('lifecycle',{state:'hidden'});
     await frame();await frame();
     const hiddenTransform = getComputedStyle(backdrop).transform;
