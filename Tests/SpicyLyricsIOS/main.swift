@@ -517,11 +517,21 @@ struct QAFailure: Error { let message: String }
             try await waitForSettledLandscape()
             try await snapshot("qa-landscape")
             try await captureSimulatorScreen()
-            let overlay = scene.windows.first(where: { $0.isKeyWindow })
+            guard let overlay = scene.keyWindow else { throw QAFailure(message: "close has no persistent window") }
             _ = try await evaluate("document.querySelector('#close-button').click()")
-            try await Task.sleep(nanoseconds: 500_000_000)
-            guard overlay?.isHidden == true else { throw QAFailure(message: "close must dispose persistent window") }
-            checks.append("close restores original window")
+            // Check the real completion state: a cold simulator can deliver the
+            // animation completion after an arbitrary half-second sleep expires.
+            let closeStarted = ProcessInfo.processInfo.systemUptime
+            while ProcessInfo.processInfo.systemUptime - closeStarted < 3 {
+                if overlay.isHidden, overlay.rootViewController == nil { break }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            guard overlay.isHidden, overlay.rootViewController == nil,
+                  let restoredWindow = scene.keyWindow, restoredWindow !== overlay,
+                  restoredWindow.rootViewController != nil else {
+                throw QAFailure(message: "close must dispose persistent window and restore the original window within 3 seconds")
+            }
+            checks.append("close disposes persistent window and restores original window in \(ProcessInfo.processInfo.systemUptime - closeStarted)s")
             try await testEmbeddedSurfaces()
             try await testRendererTransitions(baseline: true)
             try await testRendererTransitions(baseline: false)
