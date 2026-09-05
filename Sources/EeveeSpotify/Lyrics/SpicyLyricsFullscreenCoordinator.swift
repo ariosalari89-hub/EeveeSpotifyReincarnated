@@ -61,6 +61,9 @@ final class SpicyLyricsFullscreenCoordinator {
         overlay.windowLevel = .init(rawValue: sourceWindow.windowLevel.rawValue + 1)
         overlay.rootViewController = screen
         screen.loadViewIfNeeded()
+        // Size the parent before installing autoresizing children. Growing a
+        // zero-sized root would otherwise add a whole screen to the cover.
+        screen.view.frame = overlay.bounds
         // Capture the Now Playing surface BEFORE Spotify presents native
         // lyrics. This memory-only cover stays until the renderer is prepared.
         let cover = UIView(frame: overlay.bounds)

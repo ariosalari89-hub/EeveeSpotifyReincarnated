@@ -53,8 +53,10 @@ final class SpicyLyricsPlaybackBridge {
     var shuffle = 0
     var repeatMode = 0
     var onSkip: (() -> Void)?
+    var payloadReads = 0
 
     func sessionPayload() -> [String: Any]? {
+        payloadReads += 1
         sequence += 1
         return [
             "generation": String(generation), "sequence": String(sequence),
@@ -357,6 +359,13 @@ struct QAFailure: Error { let message: String }
         checks.append("card and above-title lyric share current generation, real renderer and native bounds")
         _ = try await inlineWeb.evaluateJavaScript("document.querySelector('.inline-visible').click()")
         try await waitFor("inline tap opens Spicy directly without native lyric controller", "document.querySelector('#lyrics').textContent.includes('track-4')")
+        SpicyLyricsPlaybackBridge.shared.payloadReads = 0
+        NotificationCenter.default.post(name: .spicyLyricsPlaybackStateDidChange, object: nil)
+        let visibleReads = SpicyLyricsPlaybackBridge.shared.payloadReads
+        guard visibleReads == 1 else {
+            throw QAFailure(message: "covered lyric views still request playback: expected 1 visible consumer, got \(visibleReads)")
+        }
+        checks.append("covered caption and preview stop requesting playback while fullscreen owns the scene")
         SpicyLyricsFullscreenCoordinator.shared.close()
         try await Task.sleep(nanoseconds: 500_000_000)
         guard card.window != nil else { throw QAFailure(message: "closing compact entry dismissed Now Playing") }
