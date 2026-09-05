@@ -403,11 +403,11 @@ struct QAFailure: Error { let message: String }
             }
             preparing.layoutIfNeeded()
             guard let entry = preparing.rootViewController?.view.subviews.first(where: { !($0 is WKWebView) }),
-                  let snapshot = entry.subviews.first(where: { !($0 is UIButton) }) else {
+                  let entrySnapshot = entry.subviews.first(where: { !($0 is UIButton) }) else {
                 throw QAFailure(message: "entry must preserve the previous screen while preparing")
             }
             let entryBounds = entry.convert(entry.bounds, to: preparing)
-            let snapshotBounds = snapshot.convert(snapshot.bounds, to: preparing)
+            let snapshotBounds = entrySnapshot.convert(entrySnapshot.bounds, to: preparing)
             guard abs(entryBounds.width - preparing.bounds.width) < 1,
                   abs(entryBounds.height - preparing.bounds.height) < 1,
                   abs(snapshotBounds.width - preparing.bounds.width) < 1,
