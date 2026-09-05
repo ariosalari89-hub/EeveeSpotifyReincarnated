@@ -45,8 +45,8 @@ enum SpicyLyricsAvailability {
     }
 
     private static func objectGetter(_ cls: AnyClass, _ selector: Selector) -> Method? {
-        guard let method = class_getInstanceMethod(cls, selector), method_getNumberOfArguments(method) == 2,
-              let result = method_copyReturnType(method) else { return nil }
+        guard let method = class_getInstanceMethod(cls, selector), method_getNumberOfArguments(method) == 2 else { return nil }
+        let result = method_copyReturnType(method)
         defer { free(result) }
         return result.pointee == 64 ? method : nil
     }
