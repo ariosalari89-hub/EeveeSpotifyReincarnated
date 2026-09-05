@@ -38,6 +38,14 @@ final class SpicyLyricsFullscreenCoordinator {
         present(from: controller, replacesNativeController: false)
     }
 
+    /// UIKit keeps the underlying Now Playing window attached during our
+    /// fullscreen presentation. Its embedded renderers are not visible work.
+    func covers(_ candidate: UIWindow) -> Bool {
+        guard let window, window !== candidate, !window.isHidden,
+              window.windowLevel > candidate.windowLevel else { return false }
+        return window.windowScene === candidate.windowScene
+    }
+
     private func sourceWindow(for controller: UIViewController) -> UIWindow? {
         if let existing = controller.viewIfLoaded?.window
             ?? controller.presentingViewController?.viewIfLoaded?.window

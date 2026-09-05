@@ -362,6 +362,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         guard let view = controller?.viewIfLoaded, let window = view.window,
               view.bounds.width > 1, view.bounds.height > 1,
               view.convert(view.bounds, to: window).intersects(window.bounds) else { return false }
+        guard !SpicyLyricsFullscreenCoordinator.shared.covers(window) else { return false }
         var ancestor: UIView? = view
         while let node = ancestor {
             if node.isHidden || node.alpha < 0.01 { return false }

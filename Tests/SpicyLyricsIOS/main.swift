@@ -366,9 +366,31 @@ struct QAFailure: Error { let message: String }
             throw QAFailure(message: "covered lyric views still request playback: expected 1 visible consumer, got \(visibleReads)")
         }
         checks.append("covered caption and preview stop requesting playback while fullscreen owns the scene")
+        SpicyLyricsPlaybackBridge.shared.position = 22_000
+        NotificationCenter.default.post(name: .spicyLyricsPlaybackStateDidChange, object: nil)
+        try await waitFor("visible fullscreen keeps receiving playback while embedded views sleep", "Number(document.querySelector('#seek').value) === 22000")
         SpicyLyricsFullscreenCoordinator.shared.close()
         try await Task.sleep(nanoseconds: 500_000_000)
         guard card.window != nil else { throw QAFailure(message: "closing compact entry dismissed Now Playing") }
+        SpicyLyricsPlaybackBridge.shared.payloadReads = 0
+        NotificationCenter.default.post(name: .spicyLyricsPlaybackStateDidChange, object: nil)
+        guard SpicyLyricsPlaybackBridge.shared.payloadReads == 2 else {
+            throw QAFailure(message: "closing fullscreen did not restore exactly the two embedded playback consumers")
+        }
+        var resumedAtCurrentPosition = false
+        for _ in 0..<30 {
+            let current = "Number(document.querySelector('#seek').value) === 22000"
+            if (try await cardWeb.evaluateJavaScript(current)) as? Bool == true,
+               (try await inlineWeb.evaluateJavaScript(current)) as? Bool == true {
+                resumedAtCurrentPosition = true
+                break
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard resumedAtCurrentPosition else {
+            throw QAFailure(message: "embedded lyrics resumed from a stale position after fullscreen closed")
+        }
+        checks.append("preview and caption resume from fresh playback after fullscreen closes")
         guard let expand = header.expandButtonContainerView.subviews.compactMap({ $0 as? UIButton })
             .first(where: { $0.accessibilityIdentifier == "spicy-preview-expand" }),
               header.expandButtonContainerView.hitTest(CGPoint(x: 22, y: 20), with: nil) === expand else {
