@@ -39,6 +39,7 @@ DEVICE=$(xcrun simctl create SpicyLyricsQA com.apple.CoreSimulator.SimDeviceType
 trap 'xcrun simctl shutdown "$DEVICE" >/dev/null 2>&1 || true; xcrun simctl delete "$DEVICE" >/dev/null 2>&1 || true' EXIT
 xcrun simctl boot "$DEVICE"
 xcrun simctl bootstatus "$DEVICE" -b
+bash Tests/SpicyLyricsPlaybackBridge/run.sh "$DEVICE"
 xcrun simctl install "$DEVICE" "$QA_APP"
 xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 CONTAINER=$(xcrun simctl get_app_container "$DEVICE" local.spicylyrics.qa data)

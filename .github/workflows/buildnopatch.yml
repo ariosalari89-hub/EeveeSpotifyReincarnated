@@ -107,6 +107,7 @@ jobs:
           name: SpicyLyrics-iOS-QA
           path: |
             ${{ runner.temp }}/spicy-ios-qa-result.txt
+            ${{ runner.temp }}/spicy-metadata-qa-result.txt
             ${{ runner.temp }}/qa-portrait.png
             ${{ runner.temp }}/qa-landscape.png
             ${{ runner.temp }}/qa-landscape-screen.png

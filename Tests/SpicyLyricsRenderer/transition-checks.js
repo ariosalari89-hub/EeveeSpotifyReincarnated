@@ -108,6 +108,22 @@ window.runSpicyTransitionChecks = async function (phase) {
       && positions.every((p, i) => !i || p >= positions[i - 1] - 1), { start, positions });
   check('line-timed preview highlight fades rather than switching instantly',
     new Set(colors).size >= 4, colors);
+  SpicyQA.lyrics.line.Content.forEach(line => { line.EndTime -= .3; });
+  SpicyQA.scenario('line', { ...paused, positionMs: 2500, durationMs: 60000 });
+  await wait(400);
+  SpicyQA.observe({ ...paused, positionMs: 3900, durationMs: 60000 });
+  await frame(); await frame();
+  const gapStart = scroller.scrollTop;
+  SpicyQA.observe({ ...paused, positionMs: 4100, durationMs: 60000 });
+  const gapPositions = [];
+  for (const deadline = performance.now() + 450; performance.now() < deadline;) {
+    await frame(); gapPositions.push(scroller.scrollTop);
+  }
+  const gapEnd = gapPositions.at(-1);
+  check('preview glides into the next line after a short silent gap',
+    gapEnd > gapStart + 10
+      && new Set(gapPositions.filter(p => p > gapStart + 1 && p < gapEnd - 1)).size >= 4,
+    { start: gapStart, positions: gapPositions });
   bootstrap('card', true);
   SpicyQA.observe({ ...paused, positionMs: 10100, durationMs: 60000 });
   await frame(); await frame();

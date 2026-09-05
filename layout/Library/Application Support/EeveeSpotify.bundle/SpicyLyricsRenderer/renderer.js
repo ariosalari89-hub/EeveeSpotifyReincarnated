@@ -62,6 +62,7 @@
     captionIndex: -1,
     captionMotion: null,
     cardScroll: null,
+    hasPositionedLyrics: false,
     lastLyricPosition: null,
     followLyrics: true,
     draggingSeek: false,
@@ -535,6 +536,7 @@
 
   function renderLyrics(raw, trackId, generation) {
     stopEmbeddedMotion();
+    state.hasPositionedLyrics = false;
     state.captionIndex = -1;
     state.lastLyricPosition = null;
     state.rawLyrics = raw;
@@ -812,7 +814,9 @@
     }
 
     if (activeIndex !== state.activeLine) {
-      const firstLine = state.activeLine < 0;
+      // A brief untimed gap clears the active highlight, not the preview's
+      // established scroll position. Only its first placement should snap.
+      const firstLine = !state.hasPositionedLyrics;
       state.activeLine = activeIndex;
       if (state.followLyrics && activeIndex >= 0) scrollToLine(activeIndex, firstLine || forceScroll);
     } else if (forceScroll && state.followLyrics && activeIndex >= 0) {
@@ -859,6 +863,7 @@
     if (state.surface === "inline") return;
     const element = state.lines[index]?.element;
     if (!element) return;
+    state.hasPositionedLyrics = true;
     const target = dom.scroller.scrollTop + element.getBoundingClientRect().top
       - dom.scroller.getBoundingClientRect().top
       - dom.scroller.clientHeight * (state.surface === "card" ? .28 : .42)
