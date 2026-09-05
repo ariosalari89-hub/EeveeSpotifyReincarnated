@@ -38,7 +38,7 @@ button { -webkit-tap-highlight-color: transparent; }
   background-color: #080808;
   background-size: cover;
   background-position: center;
-  filter: blur(12px) saturate(1.18);
+  filter: blur(6px) saturate(1.18);
   opacity: 1;
   transform: scale(1.24);
   animation: artwork-drift 24s ease-in-out infinite alternate;
@@ -134,17 +134,26 @@ button { -webkit-tap-highlight-color: transparent; }
 .lyric-line.not-sung, .lyric-line.sung { opacity: 1; }
 .lyric-line.sung .token::after { opacity: 0; }
 .lyric-line.static { color: rgba(255,255,255,.86); opacity: .82; cursor: default; transform: none; }
-.lyric-line.active { opacity: 1; transform: scale(1) translateY(-1px); filter: drop-shadow(0 5px 16px rgba(0,0,0,.18)); }
+.lyric-line.active { opacity: 1; transform: scale(1) translateY(-1px); }
 .lyric-line:active { transform: scale(.975); }
 .line-text { display: block; min-width: 0; max-width: 100%; transition: color .18s ease, text-shadow .18s ease; }
 .lyric-line.line-timed.active { color: var(--text); -webkit-text-fill-color: var(--text); transform: scale(1) translateY(-1px); }
-.lyric-line.line-timed.active > .line-text { color: var(--text); -webkit-text-fill-color: var(--text); text-shadow: 0 0 10px rgba(255,255,255,.14); }
+.lyric-line.line-timed.active > .line-text { color: var(--text); -webkit-text-fill-color: var(--text); }
 .word-group { display: inline-flex; white-space: nowrap; align-items: baseline; }
 .word-group.breakable { display: inline; white-space: normal; }
 .word-group.breakable .token { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .token { position: relative; display: inline-block; color: var(--dim); --fill: 0%; --pulse: 0; transform: translateY(calc(var(--pulse) * -2px)); transform-origin: center bottom; transition: transform .1s linear; }
 .token::after { content: attr(data-text); position: absolute; inset: 0; width: 100%; color: #fff; clip-path: inset(0 calc(100% - var(--fill)) 0 0); text-shadow: 0 0 calc(2px + var(--pulse) * 13px) rgba(255,255,255,calc(.1 + var(--pulse) * .34)); }
 .rtl .token::after { clip-path: inset(0 0 0 calc(100% - var(--fill))); }
+html[data-surface="fullscreen"] .token {
+  background-image: linear-gradient(to right, #fff var(--fill), var(--dim) var(--fill));
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+html[data-surface="fullscreen"] .rtl .token { background-image: linear-gradient(to left, #fff var(--fill), var(--dim) var(--fill)); }
+html[data-surface="fullscreen"] .token::after { display: none; }
+html[data-surface="fullscreen"] .lyric-line.sung .token { background-image: none; -webkit-text-fill-color: currentColor; }
 .line-translation { display: block; margin-top: .38em; font-size: .46em; line-height: 1.22; letter-spacing: -.012em; color: var(--muted); font-weight: 630; }
 .lyric-line.background { font-size: calc(clamp(21px, 2.8vw, 36px) * var(--lyric-scale)); font-style: italic; opacity: 1; margin-top: -10px; }
 .lyric-line.background.active { opacity: 1; }
@@ -302,8 +311,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
 .native-reduce-motion .lyric-line.active,
 .native-reduce-motion .token { transform: none; }
 
-/* The card shares fullscreen's cover within its lyric-content bounds. Native
-   title/share/expand controls stay owned by Spotify; Canvas stays transparent. */
+/* Native card geometry separates the full backdrop from its lyric-content slot. */
 html[data-surface="card"], html[data-surface="inline"],
 html[data-surface="card"] body, html[data-surface="inline"] body { background: transparent; }
 html[data-surface="inline"] #artwork-backdrop,
@@ -320,9 +328,10 @@ html:not([data-surface="fullscreen"]) .lyric-line.line-timed.active { transform:
 html:not([data-surface="fullscreen"]) .token { transform: none; }
 html:not([data-surface="fullscreen"]) .token::after { text-shadow: none; }
 html[data-surface="card"] { --dim: #b3b3b3; }
+html[data-surface="card"] .stage { position: absolute; left: var(--card-content-x, 0px); top: var(--card-content-y, 0px); width: var(--card-content-width, 100%); height: var(--card-content-height, 100%); }
 html[data-surface="card"] #lyrics-scroller { padding: 28% 16px 60%; overflow-y: hidden; }
 html[data-surface="card"] #lyrics { gap: 20px; }
-html[data-surface="card"] .lyric-line { font-size: calc(clamp(20px, 7vw, 27px) * var(--lyric-scale)); line-height: 1.18; }
+html[data-surface="card"] .lyric-line { font-size: calc(clamp(20px, calc(var(--card-content-width, 100vw) * .07), 27px) * var(--lyric-scale)); line-height: 1.18; }
 html[data-surface="card"] .lyric-line,
 html[data-surface="card"] .lyric-line.line-timed,
 html[data-surface="card"] .lyric-line.line-timed > .line-text,

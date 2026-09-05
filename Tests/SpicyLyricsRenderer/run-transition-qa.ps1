@@ -10,8 +10,8 @@ try {
     Get-Content (Join-Path $PSScriptRoot 'browser-fixture.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Write-Host
     Get-Content (Join-Path $PSScriptRoot 'transition-checks.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
     $results = @()
-    foreach ($phase in @('inline','card','background')) {
-        $height = if ($phase -eq 'inline') { 52 } elseif ($phase -eq 'background') { 640 } else { 320 }
+    foreach ($phase in @('inline','card','background','highlight','card-layout')) {
+        $height = if ($phase -eq 'inline') { 52 } elseif ($phase -eq 'background') { 640 } elseif ($phase -eq 'card-layout') { 392 } else { 320 }
         & agent-browser --session $session set viewport 360 $height
         $raw = "runSpicyTransitionChecks('$phase').then(JSON.stringify)" | & agent-browser --session $session eval --stdin
         if ($LASTEXITCODE -ne 0) { throw "Evaluation failed: $raw" }

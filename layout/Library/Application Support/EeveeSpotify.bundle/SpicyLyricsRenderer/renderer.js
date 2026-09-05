@@ -879,6 +879,22 @@
     dom.resumeScroll.hidden = state.followLyrics;
   }
 
+  let contentFrameKey = "";
+  function applyContentFrame(frame) {
+    const valid = state.surface === "card" && frame
+      && [frame.x, frame.y, frame.width, frame.height].every(Number.isFinite)
+      && frame.x >= 0 && frame.y >= 0 && frame.width > 0 && frame.height > 0;
+    const key = valid ? JSON.stringify([frame.x, frame.y, frame.width, frame.height]) : "";
+    if (key === contentFrameKey) return;
+    contentFrameKey = key;
+    for (const name of ["x", "y", "width", "height"]) {
+      const property = `--card-content-${name}`;
+      if (valid) document.documentElement.style.setProperty(property, `${frame[name]}px`);
+      else document.documentElement.style.removeProperty(property);
+    }
+    resizeLyrics();
+  }
+
   window.SpicyNative = {
     receive(event) {
       if (!event || typeof event !== "object") return;
@@ -888,6 +904,7 @@
         stopEmbeddedMotion();
         state.surface = ["card", "inline"].includes(payload.surface) ? payload.surface : "fullscreen";
         document.documentElement.dataset.surface = state.surface;
+        applyContentFrame(null);
         state.nativeReduceMotion = Boolean(payload.reduceMotion);
         if (payload.preferences && typeof payload.preferences === "object") {
           state.preferences.romanized = Boolean(payload.preferences.romanized);
@@ -906,6 +923,9 @@
         }
         document.body.classList.toggle("native-reduce-motion", state.nativeReduceMotion);
         applyPreferences();
+        break;
+      case "layout":
+        applyContentFrame(payload.contentFrame);
         break;
       case "session":
         applySession(payload);
@@ -1167,7 +1187,7 @@
     }
   });
   let resizeFrame = 0;
-  addEventListener("resize", () => {
+  function resizeLyrics() {
     cancelSeekDrag();
     stopEmbeddedMotion();
     cancelAnimationFrame(resizeFrame);
@@ -1175,7 +1195,8 @@
       fitWordGroups();
       updateLyrics(positionNow(), true);
     });
-  }, { passive: true });
+  }
+  addEventListener("resize", resizeLyrics, { passive: true });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopEmbeddedMotion();

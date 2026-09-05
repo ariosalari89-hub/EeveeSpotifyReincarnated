@@ -1,8 +1,8 @@
 import UIKit
 import ObjectiveC.runtime
 
-/// Installs only in verified lyric-content views. The card header/expand/share,
-/// artwork, video, title and native playback controls remain Spotify-owned.
+/// Installs in verified lyric-content views. The preview backdrop can extend to
+/// its native card; header/expand/share and playback controls stay Spotify-owned.
 enum SpicyLyricsEmbeddedSurfaces {
     private static var association: UInt8 = 0
     private static var installed = false
@@ -75,7 +75,31 @@ enum SpicyLyricsEmbeddedSurfaces {
             }
             writeDebugLog("[SpicyEmbedded] installed \(surface.rawValue) in \(name)")
         }
+        installCardLayout()
         SpicyLyricsPreviewEntry.install(isEnabled: isEnabled)
+    }
+
+    private static func installCardLayout() {
+        var seen = Set<ObjectIdentifier>()
+        for name in ["Lyrics_CardElementImpl.CardView", "_TtC22Lyrics_CardElementImpl8CardView"] {
+            guard let cls = NSClassFromString(name) as? UIView.Type,
+                  seen.insert(ObjectIdentifier(cls)).inserted else { continue }
+            let selector = #selector(UIView.layoutSubviews)
+            guard let method = class_getInstanceMethod(cls, selector),
+                  method_getNumberOfArguments(method) == 2,
+                  let encoding = method_getTypeEncoding(method), encoding.pointee == 118 else { continue }
+            typealias Original = @convention(c) (UIView, Selector) -> Void
+            let original = unsafeBitCast(method_getImplementation(method), to: Original.self)
+            let block: @convention(block) (UIView) -> Void = { card in
+                original(card, selector)
+                guard let ivar = class_getInstanceVariable(type(of: card), "contentView"),
+                      let content = object_getIvar(card, ivar) as? UIView,
+                      content.isDescendant(of: card) else { return }
+                update(content, surface: .card)
+            }
+            let replacement = imp_implementationWithBlock(block)
+            if !class_addMethod(cls, selector, replacement, encoding) { method_setImplementation(method, replacement) }
+        }
     }
 
     private static func update(_ view: UIView, surface: SpicyLyricsSurface) {
@@ -103,6 +127,30 @@ enum SpicyLyricsEmbeddedSurfaces {
 }
 
 private final class SpicyLyricsEmbeddedHost {
+    private final class NativeClip {
+        weak var view: UIView?
+        let clips: Bool
+        let mask: CALayer?
+        init(_ view: UIView) {
+            self.view = view
+            clips = view.clipsToBounds
+            mask = view.layer.mask
+        }
+        func allowBackgroundOverflow() {
+            view?.clipsToBounds = false
+            view?.layer.mask = nil
+        }
+        func restore() {
+            view?.clipsToBounds = clips
+            view?.layer.mask = mask
+        }
+    }
+    private final class NativeDepth {
+        weak var view: UIView?
+        let original: CGFloat
+        init(_ view: UIView) { self.view = view; original = view.layer.zPosition }
+        func restore() { view?.layer.zPosition = original }
+    }
     private final class NativeTap {
         weak var recognizer: UITapGestureRecognizer?
         let enabled: Bool
@@ -144,6 +192,8 @@ private final class SpicyLyricsEmbeddedHost {
     private var renderer: SpicyLyricsFullscreenHost?
     private var originals = [NativeView]()
     private var nativeTaps = [NativeTap]()
+    private var overflowPath = [NativeClip]()
+    private var headerDepth: NativeDepth?
     private var updating = false
     private var failed = false
 
@@ -206,9 +256,64 @@ private final class SpicyLyricsEmbeddedHost {
                 originals.first(where: { $0.view === child })?.suppress()
             }
             originals.removeAll { $0.view == nil }
-            controller.view.frame = container.bounds
+            layoutBackdrop(in: container)
             container.bringSubviewToFront(controller.view)
         }
+    }
+
+    private func restoreCardPresentation() {
+        overflowPath.forEach { $0.restore() }
+        overflowPath.removeAll()
+        headerDepth?.restore()
+        headerDepth = nil
+    }
+
+    private func layoutBackdrop(in container: UIView) {
+        var path = [UIView]()
+        var ancestor: UIView? = container
+        var card: UIView?
+        if surface == .card {
+            while let view = ancestor {
+                let name = NSStringFromClass(type(of: view))
+                if name == "Lyrics_CardElementImpl.CardView" || name == "_TtC22Lyrics_CardElementImpl8CardView" {
+                    card = view
+                    break
+                }
+                path.append(view)
+                ancestor = view.superview
+            }
+        }
+        guard let card, card.bounds.width > 1, card.bounds.height > 1,
+              let ivar = class_getInstanceVariable(type(of: card), "headerView"),
+              let header = object_getIvar(card, ivar) as? UIView,
+              header.isDescendant(of: card), !header.isDescendant(of: container) else {
+            restoreCardPresentation()
+            controller.view.frame = container.bounds
+            renderer?.setContentFrame(nil)
+            return
+        }
+        // Find the separate native header branch at the first shared ancestor.
+        // Its controls stay above the backdrop, with their original hit targets.
+        var headerBranch = header
+        while let parent = headerBranch.superview, !path.contains(where: { $0 === parent }) && parent !== card {
+            headerBranch = parent
+        }
+        if headerDepth?.view !== headerBranch {
+            headerDepth?.restore()
+            headerDepth = NativeDepth(headerBranch)
+        }
+        let contentDepth = path.first(where: { $0.superview === headerBranch.superview })?.layer.zPosition ?? 0
+        headerBranch.layer.zPosition = max(headerBranch.layer.zPosition, contentDepth + 1)
+        for entry in overflowPath where !path.contains(where: { $0 === entry.view }) { entry.restore() }
+        overflowPath.removeAll { entry in !path.contains(where: { $0 === entry.view }) }
+        for view in path {
+            if !overflowPath.contains(where: { $0.view === view }) { overflowPath.append(NativeClip(view)) }
+        }
+        overflowPath.forEach { $0.allowBackgroundOverflow() }
+        // Only drawing extends beyond the content slot. UIKit still limits hit
+        // testing to that slot, and the native outer card owns rounded clipping.
+        controller.view.frame = container.convert(card.bounds, from: card)
+        renderer?.setContentFrame(controller.view.convert(container.bounds, from: container))
     }
 
     @discardableResult
@@ -241,6 +346,7 @@ private final class SpicyLyricsEmbeddedHost {
         originals.removeAll()
         nativeTaps.forEach { $0.restore() }
         nativeTaps.removeAll()
+        restoreCardPresentation()
         updating = false
     }
 

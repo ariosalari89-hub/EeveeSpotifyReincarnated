@@ -53,6 +53,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private var isRecoveringRenderer = false
     private var surfaceVisible = true
     private let surface: SpicyLyricsSurface
+    private var contentFrame: CGRect?
 
     private let onClose: (() -> Void)?
     private let onReveal: ((UIView) -> Void)?
@@ -96,6 +97,22 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         cancelLyricsRequest()
         cancelLyricsUpgrade(resetAttempts: true)
         destroyWebView()
+    }
+
+    func setContentFrame(_ frame: CGRect?) {
+        guard surface == .card, contentFrame != frame else { return }
+        contentFrame = frame
+        publishLayout()
+    }
+
+    private func publishLayout() {
+        guard surface == .card, isReady else { return }
+        let frame: Any
+        if let contentFrame {
+            frame = ["x": contentFrame.minX, "y": contentFrame.minY,
+                     "width": contentFrame.width, "height": contentFrame.height]
+        } else { frame = NSNull() }
+        emit(type: "layout", payload: ["contentFrame": frame])
     }
 
     private func registerObservers() {
@@ -304,6 +321,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
             "boldText": UIAccessibility.isBoldTextEnabled,
             "preferences": rendererPreferences()
         ])
+        publishLayout()
         publishSession(reason: "ready", forceLyrics: true)
 
         revealWatchdog?.invalidate()

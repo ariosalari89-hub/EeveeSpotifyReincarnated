@@ -302,7 +302,7 @@ window.runSpicyTransitionChecks = async function (phase) {
       {currentText, futureText, highlightSeparation});
     const coverBlur = Number(getComputedStyle(document.querySelector('#artwork-backdrop')).filter.match(/blur\(([\d.]+)px\)/)?.[1]);
     check('fullscreen cover retains a gentle blur with slightly more artwork definition',
-      coverBlur >= 10 && coverBlur <= 16, {blurPx:coverBlur});
+      coverBlur >= 4 && coverBlur <= 8, {blurPx:coverBlur});
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
     const context = canvas.getContext('2d'); context.fillStyle = '#466a91';context.fillRect(0,0,16,16);
     const artwork = canvas.toDataURL();
@@ -415,6 +415,58 @@ window.runSpicyTransitionChecks = async function (phase) {
     await frame();
     check('new track with no cover clears the previous background',
       getComputedStyle(backdrop).backgroundImage === 'none');
+  }
+  if (phase === 'highlight') {
+    const extraPaint = () => {
+      const line = document.querySelector('.lyric-line.active');
+      return [line, ...line.querySelectorAll('*')].flatMap(element =>
+        [null, '::before', '::after'].flatMap(pseudo => {
+          const style = getComputedStyle(element, pseudo);
+          if (style.display === 'none' || (pseudo && ['none', 'normal', '""'].includes(style.content))) return [];
+          return ['textShadow', 'boxShadow', 'filter'].filter(property => style[property] !== 'none')
+            .map(property => ({element:element.className,pseudo,property,value:style[property]}));
+        }));
+    };
+    bootstrap('fullscreen', true);
+    SpicyQA.lyrics.karaoke.Content = [
+      {Type:'Vocal',Lead:{StartTime:0,EndTime:5,Syllables:[
+        {Text:'Crossing',StartTime:0,EndTime:1}, {Text:'syllables',StartTime:1,EndTime:5}
+      ]}}
+    ];
+    SpicyQA.scenario('karaoke',{...paused,positionMs:2500});
+    await frame(); await frame();
+    const syllablePaint = extraPaint();
+    check('fullscreen syllable highlighting paints no glow or shadow outside the glyphs',
+      syllablePaint.length === 0, {extraPaint:syllablePaint});
+    SpicyQA.scenario('line',{...paused,positionMs:1500});
+    await frame(); await frame();
+    const linePaint = extraPaint();
+    check('fullscreen line highlighting paints no glow or shadow outside the glyphs',
+      linePaint.length === 0, {extraPaint:linePaint});
+  }
+  if (phase === 'card-layout') {
+    bootstrap('card', true);
+    SpicyQA.scenario('line',{...paused,positionMs:1500});
+    await frame(); await frame();
+    const lyric = document.querySelector('.lyric-line.active');
+    SpicyQA.send('layout',{contentFrame:{x:16,y:56,width:328,height:320}});
+    await frame(); await frame();
+    const stage = document.querySelector('.stage').getBoundingClientRect();
+    const backdrop = document.querySelector('#artwork-backdrop').getBoundingClientRect();
+    check('full-card background keeps lyrics inside the native content rectangle',
+      Math.abs(stage.x-16)<1 && Math.abs(stage.y-56)<1 && Math.abs(stage.width-328)<1 && Math.abs(stage.height-320)<1
+        && backdrop.left <= 0 && backdrop.top <= 0 && backdrop.right >= innerWidth && backdrop.bottom >= innerHeight,
+      {stage:stage.toJSON(),backdrop:backdrop.toJSON()});
+    SpicyQA.send('layout',{contentFrame:{x:16,y:56,width:328,height:320}});
+    await frame();
+    check('repeated native card layout preserves the active lyric DOM',
+      document.querySelector('.lyric-line.active') === lyric);
+    SpicyQA.send('layout',{contentFrame:null});
+    await frame(); await frame();
+    const reset = document.querySelector('.stage').getBoundingClientRect();
+    check('standalone preview falls back to its whole available content area',
+      reset.x === 0 && reset.y === 0 && Math.abs(reset.width-innerWidth)<1 && Math.abs(reset.height-innerHeight)<1,
+      {stage:reset.toJSON()});
   }
   return results;
 };

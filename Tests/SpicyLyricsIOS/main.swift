@@ -84,6 +84,7 @@ final class SpicyLyricsPlaybackBridge {
     var repeatMode = 0
     var onSkip: (() -> Void)?
     var payloadReads = 0
+    var artwork = ""
 
     func sessionPayload() -> [String: Any]? {
         payloadReads += 1
@@ -95,7 +96,7 @@ final class SpicyLyricsPlaybackBridge {
             "playbackRate": 1, "requiresFreshObservation": false,
             "shuffleEnabled": shuffle != 0, "shuffleMode": ["off", "shuffle", "smart"][shuffle],
             "smartShuffleAvailable": true, "repeatMode": ["off", "context", "track"][repeatMode],
-            "track": ["id": "track-\(generation)", "title": "Track \(generation)", "artist": "Lyric layout sample"]
+            "track": ["id": "track-\(generation)", "title": "Track \(generation)", "artist": "Lyric layout sample", "artwork": artwork]
         ]
     }
 
@@ -242,6 +243,15 @@ struct QAFailure: Error { let message: String }
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
         try await Task.sleep(nanoseconds: 600_000_000)
         var enabled = true
+        let artworkImage = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { context in
+            UIColor(red: 0.2, green: 0.38, blue: 0.6, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+            UIColor(red: 0.72, green: 0.38, blue: 0.2, alpha: 1).setFill()
+            context.fill(CGRect(x: 32, y: 0, width: 32, height: 64))
+        }
+        let previousArtwork = SpicyLyricsPlaybackBridge.shared.artwork
+        SpicyLyricsPlaybackBridge.shared.artwork = "data:image/png;base64," + (artworkImage.pngData()?.base64EncodedString() ?? "")
+        defer { SpicyLyricsPlaybackBridge.shared.artwork = previousArtwork }
         SpicyLyricsEmbeddedSurfaces.install { enabled }
         let width = min(360, root.view.bounds.width - 32)
         let card = QACardContentView(frame: CGRect(x: 0, y: 40, width: width - 32, height: 320))
@@ -257,6 +267,7 @@ struct QAFailure: Error { let message: String }
         heading.textColor = .white
         header.addSubview(heading)
         header.expandButtonContainerView.frame = CGRect(x: width - 32 - 44, y: 0, width: 44, height: 40)
+        header.expandButtonContainerView.autoresizingMask = [.flexibleLeftMargin]
         let nativeExpand = UIButton(type: .system)
         nativeExpand.frame = header.expandButtonContainerView.bounds
         nativeExpand.setTitle("↗", for: .normal)
@@ -321,6 +332,34 @@ struct QAFailure: Error { let message: String }
             throw QAFailure(message: "preview artwork leaves the native card frame exposed: renderer=\(paintedCard), card=\(cardShell.bounds)")
         }
         checks.append("preview renderer reaches the entire native rounded card without changing content bounds")
+        let contentRect = cardWeb.convert(card.bounds, from: card)
+        let contentAligned = try await cardWeb.evaluateJavaScript("""
+        (() => { const r=document.querySelector('.stage').getBoundingClientRect();
+          return Math.abs(r.x-\(contentRect.minX))<1 && Math.abs(r.y-\(contentRect.minY))<1
+            && Math.abs(r.width-\(contentRect.width))<1 && Math.abs(r.height-\(contentRect.height))<1; })()
+        """)
+        let contentHit = root.view.hitTest(card.convert(CGPoint(x: card.bounds.midX, y: card.bounds.midY), to: root.view), with: nil)
+        let expandHit = root.view.hitTest(header.expandButtonContainerView.convert(CGPoint(x: 22, y: 20), to: root.view), with: nil)
+        guard contentAligned as? Bool == true, contentHit?.isDescendant(of: cardWeb) == true,
+              expandHit?.accessibilityIdentifier == "spicy-preview-expand",
+              cardShell.clipsToBounds, cardShell.layer.cornerRadius == 18,
+              header.alpha == 1, heading.alpha == 1 else {
+            throw QAFailure(message: "full-card backdrop changed lyric bounds, native header interaction or rounded clipping: aligned=\(contentAligned), contentHit=\(String(describing: contentHit)), expandHit=\(String(describing: expandHit))")
+        }
+        checks.append("full-card artwork preserves native header/expand hit testing, rounded clipping and inner lyric geometry")
+        cardShell.frame.size.height = 424
+        cardShell.setNeedsLayout(); cardShell.layoutIfNeeded()
+        for _ in 0..<30 {
+            if (try await cardWeb.evaluateJavaScript("Math.abs(document.querySelector('.stage').getBoundingClientRect().height-352)<1")) as? Bool == true { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard cardWeb.convert(cardWeb.bounds, to: cardShell).height == 424,
+              (try await cardWeb.evaluateJavaScript("Math.abs(document.querySelector('.stage').getBoundingClientRect().height-352)<1")) as? Bool == true else {
+            throw QAFailure(message: "native card resize left a stale artwork or lyric-content boundary")
+        }
+        cardShell.frame.size.height = 392
+        cardShell.setNeedsLayout(); cardShell.layoutIfNeeded()
+        checks.append("native card resizing updates the full backdrop and separate lyric slot together")
         let startupRestarts = QADiagnostics.snapshot().components(separatedBy: restartMarker).count - restartsBeforeSetup
         if startupRestarts > 0 {
             // A cold simulator may already have used the host's two permitted
@@ -539,6 +578,7 @@ struct QAFailure: Error { let message: String }
               originalInline.alpha == 1, !original.accessibilityElementsHidden,
               originalInline.layer.mask == nil, lateNativeChild.layer.mask == nil, originalTap.isEnabled,
               replacementCaption.alpha == 1, replacementCaption.layer.mask == nil,
+              card.clipsToBounds, cardShell.stackView.clipsToBounds, header.layer.zPosition == 0,
               !header.expandButtonContainerView.subviews.contains(where: { $0.accessibilityIdentifier == "spicy-preview-expand" }) else {
             throw QAFailure(message: "embedded detach did not restore native content and clean up WebKit")
         }
@@ -699,9 +739,9 @@ struct QAFailure: Error { let message: String }
             _ = try await evaluateTransitionScript(String(contentsOf: file, encoding: .utf8) + "\n;true")
         }
         var rows = [[String: Any]]()
-        let phases = baseline ? ["inline", "card"] : ["inline", "card", "background"]
+        let phases = baseline ? ["inline", "card"] : ["inline", "card", "background", "highlight", "card-layout"]
         for phase in phases {
-            web.frame.size.height = phase == "inline" ? 52 : (phase == "background" ? 640 : 320)
+            web.frame.size.height = phase == "inline" ? 52 : (phase == "background" ? 640 : (phase == "card-layout" ? 392 : 320))
             try await Task.sleep(nanoseconds: 100_000_000)
             // Explicit completion avoids selecting the fire-and-forget Void
             // overload; await the JavaScript promise and preserve its result.
