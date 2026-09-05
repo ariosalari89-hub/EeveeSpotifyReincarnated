@@ -51,6 +51,7 @@
 
   const state = {
     session: null,
+    trackPresentationKey: null,
     rawLyrics: null,
     lyricsTrackId: "",
     lyricsGeneration: "",
@@ -396,12 +397,18 @@
     const title = String(track?.title || "Unknown track");
     const artist = String(track?.artist || "Unknown artist");
     const album = String(track?.album || "");
+    const artwork = String(track?.artwork || "");
+    const dominantColor = String(track?.dominantColor || "");
+    // Playback observations are frequent; metadata and artwork are not. Avoid
+    // decoding/sampling the same image and rebuilding five labels per heartbeat.
+    const key = JSON.stringify([title, artist, album, artwork, dominantColor, state.surface]);
+    if (state.trackPresentationKey === key) return;
+    state.trackPresentationKey = key;
     dom.title.textContent = title;
     dom.artist.textContent = artist;
     dom.album.textContent = album;
     dom.miniTitle.textContent = title;
     dom.miniArtist.textContent = artist;
-    const artwork = String(track?.artwork || "");
     if (artwork) {
       if (dom.cover.src !== artwork) {
         dom.cover.classList.remove("ready");
@@ -426,7 +433,7 @@
       dom.miniCover.removeAttribute("src");
       dom.backdrop.style.backgroundImage = "none";
     }
-    if (state.surface === "fullscreen") ambient.setArtwork(artwork, String(track?.dominantColor || ""));
+    if (state.surface === "fullscreen") ambient.setArtwork(artwork, dominantColor);
   }
 
   function applyControls() {
