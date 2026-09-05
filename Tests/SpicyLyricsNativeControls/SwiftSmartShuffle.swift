@@ -3,7 +3,7 @@ import Foundation
 // Spotify's handler is a native Swift root class, not an NSObject subclass.
 // Keep this boundary fixture native Swift so NSObject reflection cannot hide
 // the methodSignatureForSelector: failure seen on the physical phone.
-@objc final class QASwiftSmartShuffle {
+final class QASwiftSmartShuffle {
     @objc var mode: UInt = 0
     @objc var offeredPicker = false
     @objc var rejectChange = false
