@@ -1,5 +1,5 @@
 #requires -Version 7.0
-param([Parameter(Mandatory)][string]$EvidenceDir, [string]$StylesRef = '')
+param([Parameter(Mandatory)][string]$EvidenceDir, [string]$StylesRef = '', [ValidateSet('artwork','gradient')][string]$BackgroundStyle = 'artwork')
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $page = Join-Path $repo 'layout\Library\Application Support\EeveeSpotify.bundle\SpicyLyricsRenderer\index.html'
@@ -22,7 +22,7 @@ try {
         foreach ($sample in @('color', 'white', 'contrast')) {
             $setup = @'
 (async () => {
-  const surface = 'SURFACE', sample = 'SAMPLE';
+  const surface = 'SURFACE', sample = 'SAMPLE', backgroundStyle = 'BACKGROUND_STYLE';
   document.querySelector('#paint-hide-foreground')?.remove();
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1024;
   const context = canvas.getContext('2d');
@@ -30,26 +30,33 @@ try {
   if(sample==='color'){context.fillStyle='#b96b40';context.fillRect(512,0,512,1024);}
   const artwork = canvas.toDataURL();
   SpicyQA.send('bootstrap',{surface,highContrast:sample==='contrast',reduceMotion:true,
-    preferences:{fontSize:100,dynamicBackground:false}});
+    preferences:{fontSize:100,dynamicBackground:false,backgroundStyle}});
   SpicyQA.scenario('karaoke',{positionMs:7400,isPlaying:false,isPaused:true,isAdvancing:false});
   SpicyQA.sendSession({track:{...SpicyQA.tracks.karaoke,artwork},positionMs:7400,
     isPlaying:false,isPaused:true,isAdvancing:false});
   document.querySelector('#app').style.visibility='';
   await document.fonts.ready;
-  for(let i=0;i<120 && !getComputedStyle(document.querySelector('#artwork-backdrop')).backgroundImage.includes(artwork);i++)
+  const painted = () => {
+    const background=getComputedStyle(document.querySelector('#artwork-backdrop')).backgroundImage;
+    return backgroundStyle==='artwork' ? background.includes(artwork)
+      : background.includes('radial-gradient') && (sample==='color'
+        ? background.includes('rgb(54, 91, 135)') && background.includes('rgb(185, 107, 64)')
+        : background.includes('rgb(255, 255, 255)'));
+  };
+  for(const deadline=performance.now()+3000;performance.now()<deadline && !painted();)
     await new Promise(requestAnimationFrame);
-  if(!getComputedStyle(document.querySelector('#artwork-backdrop')).backgroundImage.includes(artwork)) throw new Error('Artwork not painted');
+  if(!painted()) throw new Error('Current artwork colors not painted');
   await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
   const rect = element => {const r=element.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};};
   const labels=['#artist','.timeline','.brand','#mini-artist'].map(selector=>{
     const element=document.querySelector(selector),style=getComputedStyle(element);
     return {selector,color:style.color,rect:rect(element)};
   });
-  return JSON.stringify({surface,sample,labels,veil:getComputedStyle(document.querySelector('.contrast-veil')).background,
+  return JSON.stringify({surface,sample,backgroundStyle,labels,veil:getComputedStyle(document.querySelector('.contrast-veil')).background,
     active:rect(document.querySelector('.lead.active')),filter:getComputedStyle(document.querySelector('#artwork-backdrop')).filter});
 })()
 '@
-            $raw = $setup.Replace('SURFACE',$surface).Replace('SAMPLE',$sample) | & agent-browser --session $session eval --stdin
+            $raw = $setup.Replace('SURFACE',$surface).Replace('SAMPLE',$sample).Replace('BACKGROUND_STYLE',$BackgroundStyle) | & agent-browser --session $session eval --stdin
             if ($LASTEXITCODE -ne 0) { throw "Paint setup failed: $raw" }
             $results += ($raw | ConvertFrom-Json) | ConvertFrom-Json
             & agent-browser --session $session screenshot (Join-Path $EvidenceDir "$surface-$sample.png") | Out-Null

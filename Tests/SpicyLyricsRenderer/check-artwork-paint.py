@@ -20,23 +20,27 @@ def contrast(background, color):
 
 
 before, after = map(Path, sys.argv[1:3])
+gradient = '--gradient' in sys.argv[3:]
 rows = []
 for surface in ('fullscreen', 'card'):
-    old = Image.open(before / f'{surface}-color-readability.png').convert('RGB')
-    new = Image.open(after / f'{surface}-color-readability.png').convert('RGB')
-    crop = (0, int(new.height * .4), new.width, int(new.height * .55))
-    old_mean = sum(ImageStat.Stat(old.crop(crop)).mean) / 3
-    new_mean = sum(ImageStat.Stat(new.crop(crop)).mean) / 3
-    rows.append(dict(name=f'{surface}: central artwork pixels are materially brighter',
-                     before=old_mean, after=new_mean, ratio=new_mean / old_mean,
-                     passed=new_mean / old_mean >= 1.35))
-    edge = Image.open(after / f'{surface}-color-backdrop.png').convert('RGB')
-    y = edge.height // 2
-    left, right = edge.getpixel((edge.width // 4, y))[0], edge.getpixel((edge.width * 3 // 4, y))[0]
-    progress = [(edge.getpixel((x, y))[0] - left) / (right - left) for x in range(edge.width)]
-    lo = next(x for x, value in enumerate(progress) if value >= .1)
-    hi = next(x for x, value in enumerate(progress) if value >= .9)
-    rows.append(dict(name=f'{surface}: cover edge keeps visible detail', edgeWidthPx=hi-lo, passed=hi-lo <= 9))
+    # Gradient intentionally discards photographic edges. Cover brightness and
+    # detail retain their original separate oracle; both styles need contrast.
+    if not gradient:
+        old = Image.open(before / f'{surface}-color-readability.png').convert('RGB')
+        new = Image.open(after / f'{surface}-color-readability.png').convert('RGB')
+        crop = (0, int(new.height * .4), new.width, int(new.height * .55))
+        old_mean = sum(ImageStat.Stat(old.crop(crop)).mean) / 3
+        new_mean = sum(ImageStat.Stat(new.crop(crop)).mean) / 3
+        rows.append(dict(name=f'{surface}: central artwork pixels are materially brighter',
+                         before=old_mean, after=new_mean, ratio=new_mean / old_mean,
+                         passed=new_mean / old_mean >= 1.35))
+        edge = Image.open(after / f'{surface}-color-backdrop.png').convert('RGB')
+        y = edge.height // 2
+        left, right = edge.getpixel((edge.width // 4, y))[0], edge.getpixel((edge.width * 3 // 4, y))[0]
+        progress = [(edge.getpixel((x, y))[0] - left) / (right - left) for x in range(edge.width)]
+        lo = next(x for x, value in enumerate(progress) if value >= .1)
+        hi = next(x for x, value in enumerate(progress) if value >= .9)
+        rows.append(dict(name=f'{surface}: cover edge keeps visible detail', edgeWidthPx=hi-lo, passed=hi-lo <= 9))
     bright = Image.open(after / f'{surface}-contrast-backdrop.png').convert('RGB')
     maximum = [pair[1] for pair in bright.getextrema()]
     ratio = contrast(maximum, [255, 255, 255, .85])
