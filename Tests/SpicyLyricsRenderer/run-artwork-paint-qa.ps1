@@ -23,10 +23,11 @@ try {
             $setup = @'
 (async () => {
   const surface = 'SURFACE', sample = 'SAMPLE';
-  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
+  document.querySelector('#paint-hide-foreground')?.remove();
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1024;
   const context = canvas.getContext('2d');
-  context.fillStyle = sample==='color' ? '#365b87' : '#ffffff';context.fillRect(0,0,64,64);
-  if(sample==='color'){context.fillStyle='#b96b40';context.fillRect(32,0,32,64);}
+  context.fillStyle = sample==='color' ? '#365b87' : '#ffffff';context.fillRect(0,0,1024,1024);
+  if(sample==='color'){context.fillStyle='#b96b40';context.fillRect(512,0,512,1024);}
   const artwork = canvas.toDataURL();
   SpicyQA.send('bootstrap',{surface,highContrast:sample==='contrast',reduceMotion:true,
     preferences:{fontSize:100,dynamicBackground:false}});
@@ -56,6 +57,16 @@ try {
             "document.querySelector('#app').style.visibility='hidden'" | & agent-browser --session $session eval --stdin | Out-Null
             & agent-browser --session $session screenshot (Join-Path $EvidenceDir "$surface-$sample-backdrop.png") | Out-Null
             if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath (Join-Path $EvidenceDir "$surface-$sample-backdrop.png"))) { throw 'Backdrop screenshot missing' }
+            @'
+(() => {
+  document.querySelector('#app').style.visibility='';
+  const style=document.createElement('style');style.id='paint-hide-foreground';
+  style.textContent='#app *{color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important}#app :is(.token,.letter,.line-text){background-image:none!important}#app :is(img,svg,input,.brand-mark,.play-button){visibility:hidden!important}';
+  document.head.appendChild(style);return true;
+})()
+'@ | & agent-browser --session $session eval --stdin | Out-Null
+            & agent-browser --session $session screenshot (Join-Path $EvidenceDir "$surface-$sample-readability.png") | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Readability background screenshot failed' }
         }
     }
     $results | ConvertTo-Json -Depth 9 | Tee-Object -FilePath (Join-Path $EvidenceDir 'paint.json') | Out-Null

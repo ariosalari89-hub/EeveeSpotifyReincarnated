@@ -56,6 +56,41 @@ window.runSpicyTransitionChecks = async function (phase) {
   const bootstrap = (surface, reduceMotion = false) => SpicyQA.send('bootstrap', {
     surface, reduceMotion, preferences: { fontSize: 100, playbackOffset: 0, dynamicBackground: false }
   });
+  if (phase === 'gradient-network') {
+    SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:true,preferences:{backgroundStyle:'gradient'}});
+    const backdrop=document.querySelector('#artwork-backdrop'),origin=SpicyQA.artworkOrigin;
+    if(!origin)throw new Error('Artwork network fixture origin is required');
+    SpicyQA.sendSession({...paused,track:{...SpicyQA.tracks.karaoke,artwork:origin+'/cors.svg',dominantColor:''}});
+    for(const deadline=performance.now()+1800;performance.now()<deadline;) {await frame();if(getComputedStyle(backdrop).backgroundImage.includes('204, 51, 51'))break;}
+    const sampled=getComputedStyle(backdrop).backgroundImage;
+    SpicyQA.sendSession({...paused,track:{...SpicyQA.tracks.karaoke,artwork:origin+'/opaque.svg',dominantColor:'2a7e91'}});
+    await wait(250);await frame();const fallback=getComputedStyle(backdrop).backgroundImage;
+    document.querySelector('#settings-button').click();await frame();
+    const picker=document.querySelector('#background-style');picker.value='artwork';picker.dispatchEvent(new Event('change',{bubbles:true}));
+    for(const deadline=performance.now()+1800;performance.now()<deadline;) {await frame();if(getComputedStyle(backdrop).backgroundImage.includes('/opaque.svg'))break;}
+    const cover=getComputedStyle(backdrop).backgroundImage;
+    check('remote cover pixels yield a palette while CORS-denied artwork remains available as cover art',
+      sampled.includes('204, 51, 51') && sampled.includes('51, 102, 204')
+        && fallback.includes('42, 126, 145') && cover.includes('/opaque.svg'),{sampled,fallback,cover});
+    document.querySelector('#settings-close').click();
+  }
+  if (phase === 'gradient-recovery') {
+    SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:true,preferences:{backgroundStyle:'gradient',dynamicBackground:true}});
+    const backdrop=document.querySelector('#artwork-backdrop');
+    const send=track=>SpicyQA.sendSession({...paused,track:{...SpicyQA.tracks.karaoke,...track}});
+    send({artwork:'',dominantColor:'#2a7e91'});await frame();
+    const fallback=getComputedStyle(backdrop).backgroundImage;
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=16;
+    const ctx=canvas.getContext('2d');ctx.fillStyle='#cc3333';ctx.fillRect(0,0,16,16);
+    send({artwork:canvas.toDataURL(),dominantColor:'cc3333'});
+    send({artwork:'',dominantColor:'c48832'});await wait(150);await frame();
+    const next=getComputedStyle(backdrop).backgroundImage;
+    send({artwork:'',dominantColor:'invalid'});await frame();
+    const missing=getComputedStyle(backdrop).backgroundImage;
+    check('gradient uses current native cover color when pixels are unavailable and rejects stale artwork',
+      fallback.includes('42, 126, 145') && next.includes('196, 136, 50')
+        && !next.includes('204, 51, 51') && missing==='none', {fallback,next,missing});
+  }
   if (phase === 'background-speed') {
     SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{dynamicBackground:true}});
     const canvas=document.createElement('canvas');canvas.width=canvas.height=16;
@@ -89,6 +124,7 @@ window.runSpicyTransitionChecks = async function (phase) {
         && request.type==='setPreference' && request.key==='backgroundSpeed' && request.value===200
         && output==='2×' && slider.disabled && getComputedStyle(backdrop).transform===frozen,
       {initial,samples,request,output,disabled:slider.disabled,frozen});
+    document.querySelector('#settings-close').click();
   }
   if (phase === 'background-style') {
     bootstrap('fullscreen',true);
@@ -114,6 +150,7 @@ window.runSpicyTransitionChecks = async function (phase) {
         && gradient.includes('204, 51, 51') && gradient.includes('51, 102, 204')
         && request.type==='setPreference' && request.key==='backgroundStyle' && request.value==='gradient',
       {defaultStyle,gradient,request});
+    document.querySelector('#settings-close').click();
   }
   if (phase === 'shuffle-availability') {
     bootstrap('fullscreen', true);
@@ -895,8 +932,8 @@ window.runSpicyTransitionChecks = async function (phase) {
       currentText.every(c => Math.abs(c-(desktopPaint ? 255*.85 : 255))<.01) && highlightSeparation >= 3,
       {currentText, futureText, highlightSeparation});
     const coverBlur = Number(getComputedStyle(document.querySelector('#artwork-backdrop')).filter.match(/blur\(([\d.]+)px\)/)?.[1]);
-    check('fullscreen cover retains a gentle blur with slightly more artwork definition',
-      coverBlur >= 4 && coverBlur <= 8, {blurPx:coverBlur});
+    check('fullscreen cover retains only a light blur for clear artwork detail',
+      coverBlur > 0 && coverBlur <= 2, {blurPx:coverBlur});
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
     const context = canvas.getContext('2d'); context.fillStyle = '#466a91';context.fillRect(0,0,16,16);
     const artwork = canvas.toDataURL();

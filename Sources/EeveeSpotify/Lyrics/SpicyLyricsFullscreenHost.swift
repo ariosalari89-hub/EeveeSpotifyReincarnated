@@ -31,6 +31,7 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
     private static let maximumWebContentRestarts = 2
     private static let rendererStabilityInterval: TimeInterval = 20
     private static let lyricsUpgradeDelays: [TimeInterval] = [4, 12]
+    private static let preferencesDidChange = Notification.Name("EeveeSpotify.SpicyRenderer.PreferencesChanged")
 
     private weak var controller: UIViewController?
     private var rendererURL: URL?
@@ -117,6 +118,14 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
 
     private func registerObservers() {
         observers = [
+            NotificationCenter.default.addObserver(
+                forName: Self.preferencesDidChange,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self, self.isReady, !self.isDetached else { return }
+                self.emit(type: "preferences", payload: self.rendererPreferences())
+            },
             NotificationCenter.default.addObserver(
                 forName: .spicyLyricsPlaybackStateDidChange,
                 object: nil,
@@ -582,6 +591,8 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
             "romanized": defaults.object(forKey: prefix + "romanized") as? Bool ?? false,
             "translations": defaults.object(forKey: prefix + "translations") as? Bool ?? true,
             "dynamicBackground": defaults.object(forKey: prefix + "dynamicBackground") as? Bool ?? true,
+            "backgroundStyle": defaults.string(forKey: prefix + "backgroundStyle") == "gradient" ? "gradient" : "artwork",
+            "backgroundSpeed": min(200, max(25, defaults.object(forKey: prefix + "backgroundSpeed") as? Int ?? 100)),
             "fontSize": min(126, max(82, defaults.object(forKey: prefix + "fontSize") as? Int ?? 100)),
             "playbackOffset": min(
                 5000,
@@ -600,12 +611,20 @@ final class SpicyLyricsFullscreenHost: NSObject, WKScriptMessageHandler, WKNavig
         case "fontSize":
             guard let value = value as? NSNumber else { return false }
             defaults.set(min(126, max(82, value.intValue)), forKey: prefix + key)
+        case "backgroundStyle":
+            guard let value = value as? String, ["artwork", "gradient"].contains(value) else { return false }
+            defaults.set(value, forKey: prefix + key)
+        case "backgroundSpeed":
+            guard let value = value as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
+                  value.doubleValue.isFinite else { return false }
+            defaults.set(min(200, max(25, value.intValue)), forKey: prefix + key)
         case "playbackOffset":
             guard let value = value as? NSNumber else { return false }
             defaults.set(min(5000, max(-5000, value.intValue)), forKey: prefix + key)
         default:
             return false
         }
+        NotificationCenter.default.post(name: Self.preferencesDidChange, object: nil)
         return true
     }
 

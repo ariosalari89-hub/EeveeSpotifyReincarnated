@@ -38,7 +38,7 @@ button { -webkit-tap-highlight-color: transparent; }
   background-color: #080808;
   background-size: cover;
   background-position: center;
-  filter: blur(6px) saturate(1.18);
+  filter: blur(2px) saturate(1.18);
   opacity: 1;
   transform: scale(1.24);
   animation: artwork-drift 24s ease-in-out infinite alternate;
@@ -62,8 +62,9 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .contrast-veil {
   z-index: 1;
-  background: linear-gradient(180deg, rgba(8,10,14,.62) 20%, rgba(8,10,14,.5) 48%, rgba(4,6,11,.68));
+  background: linear-gradient(180deg, rgba(8,10,14,.62) 14%, rgba(8,10,14,.1) 36%, rgba(8,10,14,.1) 64%, rgba(4,6,11,.68) 87%);
 }
+.contrast-veil::after { content: ""; position: absolute; inset: 14% 0 10%; background: linear-gradient(transparent, rgba(8,10,14,var(--artwork-readability,0)) 20%, rgba(8,10,14,var(--artwork-readability,0)) 80%, transparent); }
 
 #app {
   position: relative;

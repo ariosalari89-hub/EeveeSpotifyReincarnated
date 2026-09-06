@@ -289,6 +289,8 @@ try {
   const request = [...window.SpicyQA.messages].reverse().find(m => m.type === "toggleShuffle");
   window.SpicyQA.send("commandResult", {requestId:request.requestId,accepted:true});
   window.SpicyQA.observe({shuffleEnabled:true,shuffleMode:"smart",smartShuffleAvailable:true});
+  await new Promise(resolve => setTimeout(resolve,160));
+  window.SpicyQA.observe({shuffleEnabled:true,shuffleMode:"smart",smartShuffleAvailable:true});
   await new Promise(requestAnimationFrame);
   const smart = button.dataset.mode === "smart" && !button.classList.contains("pending")
     && getComputedStyle(button.querySelector(".smart-shuffle-mark")).display !== "none"
@@ -296,6 +298,8 @@ try {
   button.click();
   const offRequest = [...window.SpicyQA.messages].reverse().find(m => m.type === "toggleShuffle");
   window.SpicyQA.send("commandResult", {requestId:offRequest.requestId,accepted:true});
+  window.SpicyQA.observe({shuffleEnabled:false,shuffleMode:"off",smartShuffleAvailable:true});
+  await new Promise(resolve => setTimeout(resolve,160));
   window.SpicyQA.observe({shuffleEnabled:false,shuffleMode:"off",smartShuffleAvailable:true});
   await new Promise(requestAnimationFrame);
   const off = button.dataset.mode === "off" && button.getAttribute("aria-pressed") === "false"

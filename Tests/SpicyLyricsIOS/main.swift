@@ -905,7 +905,8 @@ struct QAFailure: Error { let message: String }
         configuration.allowsInlineMediaPlayback = true
         let inline = phase == "inline" || phase.hasSuffix("-inline")
         let fullscreen = phase == "background" || phase == "highlight" || phase.hasSuffix("-fullscreen")
-        let height: CGFloat = inline ? 52 : (phase == "background" || phase.hasSuffix("-fullscreen") ? 640 : (phase == "card-layout" ? 392 : 320))
+            || phase.hasPrefix("background-") || phase.hasPrefix("gradient-") || phase.hasPrefix("shuffle-")
+        let height: CGFloat = inline ? 52 : (fullscreen ? 640 : (phase == "card-layout" ? 392 : 320))
         let surface = inline ? "inline" : (fullscreen ? "fullscreen" : "card")
         let web = WKWebView(frame: CGRect(x: 0, y: 100, width: 360, height: height), configuration: configuration)
         web.isOpaque = false
@@ -976,7 +977,8 @@ struct QAFailure: Error { let message: String }
             .flatMap { phase in ["fullscreen", "card", "inline"].map { "desktop-\(phase)-\($0)" } }
             + ["desktop-shuffle-fullscreen", "desktop-backdrop-fullscreen"]
         let phases = baseline ? ["inline", "card"]
-            : ["inline", "card", "background", "highlight", "card-layout"] + desktopPhases
+            : ["inline", "card", "background", "highlight", "card-layout", "background-style", "background-speed",
+               "gradient-recovery", "shuffle-availability", "shuffle-settlement"] + desktopPhases
         for phase in phases {
             let phaseRows = try await rendererTransitionPhase(phase, baseline: baseline)
             rows += phaseRows

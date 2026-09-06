@@ -1,5 +1,5 @@
 #requires -Version 7.0
-param([Parameter(Mandatory)][string]$Phase, [Parameter(Mandatory)][string]$EvidenceFile)
+param([Parameter(Mandatory)][string]$Phase, [Parameter(Mandatory)][string]$EvidenceFile, [string]$ArtworkOrigin = '')
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $page=Join-Path $repo 'layout\Library\Application Support\EeveeSpotify.bundle\SpicyLyricsRenderer\index.html'
@@ -12,6 +12,10 @@ try {
     Get-Content (Join-Path $PSScriptRoot 'browser-fixture.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
     Write-Host 'Load rendered transition checks'
     Get-Content (Join-Path $PSScriptRoot 'transition-checks.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
+    if ($ArtworkOrigin) {
+        $quotedOrigin=$ArtworkOrigin | ConvertTo-Json -Compress
+        "window.SpicyQA.artworkOrigin=$quotedOrigin" | & agent-browser --session $session eval --stdin | Out-Null
+    }
     Write-Host "Run $Phase"
     $quotedPhase=$Phase | ConvertTo-Json -Compress
     $raw="runSpicyTransitionChecks($quotedPhase).then(JSON.stringify)" | & agent-browser --session $session eval --stdin

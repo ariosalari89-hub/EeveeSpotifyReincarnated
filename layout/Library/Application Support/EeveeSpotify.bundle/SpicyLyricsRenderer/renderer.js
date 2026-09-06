@@ -201,6 +201,8 @@
     constructor(layer) {
       this.layer = layer;
       this.artwork = "";
+      this.dominantColor = "";
+      this.artworkLoaded = false;
       this.artworkRequest = 0;
       this.enabled = true;
       this.playing = false;
@@ -221,6 +223,13 @@
 
     paint() {
       this.layer.dataset.style = this.style;
+      this.ready = this.style === "gradient" ? this.palette.length > 0 : this.artworkLoaded;
+      // Bright covers need protection behind the glyphs, not a dark film
+      // across the entire artwork. Normal/dark covers keep this very light.
+      const brightness = Math.max(0, ...this.palette.map(rgb =>
+        (rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722) / 255));
+      document.documentElement.style.setProperty("--artwork-readability",
+        String(this.ready ? model.clamp((brightness - .45) * 1.08, 0, .6) : 0));
       if (!this.ready) this.layer.style.backgroundImage = "none";
       else if (this.style !== "gradient") this.layer.style.backgroundImage = `url(${JSON.stringify(this.artwork)})`;
       else {
@@ -271,29 +280,40 @@
       }
     }
 
-    setArtwork(url) {
-      if (this.artwork === url) return;
+    setArtwork(url, dominantColor = "") {
+      if (this.artwork === url && this.dominantColor === dominantColor) return;
       this.artwork = url;
+      this.dominantColor = dominantColor;
       const request = ++this.artworkRequest;
-      this.ready = false;
-      this.palette = [];
-      this.layer.style.backgroundImage = "none";
-      this.syncMotion();
+      this.artworkLoaded = false;
+      const hex = /^#?([0-9a-f]{6})$/i.exec(dominantColor)?.[1];
+      const fallback = hex ? [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16)) : null;
+      this.palette = fallback ? [fallback, fallback.map(c => Math.round(c * .6))] : [];
+      this.paint();
       if (!url) return;
       const image = new Image();
       image.decoding = "async";
+      let anonymous = /^https?:\/\//i.test(url);
+      if (anonymous) image.crossOrigin = "anonymous";
       image.onload = () => {
         if (request !== this.artworkRequest) return;
-        this.palette = this.colorsFrom(image);
-        this.ready = true;
+        const sampled = this.colorsFrom(image);
+        if (sampled.length) this.palette = sampled;
+        this.artworkLoaded = true;
         this.paint();
       };
-      // A failed image stays on the neutral background, never the prior song.
+      // A server may permit display but deny pixel access. Keep cover mode
+      // available, with the native cover color as the gradient fallback.
       image.onerror = () => {
         if (request !== this.artworkRequest) return;
-        this.ready = false;
-        this.layer.style.backgroundImage = "none";
-        this.syncMotion();
+        if (anonymous) {
+          anonymous = false;
+          image.removeAttribute("crossorigin");
+          image.src = url;
+          return;
+        }
+        this.artworkLoaded = false;
+        this.paint();
       };
       image.src = url;
     }
@@ -373,9 +393,10 @@
     const artist = String(track?.artist || "Unknown artist");
     const album = String(track?.album || "");
     const artwork = String(track?.artwork || "");
+    const dominantColor = String(track?.dominantColor || "");
     // Playback observations are frequent; metadata and artwork are not. Avoid
     // decoding the same image and rebuilding five labels per heartbeat.
-    const key = JSON.stringify([title, artist, album, artwork, state.surface]);
+    const key = JSON.stringify([title, artist, album, artwork, dominantColor, state.surface]);
     if (state.trackPresentationKey === key) return;
     state.trackPresentationKey = key;
     dom.title.textContent = title;
@@ -407,7 +428,7 @@
       dom.cover.removeAttribute("src");
       dom.miniCover.removeAttribute("src");
     }
-    ambient.setArtwork(state.surface !== "inline" ? artwork : "");
+    ambient.setArtwork(state.surface !== "inline" ? artwork : "", state.surface !== "inline" ? dominantColor : "");
   }
 
   function applyControls() {
@@ -1047,6 +1068,16 @@
     } catch (_) {}
   }
 
+  function receivePreferences(preferences) {
+    state.preferences.romanized = Boolean(preferences.romanized);
+    state.preferences.translations = preferences.translations !== false;
+    state.preferences.dynamicBackground = preferences.dynamicBackground !== false;
+    state.preferences.backgroundStyle = preferences.backgroundStyle === "gradient" ? "gradient" : "artwork";
+    state.preferences.backgroundSpeed = model.clamp(model.finite(preferences.backgroundSpeed, 100), 25, 200);
+    state.preferences.fontSize = model.clamp(model.finite(preferences.fontSize, 100), 82, 126);
+    state.preferences.playbackOffset = model.clamp(model.finite(preferences.playbackOffset), -5000, 5000);
+  }
+
   function applyPreferences({ rerender = false } = {}) {
     if (reduceMotion()) stopEmbeddedMotion();
     dom.romanized.checked = state.preferences.romanized;
@@ -1132,26 +1163,20 @@
         applyContentFrame(null);
         state.nativeReduceMotion = Boolean(payload.reduceMotion);
         if (payload.preferences && typeof payload.preferences === "object") {
-          state.preferences.romanized = Boolean(payload.preferences.romanized);
-          state.preferences.translations = payload.preferences.translations !== false;
-          state.preferences.dynamicBackground = payload.preferences.dynamicBackground !== false;
-          state.preferences.backgroundStyle = payload.preferences.backgroundStyle === "gradient" ? "gradient" : "artwork";
-          state.preferences.backgroundSpeed = model.clamp(model.finite(payload.preferences.backgroundSpeed, 100), 25, 200);
-          state.preferences.fontSize = model.clamp(
-            model.finite(payload.preferences.fontSize, 100),
-            82,
-            126
-          );
-          state.preferences.playbackOffset = model.clamp(
-            model.finite(payload.preferences.playbackOffset),
-            -5000,
-            5000
-          );
+          receivePreferences(payload.preferences);
         }
         document.body.classList.toggle("native-reduce-motion", state.nativeReduceMotion);
         document.body.classList.toggle("native-high-contrast", Boolean(payload.highContrast));
         applyPreferences();
         break;
+      case "preferences": {
+        const previous = { ...state.preferences };
+        receivePreferences(payload);
+        applyPreferences({ rerender: previous.romanized !== state.preferences.romanized
+          || previous.translations !== state.preferences.translations });
+        if (previous.playbackOffset !== state.preferences.playbackOffset) updateLyrics(positionNow(), true);
+        break;
+      }
       case "accessibility":
         state.nativeReduceMotion = Boolean(payload.reduceMotion);
         document.body.classList.toggle("native-reduce-motion", state.nativeReduceMotion);
