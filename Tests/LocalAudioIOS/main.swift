@@ -157,6 +157,7 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try expect(copiedBytes == originalBytes && preservedBytes == originalBytes && playerInput.length == 4_410,
                        "the visible Copied receipt must correspond to real playable output with the source preserved")
             try await capture("imported")
+            try await verifyImportedFileEntry(navigation: navigation)
             try tap("local_files_open", in: list)
             try expect(openedRoutes.map(\.absoluteString) == ["spotify:local-files"],
                        "Open Local Files must request Spotify's native collection through the no-effect route boundary")
