@@ -10,8 +10,10 @@ func runLocalAudioLibraryChecks() throws {
             throw TestFailure(description: "library scenario needs a completed audio import")
         }
         let files = try LocalAudioLibrary(directory: output).files()
-        try expect(files.count == 1 && files[0].fileURL == copied,
-                   "the imported-files library must list the existing native Documents copy; actual=\(files), expected=\(copied), fixture=\(try? FileManager.default.attributesOfItem(atPath: copied.path))")
+        // macOS exposes the same temporary file through /var and /private/var.
+        // Compare file locations, not those equivalent URL spellings.
+        try expect(files.count == 1 && files[0].fileURL.resolvingSymlinksInPath() == copied.resolvingSymlinksInPath(),
+                   "the imported-files library must list the existing native Documents copy; actual=\(files), expected=\(copied)")
         let reopened = try LocalAudioLibrary(directory: output).files()
         try expect(files == reopened && files[0].name == "Imported song.wav" && files[0].size > 0,
                    "reopening the library must retain the file's identity, name and size")
