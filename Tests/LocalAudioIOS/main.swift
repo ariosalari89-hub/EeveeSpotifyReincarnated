@@ -164,6 +164,11 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try await cancelAndRetry(navigation: navigation)
             try await verifyRouteFallback(navigation: navigation)
             try await verifyLayouts(returningTo: navigation)
+            try await waitUntil("the ordinary settings page did not return after viewport checks") {
+                guard let host = navigation.topViewController, let list = table(in: host.view) else { return false }
+                return list.window != nil && cell("local_files_import", in: list) != nil
+            }
+            try await capture("finished")
             mark("Native import output verified")
             try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS: Open Local Files requests the native collection route\nPASS: stop across native page navigation retains completed songs and cancels waiting work\nPASS: cancelling the picker preserves results and a mixed retry reports real WAV/MP3/AAC copies, duplicate and failed audio\nPASS: an unavailable native route presents a manual collection path\nPASS: native light, dark, narrow, landscape, large-text and RTL layout/accessibility checks\nPASS\n"
                 .write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)

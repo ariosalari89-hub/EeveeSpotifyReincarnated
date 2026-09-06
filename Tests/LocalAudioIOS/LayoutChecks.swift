@@ -34,6 +34,9 @@ extension QAAppDelegate {
         let originalFrame = window.frame
         defer {
             window.frame = originalFrame
+            // The viewport matrix replaces the window root repeatedly. Reopen
+            // the normal page instead of reusing a detached navigation snapshot.
+            original.setViewControllers([makeHost()], animated: false)
             window.rootViewController = original
             window.makeKeyAndVisible()
         }
