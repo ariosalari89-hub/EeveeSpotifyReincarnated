@@ -224,6 +224,7 @@ do {
         print("PASS: encoded URL path aliases cannot escape the native song source")
     }
     try runLocalAudioLibraryChecks()
+    try runLocalAudioArtworkChecks()
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)
