@@ -72,6 +72,27 @@ final class LocalFilesImportModel: ObservableObject {
         }
     }
 
+    func remove(_ file: LocalAudioFile, completion: @escaping (Result<Void, LocalAudioLibraryFailure>) -> Void) {
+        precondition(Thread.isMainThread)
+        guard !state.isBusy else { completion(.failure(.busy)); return }
+        state.changingFileID = file.id
+        state.fileOperation = "local_files_removing"
+        queue.async { [self] in
+            let result: Result<Void, LocalAudioLibraryFailure>
+            do {
+                guard let library = library else { throw LocalAudioLibraryFailure.cannotRemove }
+                try library.remove(file)
+                result = .success(())
+            } catch { result = .failure((error as? LocalAudioLibraryFailure) ?? .cannotRemove) }
+            DispatchQueue.main.async { [self] in
+                state.changingFileID = nil
+                state.fileOperation = nil
+                refreshFiles()
+                completion(result)
+            }
+        }
+    }
+
     func importSelection(_ urls: [URL]) {
         precondition(Thread.isMainThread)
         guard !state.isBusy, !urls.isEmpty else { return }
