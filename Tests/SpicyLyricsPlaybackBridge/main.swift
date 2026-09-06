@@ -9,6 +9,7 @@ var statefulPlayer: StatefulPlayerImplementation?
 var capturedTrackTitle: String?
 var capturedArtistName: String?
 var capturedTrackId: String?
+var spotifyAccessToken: String?
 func writeDebugLog(_ message: String) { print(message) }
 
 @objc final class MetadataTrack: NSObject {

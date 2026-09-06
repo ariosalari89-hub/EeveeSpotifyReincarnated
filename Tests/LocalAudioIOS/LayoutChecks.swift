@@ -141,6 +141,7 @@ extension QAAppDelegate {
             let filesSection = list.numberOfSections - 1
             list.scrollToRow(at: IndexPath(row: 0, section: filesSection), at: .top, animated: false)
             try await capture("layout-" + name + "-files")
+            try await verifyFilenameLayout(navigation: navigation, list: list, variant: name, category: category)
             evidence.append(["variant": name, "width": list.bounds.width, "height": list.bounds.height,
                              "contentSizeCategory": category.rawValue, "rtl": rtl, "rows": rows])
         }

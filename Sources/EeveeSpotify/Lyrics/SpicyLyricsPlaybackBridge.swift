@@ -114,6 +114,8 @@ final class SpicyLyricsPlaybackBridge {
             "positionMs": Int((max(0, snapshot.positionSeconds) * 1000).rounded()),
             "durationMs": Int((max(0, snapshot.durationSeconds) * 1000).rounded()),
             "playbackRate": snapshot.playbackRate,
+            "backgroundMotionMultiplier": SpicyLyricsAudioAnalysisProvider.shared.multiplier(
+                trackID: identity.trackIdentifier, position: snapshot.positionSeconds, token: spotifyAccessToken),
             "isPlaying": snapshot.isPlaying,
             "isPaused": snapshot.isPaused,
             "isLoading": snapshot.isLoading,

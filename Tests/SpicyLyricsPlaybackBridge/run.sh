@@ -14,6 +14,7 @@ xcrun swiftc -swift-version 5 -target "$METADATA_TARGET" -sdk "$METADATA_SDK" \
   Sources/EeveeSpotify/Lyrics/Models/Headers/StatefulPlayerImplementation.swift \
   Sources/EeveeSpotify/Lyrics/Models/Extensions/SPTPlayerTrack+Extension.swift \
   Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackClock.swift \
+  Sources/EeveeSpotify/Lyrics/SpicyLyricsAudioAnalysis.swift \
   Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackBridge.swift \
   Tests/SpicyLyricsPlaybackBridge/main.swift "$METADATA_QA_DIR/SpicyLyricsNativeControls.o" \
   "$METADATA_QA_DIR/spotify-command-boundary.o" -o "$METADATA_QA_DIR/metadata-tests"

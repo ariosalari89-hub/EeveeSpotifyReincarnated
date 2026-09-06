@@ -1,12 +1,24 @@
 import UIKit
 
+private final class FilenameTextView: UITextView {
+    override func insertText(_ text: String) {
+        // UITextInput insertion and the software-keyboard delegate are not
+        // interchangeable paths. Own Done at the actual input boundary too.
+        if text == "\n", markedTextRange == nil {
+            resignFirstResponder()
+            return
+        }
+        super.insertText(text)
+    }
+}
+
 /// A filename draft is UI state, not an alert action. Only the explicit Save
 /// target can submit it; selection and first-responder changes never dismiss it.
 final class LocalAudioRenameController: UIViewController, UITextViewDelegate {
     private let file: LocalAudioFile
     private let model: LocalFilesImportModel
     private let scroll = UIScrollView()
-    private let filename = UITextView()
+    private let filename = FilenameTextView()
     private let errorLabel = UILabel()
     private var inputHeight: NSLayoutConstraint!
     private var keyboardObserver: NSObjectProtocol?
@@ -136,11 +148,6 @@ final class LocalAudioRenameController: UIViewController, UITextViewDelegate {
     }
 
     func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-        if text == "\n" {
-            // Done ends keyboard editing only. It is deliberately not Save.
-            textView.resignFirstResponder()
-            return false
-        }
         return !saving
     }
 

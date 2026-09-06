@@ -990,7 +990,7 @@ struct QAFailure: Error { let message: String }
             + ["desktop-shuffle-fullscreen", "desktop-backdrop-fullscreen"]
         let phases = baseline ? ["inline", "card"]
             : ["inline", "card", "background", "highlight", "card-layout", "background-style", "background-speed", "background-motion-perception", "background-lifecycle",
-               "gradient-recovery", "gradient-quality", "gradient-pc-parity", "shuffle-availability", "shuffle-settlement"] + desktopPhases
+               "gradient-recovery", "gradient-quality", "gradient-pc-parity", "gradient-artwork-transition", "shuffle-availability", "shuffle-settlement"] + desktopPhases
         for phase in phases {
             let phaseRows = try await rendererTransitionPhase(phase, baseline: baseline)
             rows += phaseRows

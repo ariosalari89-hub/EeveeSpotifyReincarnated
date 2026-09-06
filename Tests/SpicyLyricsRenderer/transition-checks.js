@@ -210,6 +210,25 @@ window.runSpicyTransitionChecks = async function (phase) {
   if (phase === 'gradient-pc-parity') {
     results.push(...window.runPCGradientChecks(window.SpicyDesktopKawarp));
   }
+  if (phase === 'gradient-artwork-transition') {
+    const playing={isPlaying:true,isPaused:false,isAdvancing:true};
+    SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{backgroundStyle:'gradient',dynamicBackground:true}});
+    SpicyQA.scenario('karaoke',playing);
+    const source=document.createElement('canvas');source.width=source.height=64;
+    const context=source.getContext('2d');context.fillStyle='#cc3333';context.fillRect(0,0,64,64);
+    const first=source.toDataURL();context.fillStyle='#337dcc';context.fillRect(0,0,64,64);const next=source.toDataURL();
+    const send=artwork=>SpicyQA.sendSession({...playing,track:{...SpicyQA.tracks.karaoke,artwork,dominantColor:''}});
+    send(first);const layer=document.querySelector('#artwork-backdrop'),canvas=layer.querySelector('canvas');
+    for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(!canvas.hidden)break;}
+    await wait(650);await frame();const painted=canvas.toDataURL();
+    send(next);
+    check('the next cover decodes without blanking or stopping the current PC gradient',
+      !canvas.hidden && painted===canvas.toDataURL() && layer.classList.contains('is-animated'));
+    await wait(1200);await frame();const changed=painted!==canvas.toDataURL();
+    send('');await wait(150);await frame();
+    check('a decoded next cover crossfades, while a genuinely missing cover clears the old image',
+      changed && canvas.hidden && getComputedStyle(layer).backgroundImage==='none');
+  }
   if (phase === 'background-speed') {
     SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{dynamicBackground:true}});
     SpicyQA.scenario('karaoke',{isPlaying:true,isPaused:false,isAdvancing:true});

@@ -23,6 +23,11 @@ function session(overrides = {}, now = 1000) {
 
 // Atomic session ordering: no late callback from an old generation or old
 // sequence can combine a prior song with the current renderer.
+assert.equal(session().backgroundMotionMultiplier, 1);
+assert.equal(session({backgroundMotionMultiplier: 1.45}).backgroundMotionMultiplier, 1.45);
+assert.equal(session({backgroundMotionMultiplier: NaN}).backgroundMotionMultiplier, 1);
+assert.equal(session({backgroundMotionMultiplier: 10}).backgroundMotionMultiplier, 3);
+assert.equal(session({backgroundMotionMultiplier: -1}).backgroundMotionMultiplier, .1);
 const current = session({ generation: "8", sequence: "14", trackId: "new" });
 assert.equal(model.shouldAcceptSession(current, { generation: "7", sequence: "999", trackId: "old" }), false);
 assert.equal(model.shouldAcceptSession(current, { generation: "8", sequence: "13", trackId: "new" }), false);

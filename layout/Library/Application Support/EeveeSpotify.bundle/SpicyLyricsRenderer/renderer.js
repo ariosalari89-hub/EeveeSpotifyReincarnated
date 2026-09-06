@@ -210,6 +210,7 @@
       this.ready = false;
       this.style = "artwork";
       this.speed = 100;
+      this.analysisSpeed = 1;
       this.palette = [];
       this.gradientPalette = [];
       this.gradient = new window.SpicyGradientField(layer);
@@ -218,6 +219,7 @@
     setEnabled(enabled) { this.enabled = enabled; this.syncMotion(); }
     setPlaying(playing) { this.playing = playing; this.syncMotion(); }
     setSpeed(speed) { this.speed = speed; this.syncMotion(); }
+    setAnalysisSpeed(speed) { this.analysisSpeed = speed; this.syncMotion(); }
     setStyle(style) {
       if (this.style === style) return;
       this.style = style;
@@ -297,7 +299,7 @@
         && !document.hidden && !reduceMotion();
       const active = this.ready && wanted;
       this.layer.classList.toggle("is-animated", active);
-      this.gradient.setMotion(wanted && this.style === "gradient", this.speed);
+      this.gradient.setMotion(wanted && this.style === "gradient", this.speed * this.analysisSpeed);
       for (const animation of this.layer.getAnimations()) {
         if (animation.playbackRate !== this.speed / 100) animation.updatePlaybackRate(this.speed / 100);
       }
@@ -309,7 +311,9 @@
       this.dominantColor = dominantColor;
       const request = ++this.artworkRequest;
       this.artworkLoaded = false;
-      this.gradient.setImage(null);
+      // Match the PC handoff: keep the painted texture moving while the next
+      // real cover decodes, then crossfade. A truly missing cover clears now.
+      if (!url) this.gradient.setImage(null);
       const hex = /^#?([0-9a-f]{6})$/i.exec(dominantColor)?.[1];
       const fallback = hex ? [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16)) : null;
       this.palette = fallback ? [fallback, fallback.map(c => Math.round(c * .6))] : [];
@@ -341,6 +345,7 @@
           return;
         }
         this.artworkLoaded = false;
+        this.gradient.setImage(null);
         this.paint();
       };
       image.src = url;
@@ -503,6 +508,7 @@
     dom.seek.disabled = !session.canSeek;
     if (!session.canSeek) cancelSeekDrag();
     ambient.setPlaying(isPlaying);
+    ambient.setAnalysisSpeed(session.backgroundMotionMultiplier);
   }
 
   function applySession(payload) {

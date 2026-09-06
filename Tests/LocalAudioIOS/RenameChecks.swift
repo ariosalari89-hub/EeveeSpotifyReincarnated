@@ -33,6 +33,37 @@ func tapFilenameAction(_ identifier: String, editor: UIViewController) throws {
 
 @MainActor
 extension QAAppDelegate {
+    func verifyFilenameLayout(navigation: UINavigationController, list: UITableView,
+                              variant: String, category: UIContentSizeCategory) async throws {
+        let path = IndexPath(row: 0, section: list.numberOfSections - 1)
+        list.scrollToRow(at: path, at: .top, animated: false)
+        let row = list.cellForRow(at: path)!
+        let configuration = list.delegate!.tableView!(list, trailingSwipeActionsConfigurationForRowAt: path)!
+        let rename = configuration.actions.first { $0.title == "Rename file" }!
+        rename.handler(rename, row) { _ in }
+        try await waitUntil("the filename layout fixture must finish presenting and focus its input") {
+            guard let editor = filenameEditor(in: navigation), let field = filenameInput(in: editor.view) else { return false }
+            return editor.navigationController?.isBeingPresented == false && field.isFirstResponder
+        }
+        let editor = filenameEditor(in: navigation)!, field = filenameInput(in: filenameEditor(in: navigation)!.view)!
+        editor.view.layoutIfNeeded()
+        try expect(field.traitCollection.preferredContentSizeCategory == category && field.isEditable && field.isSelectable &&
+                   field.isScrollEnabled && field.bounds.width >= 180 && field.bounds.width <= editor.view.bounds.width &&
+                   field.bounds.height >= 144 && editor.navigationItem.leftBarButtonItem?.isEnabled == true &&
+                   editor.navigationItem.rightBarButtonItem?.isEnabled == true,
+                   "the native filename input must remain selectable, scrollable and reachable in " + variant)
+        if category == .accessibilityExtraExtraExtraLarge {
+            try expect((field.font?.pointSize ?? 0) > 30 && field.bounds.height > 200,
+                       "the filename editor must actually enlarge its text and input for accessibility")
+        }
+        field.selectAll(nil)
+        field.insertText("A long filename — a selectable section — another selectable section — final section 音楽")
+        field.selectAll(nil)
+        try await capture("rename-" + variant)
+        try tapFilenameAction("local_files_cancel", editor: editor)
+        try await waitUntil("cancelling the layout draft must dismiss only its editor") { filenameEditor(in: navigation) == nil }
+    }
+
     func verifySelectionDoesNotSave(editor: UIViewController, field: UITextView, navigation: UINavigationController) async throws {
         mark("Selecting, cutting, pasting and deleting a long filename without dismissing its editor")
         let source = documents.appendingPathComponent("Picked song.wav")
@@ -63,6 +94,7 @@ extension QAAppDelegate {
         field.endEditing(true)
         try await Task.sleep(nanoseconds: 300_000_000)
         let unchanged = try Data(contentsOf: source)
+        mark("Filename input outcome: text=\(field.text.debugDescription), sameEditor=\(filenameEditor(in: navigation) === editor), visible=\(editor.view.window != nil), bytesUnchanged=\(unchanged == original)")
         try expect(filenameEditor(in: navigation) === editor && editor.view.window != nil &&
                    field.text == "Renamed on phone" && unchanged == original &&
                    !FileManager.default.fileExists(atPath: documents.appendingPathComponent("Renamed on phone.wav").path),

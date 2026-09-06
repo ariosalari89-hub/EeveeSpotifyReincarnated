@@ -68,6 +68,7 @@
       transportExpired: age != null && age > 2000,
       durationMs,
       playbackRate: Math.max(0.01, finite(payload?.playbackRate, 1)),
+      backgroundMotionMultiplier: clamp(optionalFinite(payload?.backgroundMotionMultiplier) ?? 1, .1, 3),
       isPlaying: Boolean(payload?.isPlaying),
       isPaused,
       isLoading: Boolean(payload?.isLoading),
