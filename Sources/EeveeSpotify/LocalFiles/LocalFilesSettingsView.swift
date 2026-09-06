@@ -29,6 +29,9 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
             ? UIColor(red: 30 / 255, green: 215 / 255, blue: 96 / 255, alpha: 1)
             : UIColor(red: 16 / 255, green: 112 / 255, blue: 49 / 255, alpha: 1)
     }
+    private let secondaryText = UIColor { traits in
+        UIColor(white: traits.userInterfaceStyle == .dark ? 0.72 : 0.35, alpha: 1)
+    }
 
     init(model: LocalFilesImportModel, openURL: @escaping LocalFilesRouteOpener) {
         self.model = model
@@ -57,7 +60,7 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        section == 2 ? state.results.count : 1
+        section == 0 ? 2 : (section == 2 ? state.results.count : 1)
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
@@ -68,13 +71,24 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
         section == 2 ? "local_files_results".localized : nil
     }
 
+    override func tableView(_ tableView: UITableView, willDisplayFooterView view: UIView, forSection section: Int) {
+        (view as? UITableViewHeaderFooterView)?.textLabel?.textColor = secondaryText
+    }
+
+    override func tableView(_ tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
+        (view as? UITableViewHeaderFooterView)?.textLabel?.textColor = secondaryText
+    }
+
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         if indexPath.section == 0 {
-            let cell = makeCell("local_files_import".localized, identifier: "local_files_import")
-            cell.textLabel?.textColor = state.isImporting ? .secondaryLabel : accent
-            cell.accessibilityTraits = state.isImporting ? [.button, .notEnabled] : .button
-            cell.isUserInteractionEnabled = !state.isImporting
-            cell.imageView?.image = UIImage(systemName: "square.and.arrow.down")
+            let key = indexPath.row == 0 ? "local_files_import" : "local_files_open"
+            let disabled = indexPath.row == 0 && state.isImporting
+            let cell = makeCell(key.localized, identifier: key)
+            cell.textLabel?.textColor = disabled ? .secondaryLabel : accent
+            cell.accessibilityTraits = disabled ? [.button, .notEnabled] : .button
+            cell.isUserInteractionEnabled = !disabled
+            cell.selectionStyle = .default
+            cell.imageView?.image = UIImage(systemName: indexPath.row == 0 ? "square.and.arrow.down" : "music.note.list")
             return cell
         }
         if indexPath.section == 1 {
@@ -102,7 +116,7 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
         cell.detailTextLabel?.font = .preferredFont(forTextStyle: .subheadline)
         cell.detailTextLabel?.adjustsFontForContentSizeCategory = true
         cell.detailTextLabel?.numberOfLines = 0
-        cell.detailTextLabel?.textColor = .secondaryLabel
+        cell.detailTextLabel?.textColor = secondaryText
         cell.accessibilityIdentifier = identifier
         cell.isAccessibilityElement = true
         cell.accessibilityLabel = title
@@ -125,7 +139,22 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        guard indexPath.section == 0, !state.isImporting, presentedViewController == nil else { return }
+        guard indexPath.section == 0, presentedViewController == nil else { return }
+        if indexPath.row == 1 {
+            guard let route = URL(string: "spotify:local-files") else { return }
+            openURL(route) { [weak self] accepted in
+                guard !accepted else { return }
+                DispatchQueue.main.async {
+                    guard let self = self, self.viewIfLoaded?.window != nil, self.presentedViewController == nil else { return }
+                    let alert = UIAlertController(title: "local_files_open".localized,
+                                                  message: "local_files_open_failed".localized, preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "local_files_ok".localized, style: .default))
+                    self.present(alert, animated: true)
+                }
+            }
+            return
+        }
+        guard indexPath.row == 0, !state.isImporting else { return }
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.audio], asCopy: true)
         picker.allowsMultipleSelection = true
         picker.delegate = self
