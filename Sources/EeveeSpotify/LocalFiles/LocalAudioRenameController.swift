@@ -125,14 +125,15 @@ final class LocalAudioRenameController: UIViewController, UITextViewDelegate {
 
     private func updateAppearance() {
         filename.layer.borderColor = UIColor.separator.resolvedColor(with: traitCollection).cgColor
-        inputHeight.constant = max(144, UIFont.preferredFont(forTextStyle: .body,
-            compatibleWith: traitCollection).lineHeight * 4 + 28)
+        let font = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traitCollection)
+        filename.font = font
+        inputHeight.constant = max(144, font.lineHeight * 4 + 28)
     }
 
     private func label(_ text: String, style: UIFont.TextStyle) -> UILabel {
         let result = UILabel()
         result.text = text
-        result.font = .preferredFont(forTextStyle: style)
+        result.font = .preferredFont(forTextStyle: style, compatibleWith: traitCollection)
         result.adjustsFontForContentSizeCategory = true
         result.textColor = .label
         result.numberOfLines = 0

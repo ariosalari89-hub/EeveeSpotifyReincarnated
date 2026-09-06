@@ -229,6 +229,36 @@ window.runSpicyTransitionChecks = async function (phase) {
     check('a decoded next cover crossfades, while a genuinely missing cover clears the old image',
       changed && canvas.hidden && getComputedStyle(layer).backgroundImage==='none');
   }
+  if (phase === 'gradient-context') {
+    SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:true,preferences:{backgroundStyle:'gradient',dynamicBackground:true}});
+    SpicyQA.scenario('karaoke',paused);
+    const source=document.createElement('canvas');source.width=source.height=64;
+    const context=source.getContext('2d');context.fillStyle='#cc3333';context.fillRect(0,0,64,64);
+    const first=source.toDataURL();context.fillStyle='#337dcc';context.fillRect(0,0,64,64);const next=source.toDataURL();
+    const send=artwork=>SpicyQA.sendSession({...paused,track:{...SpicyQA.tracks.karaoke,artwork,dominantColor:''}});
+    send(first);const layer=document.querySelector('#artwork-backdrop'),canvas=layer.querySelector('canvas');
+    for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(!canvas.hidden)break;}
+    const extension=canvas.getContext('webgl').getExtension('WEBGL_lose_context');
+    if(!extension) {
+      check('context-loss injection is unavailable on this WebGL implementation',!canvas.hidden,{injectionSupported:false});
+      return results;
+    }
+    const lost=new Promise(resolve=>canvas.addEventListener('webglcontextlost',resolve,{once:true}));
+    extension.loseContext();await Promise.race([lost,wait(2000)]);
+    const hiddenWhileLost=canvas.hidden;
+    send(next);
+    for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(getComputedStyle(layer).backgroundImage.includes('51, 125, 204'))break;}
+    const currentFallback=getComputedStyle(layer).backgroundImage.includes('51, 125, 204');
+    extension.restoreContext();
+    for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(!canvas.hidden)break;}
+    const pixels=canvasPixels(canvas);let blue=0;
+    for(let offset=0;offset<pixels.length;offset+=4)if(pixels[offset+2]>pixels[offset]+40)blue++;
+    const restoredCurrent=!canvas.hidden && blue/(canvas.width*canvas.height)>.8;
+    const frozen=canvas.toDataURL();await wait(150);await frame();
+    check('WebGL context recovery restores only the current cover and respects frozen motion',
+      hiddenWhileLost && currentFallback && restoredCurrent && frozen===canvas.toDataURL(),
+      {injectionSupported:true,hiddenWhileLost,currentFallback,restoredCurrent,blueFraction:blue/(canvas.width*canvas.height)});
+  }
   if (phase === 'background-speed') {
     SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{dynamicBackground:true}});
     SpicyQA.scenario('karaoke',{isPlaying:true,isPaused:false,isAdvancing:true});

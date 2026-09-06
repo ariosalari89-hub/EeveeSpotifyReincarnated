@@ -47,6 +47,8 @@ extension QAAppDelegate {
         }
         let editor = filenameEditor(in: navigation)!, field = filenameInput(in: filenameEditor(in: navigation)!.view)!
         editor.view.layoutIfNeeded()
+        mark("Filename layout \(variant): category=\(field.traitCollection.preferredContentSizeCategory.rawValue), font=\(field.font?.pointSize ?? 0), input=\(field.bounds.size), editor=\(editor.view.bounds.size)")
+        try await capture("rename-" + variant + "-initial")
         try expect(field.traitCollection.preferredContentSizeCategory == category && field.isEditable && field.isSelectable &&
                    field.isScrollEnabled && field.bounds.width >= 180 && field.bounds.width <= editor.view.bounds.width &&
                    field.bounds.height >= 144 && editor.navigationItem.leftBarButtonItem?.isEnabled == true &&

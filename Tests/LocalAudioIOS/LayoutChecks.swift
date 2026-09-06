@@ -32,8 +32,12 @@ extension QAAppDelegate {
     func verifyLayouts(returningTo original: UINavigationController) async throws {
         guard let window = window else { throw Failure(description: "missing native layout window") }
         let originalFrame = window.frame
+        let originalCategory = window.traitCollection.preferredContentSizeCategory
+        let originalStyle = window.overrideUserInterfaceStyle
         defer {
             window.frame = originalFrame
+            window.traitOverrides.preferredContentSizeCategory = originalCategory
+            window.overrideUserInterfaceStyle = originalStyle
             // The viewport matrix replaces the window root repeatedly. Reopen
             // the normal page instead of reusing a detached navigation snapshot.
             original.setViewControllers([makeHost()], animated: false)
@@ -52,6 +56,11 @@ extension QAAppDelegate {
         var defaultActionFont: CGFloat = 0
         for (name, size, style, category, rtl) in variants {
             mark("Auditing native layout: " + name)
+            // A presented sheet belongs to the window's presentation hierarchy,
+            // not the child-only trait override used by the inventory table.
+            // Model the actual global text/theme setting for both surfaces.
+            window.traitOverrides.preferredContentSizeCategory = category
+            window.overrideUserInterfaceStyle = style
             let container = UIViewController()
             let navigation = UINavigationController(rootViewController: makeHost())
             container.addChild(navigation)

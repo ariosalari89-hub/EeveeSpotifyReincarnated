@@ -65,7 +65,11 @@ trap cleanup EXIT
 xcrun simctl boot "$DEVICE"
 xcrun simctl bootstatus "$DEVICE" -b
 bash Tests/SpicyLyricsPlaybackBridge/run.sh "$DEVICE"
-bash Tests/LocalAudioIOS/run.sh "$DEVICE"
+LOCAL_AUDIO_FAILED=false
+if ! bash Tests/LocalAudioIOS/run.sh "$DEVICE"; then
+  LOCAL_AUDIO_FAILED=true
+  echo "Local audio UI failed; continuing independent WebKit checks. The overall step will still fail."
+fi
 xcrun simctl install "$DEVICE" "$QA_APP"
 # Resolve the container and initialize the simulator display service before the
 # app starts its screenshot handshake. Cold simctl setup can otherwise consume
@@ -139,6 +143,7 @@ for iteration in {1..200}; do
     done
     cat "$RUNNER_TEMP/spicy-ios-qa-result.txt"
     grep -q '^PASS$' "$RUNNER_TEMP/spicy-ios-qa-result.txt"
+    [ "$LOCAL_AUDIO_FAILED" = false ]
     exit
   fi
   sleep 1
