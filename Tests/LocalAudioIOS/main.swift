@@ -1,0 +1,96 @@
+import UIKit
+import SwiftUI
+import AVFoundation
+
+// The fixture uses the shipping English resource through the app-bundle boundary.
+extension String {
+    var localized: String { Bundle.main.localizedString(forKey: self, value: nil, table: nil) }
+}
+
+struct Failure: Error, CustomStringConvertible { let description: String }
+
+@MainActor
+func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+    guard condition() else { throw Failure(description: message) }
+}
+
+@MainActor
+func waitUntil(_ message: String, seconds: Double = 8, _ condition: () -> Bool) async throws {
+    let deadline = Date().addingTimeInterval(seconds)
+    while Date() < deadline {
+        if condition() { return }
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    throw Failure(description: message)
+}
+
+@MainActor
+func table(in view: UIView) -> UITableView? {
+    if let table = view as? UITableView { return table }
+    return view.subviews.compactMap { table(in: $0) }.first
+}
+
+@MainActor
+func picker(in controller: UIViewController) -> UIDocumentPickerViewController? {
+    if let picker = controller as? UIDocumentPickerViewController { return picker }
+    if let presented = controller.presentedViewController, let picker = picker(in: presented) { return picker }
+    return controller.children.compactMap { picker(in: $0) }.first
+}
+
+@MainActor
+func tap(_ identifier: String, in table: UITableView) throws {
+    for section in 0..<table.numberOfSections {
+        for row in 0..<table.numberOfRows(inSection: section) {
+            let path = IndexPath(row: row, section: section)
+            guard let cell = table.dataSource?.tableView(table, cellForRowAt: path),
+                  cell.accessibilityIdentifier == identifier else { continue }
+            table.delegate?.tableView?(table, didSelectRowAt: path)
+            return
+        }
+    }
+    throw Failure(description: "visible native action not found: " + identifier)
+}
+
+@MainActor
+final class QAAppDelegate: UIResponder, UIApplicationDelegate {
+    var window: UIWindow?
+    let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        let host = UIHostingController(rootView: LocalFilesSettingsView())
+        host.title = "local_files_title".localized
+        let navigation = UINavigationController(rootViewController: host)
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = navigation
+        window.makeKeyAndVisible()
+        self.window = window
+        Task { await run(navigation: navigation) }
+        return true
+    }
+
+    func run(navigation: UINavigationController) async {
+        do {
+            try await waitUntil("the real local-files page did not render") { table(in: navigation.view) != nil }
+            let list = table(in: navigation.view)!
+            try tap("local_files_import", in: list)
+            try await waitUntil("Import audio files must present the actual system document picker") { picker(in: navigation) != nil }
+            let systemPicker = picker(in: navigation)!
+            try expect(systemPicker.allowsMultipleSelection && systemPicker.documentPickerMode == .import,
+                       "the native picker must select multiple copied files, not edit originals in place")
+            try await capture("picker")
+            try "PASS: native import action presents the multi-audio copy picker\nPASS\n"
+                .write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
+        } catch {
+            try? "FAIL: \(error)\n".write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
+        }
+    }
+
+    func capture(_ name: String) async throws {
+        try name.write(to: documents.appendingPathComponent("local-audio-capture.txt"), atomically: true, encoding: .utf8)
+        try await waitUntil("native screenshot was not captured", seconds: 40) {
+            FileManager.default.fileExists(atPath: self.documents.appendingPathComponent("capture-\(name).done").path)
+        }
+    }
+}
+
+UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(QAAppDelegate.self))

@@ -57,6 +57,7 @@ trap cleanup EXIT
 xcrun simctl boot "$DEVICE"
 xcrun simctl bootstatus "$DEVICE" -b
 bash Tests/SpicyLyricsPlaybackBridge/run.sh "$DEVICE"
+bash Tests/LocalAudioIOS/run.sh "$DEVICE"
 xcrun simctl install "$DEVICE" "$QA_APP"
 # Resolve the container and initialize the simulator display service before the
 # app starts its screenshot handshake. Cold simctl setup can otherwise consume

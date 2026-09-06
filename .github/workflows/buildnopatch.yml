@@ -120,18 +120,36 @@ jobs:
       - name: Test local audio import output
         run: bash Tests/LocalAudioImport/run.sh
 
+      - name: Test local audio native UI
+        if: ${{ inputs.qa_only && inputs.qa_scope == 'local_audio' }}
+        timeout-minutes: 6
+        run: bash Tests/LocalAudioIOS/run.sh
+
       - name: Upload local audio verification
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: LocalAudio-QA
-          path: ${{ runner.temp }}/local-audio-result.txt
+          path: |
+            ${{ runner.temp }}/local-audio-result.txt
+            ${{ runner.temp }}/local-audio-ui-result.txt
+            ${{ runner.temp }}/local-audio-*.png
           if-no-files-found: warn
 
       - name: Test Spicy Lyrics in iOS WebKit and UIKit
         if: ${{ !inputs.qa_only || inputs.qa_scope != 'local_audio' }}
         timeout-minutes: 15
         run: bash Tests/SpicyLyricsIOS/run.sh
+
+      - name: Upload shared-simulator local audio verification
+        if: ${{ always() && (!inputs.qa_only || inputs.qa_scope != 'local_audio') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalAudio-iOS-QA
+          path: |
+            ${{ runner.temp }}/local-audio-ui-result.txt
+            ${{ runner.temp }}/local-audio-*.png
+          if-no-files-found: warn
 
       - name: Upload iOS integration result
         if: ${{ always() && (!inputs.qa_only || inputs.qa_scope != 'local_audio') }}
