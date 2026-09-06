@@ -147,6 +147,22 @@ do {
                    "an interrupted file must never appear in the native song folder or modify the original")
         print("PASS: a running copy can stop without exposing a partial song")
     }
+    try withDirectories { input, output in
+        let original = input.appendingPathComponent("Linked name.wav")
+        try makeAudio(at: original)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let existingLink = output.appendingPathComponent("Linked name.wav")
+        try FileManager.default.createSymbolicLink(at: existingLink, withDestinationURL: original)
+        let results = LocalAudioImporter(directory: output).importFiles([original])
+        guard case .copied(let copied) = results[0].outcome else {
+            throw TestFailure(description: "a same-name symbolic link must not stand in for a durable local song copy")
+        }
+        try expect(copied.lastPathComponent == "Linked name (2).wav" &&
+                   copied.resolvingSymlinksInPath().deletingLastPathComponent() == output.resolvingSymlinksInPath(),
+                   "a copied song must remain inside the native source even when an existing name is a link")
+        try expect(FileManager.default.fileExists(atPath: original.path), "import must not modify a linked external original")
+        print("PASS: existing symbolic links cannot redirect a local song's returned output")
+    }
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)
