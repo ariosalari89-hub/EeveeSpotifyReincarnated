@@ -165,6 +165,7 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try await cancelAndRetry(navigation: navigation)
             try await verifyRouteFallback(navigation: navigation)
             try await verifyLayouts(returningTo: navigation)
+            try await verifyNativeFilenameRename(navigation: navigation)
             try await waitUntil("the ordinary settings page did not return after viewport checks") {
                 guard let host = navigation.topViewController, let list = table(in: host.view) else { return false }
                 return list.window != nil && cell("local_files_import", in: list) != nil
