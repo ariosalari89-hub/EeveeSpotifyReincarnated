@@ -52,21 +52,27 @@ extension QAAppDelegate {
         try expect(!configuration.performsFirstActionWithFullSwipe,
                    "a full swipe must not bypass review or commit a file mutation")
         rename.handler(rename, row) { _ in }
-        try await waitUntil("Rename file must open an editable native filename field") {
-            guard let editor = fileAlert(in: navigation) else { return false }
-            return editor.title == "Rename file" && editor.textFields?.first?.text == "Picked song" &&
+        try await waitUntil("Rename file must open a persistent native filename editor, not an alert") {
+            guard let editor = filenameEditor(in: navigation) else { return false }
+            return editor.title == "Rename file" && filenameInput(in: editor.view)?.text == "Picked song" &&
                 editor.viewIfLoaded?.window != nil && !editor.isBeingPresented
         }
-        let editor = fileAlert(in: navigation)!
-        let field = editor.textFields!.first!
-        try expect(field.accessibilityLabel == "Filename" && editor.actions.map(\.title) == ["Cancel", "Save"],
+        let editor = filenameEditor(in: navigation)!
+        let field = filenameInput(in: editor.view)!
+        try expect(field.accessibilityLabel == "Filename" &&
+                   editor.navigationItem.leftBarButtonItem?.title == "Cancel" &&
+                   editor.navigationItem.rightBarButtonItem?.title == "Save" &&
+                   editor.navigationController?.isModalInPresentation == true,
                    "the filename editor needs a named input and explicit save/cancel actions")
-        field.text = "Renamed on phone"
+        try await verifySelectionDoesNotSave(editor: editor, field: field, navigation: navigation)
         try await capture("rename-editing")
-        field.sendActions(for: .editingDidEndOnExit)
-        field.sendActions(for: .editingDidEndOnExit)
+        try tapFilenameAction("local_files_save", editor: editor)
+        // Native callers can submit a button twice before the next run-loop turn.
+        // The disabled action must neither rename twice nor reopen a stale editor.
+        let save = editor.navigationItem.rightBarButtonItem!
+        if let action = save.action { UIApplication.shared.sendAction(action, to: save.target, from: save, for: nil) }
         try await waitUntil("submitting the filename must show the authoritative renamed copy") {
-            fileAlert(in: navigation) == nil && cell("local_files_file", label: "Renamed on phone.wav", in: list) != nil &&
+            filenameEditor(in: navigation) == nil && cell("local_files_file", label: "Renamed on phone.wav", in: list) != nil &&
                 cell("local_files_file", label: "Picked song.wav", in: list) == nil
         }
         let original = FileManager.default.temporaryDirectory.appendingPathComponent("Picked song.wav")
@@ -108,31 +114,56 @@ extension QAAppDelegate {
         let rename = configuration.actions.first { $0.title == "Rename file" }!
         rename.handler(rename, row) { _ in }
         try await waitUntil("the existing file must open its filename editor") {
-            guard let editor = fileAlert(in: navigation) else { return false }
-            return editor.textFields?.first?.text == "Renamed on phone" && !editor.isBeingPresented
+            guard let editor = filenameEditor(in: navigation) else { return false }
+            return filenameInput(in: editor.view)?.text == "Renamed on phone" && !editor.isBeingPresented
         }
-        let editor = fileAlert(in: navigation)!
-        editor.textFields!.first!.text = "Existing name"
-        editor.textFields!.first!.sendActions(for: .editingDidEndOnExit)
+        let editor = filenameEditor(in: navigation)!
+        let field = filenameInput(in: editor.view)!
+        field.text = "Existing name"
+        try tapFilenameAction("local_files_save", editor: editor)
         try await waitUntil("a filename collision must preserve the proposed value with a corrective error") {
-            guard let error = fileAlert(in: navigation) else { return false }
-            return error !== editor && error.textFields?.first?.text == "Existing name" && !error.isBeingPresented &&
-                error.message == "A file with that name already exists. Choose another name."
+            return filenameEditor(in: navigation) === editor && field.text == "Existing name" &&
+                editor.navigationItem.rightBarButtonItem?.isEnabled == true &&
+                filenameError(in: editor.view)?.text == "A file with that name already exists. Choose another name."
         }
         let afterOriginal = try Data(contentsOf: original), afterOccupied = try Data(contentsOf: occupied)
         try expect(afterOriginal == originalBytes && afterOccupied == occupiedBytes,
                    "a failed native filename edit must preserve both files byte for byte")
         try await capture("rename-collision")
-        let retry = fileAlert(in: navigation)!
-        retry.textFields!.first!.text = "Renamed on phone"
-        retry.textFields!.first!.sendActions(for: .editingDidEndOnExit)
+        field.text = "invalid/name"
+        try tapFilenameAction("local_files_save", editor: editor)
+        try await waitUntil("invalid names must stay in the same editor with an inline error") {
+            filenameEditor(in: navigation) === editor && field.text == "invalid/name" &&
+                editor.navigationItem.rightBarButtonItem?.isEnabled == true &&
+                filenameError(in: editor.view)?.text == "local_files_invalid_name".localized
+        }
+        field.text = "Renamed on phone"
+        try tapFilenameAction("local_files_save", editor: editor)
         var readySamples = 0
         try await waitUntil("correcting a filename error must close the editor and retain the selected copy") {
             let row = cell("local_files_file", label: "Renamed on phone.wav", in: list)
-            let ready = fileAlert(in: navigation) == nil && !retry.isBeingDismissed &&
+            let ready = filenameEditor(in: navigation) == nil && !editor.isBeingDismissed &&
                 row?.isUserInteractionEnabled == true && row?.accessibilityTraits.contains(.notEnabled) == false
             readySamples = ready ? readySamples + 1 : 0
             return readySamples >= 2
         }
+        let current = cell("local_files_file", label: "Renamed on phone.wav", in: list)!
+        let currentPath = list.indexPath(for: current)!
+        let actions = list.delegate!.tableView!(list, trailingSwipeActionsConfigurationForRowAt: currentPath)!
+        let cancelRename = actions.actions.first { $0.title == "Rename file" }!
+        cancelRename.handler(cancelRename, current) { _ in }
+        try await waitUntil("cancel scenario must open the real filename editor") {
+            filenameEditor(in: navigation)?.viewIfLoaded?.window != nil
+        }
+        let cancelled = filenameEditor(in: navigation)!
+        filenameInput(in: cancelled.view)!.text = "This must not be saved"
+        try tapFilenameAction("local_files_cancel", editor: cancelled)
+        try await waitUntil("explicit Cancel must close without changing the selected file") {
+            filenameEditor(in: navigation) == nil && cell("local_files_file", label: "Renamed on phone.wav", in: list) != nil
+        }
+        let bytesAfterCancel = try Data(contentsOf: original)
+        try expect(bytesAfterCancel == originalBytes &&
+                   !FileManager.default.fileExists(atPath: documents.appendingPathComponent("This must not be saved.wav").path),
+                   "cancelling a draft must preserve the filename and audio")
     }
 }
