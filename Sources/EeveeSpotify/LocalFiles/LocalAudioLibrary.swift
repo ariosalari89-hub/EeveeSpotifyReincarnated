@@ -7,6 +7,7 @@ enum LocalAudioLibraryFailure: String, Error {
     case changed = "local_files_changed"
     case nameExists = "local_files_name_exists"
     case cannotRename = "local_files_rename_failed"
+    case cannotRemove = "local_files_remove_failed"
 }
 
 struct LocalAudioFile: Identifiable, Equatable {
@@ -93,6 +94,16 @@ final class LocalAudioLibrary {
     }
 
     func remove(_ file: LocalAudioFile) throws {
-        throw LocalAudioLibraryFailure.cannotRead
+        var coordinationError: NSError?
+        var outcome: Result<Void, Error>?
+        NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: file.fileURL, options: .forDeleting,
+                                                         error: &coordinationError) { target in
+            outcome = Result {
+                try validate(file, at: target)
+                try FileManager.default.removeItem(at: target)
+            }
+        }
+        if let outcome = outcome { return try outcome.get() }
+        throw coordinationError ?? LocalAudioLibraryFailure.cannotRemove as Error
     }
 }
