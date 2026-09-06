@@ -64,6 +64,7 @@ extension QAAppDelegate {
         field.text = "Renamed on phone"
         try await capture("rename-editing")
         field.sendActions(for: .editingDidEndOnExit)
+        field.sendActions(for: .editingDidEndOnExit)
         try await waitUntil("submitting the filename must show the authoritative renamed copy") {
             fileAlert(in: navigation) == nil && cell("local_files_file", label: "Renamed on phone.wav", in: list) != nil &&
                 cell("local_files_file", label: "Picked song.wav", in: list) == nil

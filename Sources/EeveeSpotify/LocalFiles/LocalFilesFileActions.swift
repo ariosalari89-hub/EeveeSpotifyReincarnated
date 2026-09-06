@@ -55,6 +55,10 @@ extension LocalFilesSettingsController {
     }
 
     private func saveRename(_ file: LocalAudioFile, from editor: UIAlertController) {
+        // UIKit may submit the default action as well as the field's Return
+        // event. One editor can commit only once, including during dismissal.
+        guard let save = editor.actions.last, save.isEnabled else { return }
+        save.isEnabled = false
         let proposed = editor.textFields?.first?.text ?? ""
         // Dismissal precedes the filesystem operation, so an immediate failure
         // can reopen the editor with the user's proposed value intact.
