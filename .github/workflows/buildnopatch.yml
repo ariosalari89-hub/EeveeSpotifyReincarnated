@@ -117,6 +117,8 @@ jobs:
             ${{ runner.temp }}/spicy-ios-qa-result.txt
             ${{ runner.temp }}/spicy-ios-qa-progress.txt
             ${{ runner.temp }}/spicy-metadata-qa-result.txt
+            ${{ runner.temp }}/qa-renderer-baseline.json
+            ${{ runner.temp }}/qa-renderer-results.json
             ${{ runner.temp }}/qa-portrait.png
             ${{ runner.temp }}/qa-landscape.png
             ${{ runner.temp }}/qa-landscape-screen.png

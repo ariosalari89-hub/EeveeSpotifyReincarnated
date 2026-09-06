@@ -101,6 +101,11 @@ for iteration in {1..200}; do
     if [ "$QA_PROGRESS" != "$QA_LAST_PROGRESS" ]; then
       printf '%s\n' "$QA_PROGRESS"
       cp "$CONTAINER/Documents/qa-progress.txt" "$RUNNER_TEMP/spicy-ios-qa-progress.txt"
+      for QA_RENDERER_REPORT in qa-renderer-baseline.json qa-renderer-results.json; do
+        if [ -s "$CONTAINER/Documents/$QA_RENDERER_REPORT" ]; then
+          cp "$CONTAINER/Documents/$QA_RENDERER_REPORT" "$RUNNER_TEMP/$QA_RENDERER_REPORT"
+        fi
+      done
       QA_LAST_PROGRESS="$QA_PROGRESS"
     fi
   fi

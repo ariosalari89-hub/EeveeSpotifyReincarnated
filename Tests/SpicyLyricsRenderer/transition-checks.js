@@ -573,14 +573,16 @@ window.runSpicyTransitionChecks = async function (phase) {
   }));
   SpicyQA.scenario('line', { ...paused, positionMs: 2100, durationMs: 60000 });
   await wait(700);
-  await waitForSteadyFrames();
+  const previewCadence = await waitForSteadyFrames();
   const scroller = document.querySelector('#lyrics-scroller');
   const start = scroller.scrollTop;
+  const previewStarted = performance.now(), previewStartedAtMs = Date.now();
   SpicyQA.observe({ ...paused, positionMs: 4100, durationMs: 60000 });
-  const positions = [], colors = [];
+  const positions = [], colors = [], previewFrameTimes = [];
   for (const deadline = performance.now() + 450; performance.now() < deadline;) {
     await frame();
     positions.push(scroller.scrollTop);
+    previewFrameTimes.push(performance.now()-previewStarted);
     colors.push(desktopPaint ? getComputedStyle(document.querySelector('.line-timed.active')).opacity
       : getComputedStyle(document.querySelector('.line-timed.active .line-text')).webkitTextFillColor);
   }
@@ -588,7 +590,8 @@ window.runSpicyTransitionChecks = async function (phase) {
   const intermediate = positions.filter(p => p > start + 1 && p < end - 1);
   check('preview scroll has multiple intermediate positions, not a teleport',
     end > start + 10 && new Set(intermediate).size >= 4
-      && positions.every((p, i) => !i || p >= positions[i - 1] - 1), { start, positions });
+      && positions.every((p, i) => !i || p >= positions[i - 1] - 1),
+    {start,positions,frameTimes:previewFrameTimes,cadenceBeforeMs:previewCadence,startedAtMs:previewStartedAtMs});
   check('line-timed preview highlight fades rather than switching instantly',
     new Set(colors).size >= 4, colors);
   SpicyQA.lyrics.line.Content.forEach(line => { line.EndTime -= .3; });
@@ -691,16 +694,27 @@ window.runSpicyTransitionChecks = async function (phase) {
         return fill > 0 && fill < 100 && (desktopPaint ? getComputedStyle(token).backgroundImage!=='none'
           : Number(getComputedStyle(token, '::after').opacity) === 1);
       }));
-  const seekHolds = [];
+  const seekHolds = [], seekHoldDetails = [];
   for (const [positionMs, index] of [[21900,10], [31900,15]]) {
+    const observedAt = performance.now();
     SpicyQA.observe({ ...paused, positionMs, durationMs: 60000 });
     await wait(280);
     const leads = [...document.querySelectorAll('.lyric-line.lead')];
     const bright = leads.filter(line => [...line.querySelectorAll('.token')].every(token =>
       token.style.getPropertyValue('--fill') === '100.00%' && brightToken(token)));
     seekHolds.push(bright.length === 1 && bright[0] === leads[index] && !document.querySelector('#lyrics [aria-current]'));
+    seekHoldDetails.push({positionMs,index,elapsedMs:performance.now()-observedAt,
+      bright:bright.map(line=>leads.indexOf(line)),
+      active:leads.filter(line=>line.hasAttribute('aria-current')).map(line=>leads.indexOf(line)),
+      held:leads.filter(line=>line.classList.contains('preview-held')).map(line=>leads.indexOf(line)),
+      nearby:leads.map((line,i)=>({line,index:i})).filter(({index:i})=>Math.abs(i-index)<=3)
+        .map(({line,index:i})=>({index:i,opacity:Number(getComputedStyle(line).opacity),
+        tokens:[...line.querySelectorAll('.token')].map(token=>({fill:token.style.getPropertyValue('--fill'),
+          bright:brightToken(token),background:getComputedStyle(token).backgroundImage,
+          ink:getComputedStyle(token).webkitTextFillColor,gradient:token.style.getPropertyValue('--gradient-position')}))}))});
   }
-  check('backward and forward gap observations hold only the correct preview line', seekHolds.every(Boolean), seekHolds);
+  check('backward and forward gap observations hold only the correct preview line', seekHolds.every(Boolean),
+    {passed:seekHolds,observations:seekHoldDetails});
 
   SpicyQA.lyrics.line.Content = [
     {Type:'Vocal',Text:'First timed phrase',StartTime:1,EndTime:2.7},

@@ -158,6 +158,7 @@ struct QAFailure: Error { let message: String }
     let source: UIViewController
     let scene: UIWindowScene
     var checks: [String] = []
+    var rendererFailures: [String] = []
     init(source: UIViewController, scene: UIWindowScene) { self.source = source; self.scene = scene }
 
     // Persist phase boundaries independently of final completion. A stalled
@@ -727,7 +728,7 @@ struct QAFailure: Error { let message: String }
             // external display-capture handshake and native lifecycle fixtures.
             try await testRendererTransitions(baseline: true)
             try await testRendererTransitions(baseline: false)
-            checkpoint("all current WebKit transitions passed")
+            checkpoint("current WebKit transitions finished with \(rendererFailures.count) failures; testing independent UIKit lifecycle")
             SpicyLyricsFullscreenCoordinator.shared.attach(to: source)
             guard let preparing = scene.keyWindow, preparing.rootViewController !== source,
                   preparing.rootViewController?.view.subviews.count == 2 else {
@@ -817,6 +818,9 @@ struct QAFailure: Error { let message: String }
             checkpoint("fullscreen close passed; starting embedded lifecycle")
             try await testEmbeddedSurfaces()
             checkpoint("embedded lifecycle passed; finishing suite")
+            guard rendererFailures.isEmpty else {
+                throw QAFailure(message: rendererFailures.joined(separator: "; "))
+            }
             finish(result: "PASS")
         } catch {
             finish(result: "FAIL: \(error)\n\(await failureDiagnostics())")
@@ -888,6 +892,10 @@ struct QAFailure: Error { let message: String }
                 throw QAFailure(message: "no transition results")
             }
             rows += phaseRows
+            let reportURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(baseline ? "qa-renderer-baseline.json" : "qa-renderer-results.json")
+            try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys])
+                .write(to: reportURL, options: .atomic)
             checkpoint("\(baseline ? "baseline" : "current") WebKit \(phase): \(phaseRows.filter { $0["pass"] as? Bool == true }.count)/\(phaseRows.count) checks passed")
         }
         var failures = [String]()
@@ -902,7 +910,12 @@ struct QAFailure: Error { let message: String }
                   failures.contains("line-timed preview highlight fades rather than switching instantly") else {
                 throw QAFailure(message: "historical renderer did not reproduce transition defects")
             }
-        } else if !failures.isEmpty { throw QAFailure(message: failures.joined(separator: "; ")) }
+        } else {
+            // A rendered assertion failure still fails the complete run, but
+            // must not conceal results from the independent hosting/lifecycle
+            // fixtures that follow. Structural setup errors remain fatal.
+            rendererFailures += failures
+        }
     }
 
     func finish(result: String) {
