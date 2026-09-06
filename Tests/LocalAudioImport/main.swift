@@ -65,6 +65,20 @@ do {
         try expect(preservedBytes == existingBytes && copiedBytes == sourceBytes, "neither colliding song may be overwritten")
         print("PASS: different songs with the same filename both survive")
     }
+    try withDirectories { input, output in
+        let original = input.appendingPathComponent("Repeat.wav")
+        try makeAudio(at: original)
+        let importer = LocalAudioImporter(directory: output)
+        let first = importer.importFiles([original])
+        let repeated = importer.importFiles([original])
+        guard case .alreadyPresent(let sameFile) = repeated[0].outcome else {
+            throw TestFailure(description: "reimporting identical audio must report already present, not copy it again")
+        }
+        try expect(sameFile == first[0].fileURL, "reimport must return the existing playable file")
+        let files = try FileManager.default.contentsOfDirectory(atPath: output.path)
+        try expect(files == ["Repeat.wav"], "reimport must not create a second song file")
+        print("PASS: repeated selection reports already present without making another copy")
+    }
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)

@@ -3,6 +3,7 @@ import Foundation
 struct LocalAudioImportResult: Identifiable {
     enum Outcome {
         case copied(URL)
+        case alreadyPresent(URL)
         case failed(String)
     }
 
@@ -11,8 +12,10 @@ struct LocalAudioImportResult: Identifiable {
     let outcome: Outcome
 
     var fileURL: URL? {
-        if case .copied(let url) = outcome { return url }
-        return nil
+        switch outcome {
+        case .copied(let url), .alreadyPresent(let url): return url
+        case .failed: return nil
+        }
     }
 }
 
