@@ -440,12 +440,13 @@ window.runSpicyTransitionChecks = async function (phase) {
   if (desktopPaint) {
     const profileStyle = document.createElement('style');
     document.head.appendChild(profileStyle);
-    const flatten = ' { will-change: auto !important; backface-visibility: visible !important; }';
     try {
       for (const [variant, css] of [
         ['control-before', ''],
-        ['flatten-descendants', '.lyric-line.effects-near :is(.token,.letter,.dot)' + flatten],
-        ['flatten-all', '.lyric-line.effects-near,.lyric-line.effects-near :is(.token,.letter,.dot)' + flatten],
+        ['hidden-pool', ''],
+        ['underpaint-off', '.lyric-line.active > .line-text { background-image: none !important; }'],
+        ['glyph-shadow-off', '.token,.letter { text-shadow: none !important; }'],
+        ['ghostless', ''],
         ['control-after', '']
       ]) {
         profileStyle.textContent = css;
@@ -454,13 +455,25 @@ window.runSpicyTransitionChecks = async function (phase) {
         const before = [];
         for (let i = 0; i < 6; i++) { await frame(); before.push(performance.now()); }
         const started = performance.now(), times = [], opacities = [];
-        SpicyQA.observe({ ...paused, positionMs: 15500 });
-        for (const end = started + 400; performance.now() < end;) {
-          await frame();
-          times.push(performance.now() - started);
-          opacities.push(Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity));
-        }
-        pageLayerProfiles.push({variant,before:before.slice(1).map((t,i)=>t-before[i]),times,opacities});
+        const hiddenPool = document.createDocumentFragment();
+        const diagnosticObserver = new MutationObserver(() => {
+          if (variant === 'hidden-pool') {
+            document.querySelectorAll('#lyrics .inline-visible > .line-text > [hidden]')
+              .forEach(node => hiddenPool.appendChild(node));
+          } else if (variant === 'ghostless') document.querySelector('.caption-outgoing')?.remove();
+        });
+        diagnosticObserver.observe(document.querySelector('.lyrics-pane'),
+          {childList:true,subtree:true,attributes:true,attributeFilter:['hidden']});
+        try {
+          SpicyQA.observe({ ...paused, positionMs: 15500 });
+          for (const end = started + 400; performance.now() < end;) {
+            await frame();
+            times.push(performance.now() - started);
+            opacities.push(Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity));
+          }
+          pageLayerProfiles.push({variant,before:before.slice(1).map((t,i)=>t-before[i]),times,opacities,
+            pooledNodes:hiddenPool.childNodes.length});
+        } finally { diagnosticObserver.disconnect(); }
       }
     } finally { profileStyle.remove(); }
   }
