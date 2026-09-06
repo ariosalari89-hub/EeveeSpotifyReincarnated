@@ -52,7 +52,16 @@ try {
     const element=document.querySelector(selector),style=getComputedStyle(element);
     return {selector,color:style.color,rect:rect(element)};
   });
-  return JSON.stringify({surface,sample,backgroundStyle,labels,veil:getComputedStyle(document.querySelector('.contrast-veil')).background,
+  const ink=line=>{
+    if(!line)return null;
+    const glyph=line.querySelector('.letter') || line.querySelector('.token') || line.querySelector('.line-text');
+    const s=getComputedStyle(glyph),alpha=Number(getComputedStyle(line).opacity);
+    return {rect:rect(line),brightAlpha:parseFloat(s.getPropertyValue('--gradient-alpha'))*alpha,
+      quietAlpha:parseFloat(s.getPropertyValue('--gradient-alpha-end'))*alpha,fontSize:parseFloat(s.fontSize)};
+  };
+  const quiet=[...document.querySelectorAll('.lead:not(.active)')].find(line=>{const r=line.getBoundingClientRect();return r.height>0 && r.top>=0 && r.bottom<=innerHeight;});
+  return JSON.stringify({surface,sample,backgroundStyle,labels,viewport:{width:innerWidth,height:innerHeight},
+    activeInk:ink(document.querySelector('.lead.active')),quietInk:ink(quiet),veil:getComputedStyle(document.querySelector('.contrast-veil')).background,
     active:rect(document.querySelector('.lead.active')),filter:getComputedStyle(document.querySelector('#artwork-backdrop')).filter});
 })()
 '@
@@ -61,6 +70,9 @@ try {
             $results += ($raw | ConvertFrom-Json) | ConvertFrom-Json
             & agent-browser --session $session screenshot (Join-Path $EvidenceDir "$surface-$sample.png") | Out-Null
             if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath (Join-Path $EvidenceDir "$surface-$sample.png"))) { throw 'UI screenshot missing' }
+            $audit = & agent-browser --session $session a11y --json
+            $audit | Tee-Object -FilePath (Join-Path $EvidenceDir "$surface-$sample-a11y.json") | Out-Null
+            if (($audit | ConvertFrom-Json).data.violations.Count) { throw "Accessibility violations in $surface/$sample" }
             "document.querySelector('#app').style.visibility='hidden'" | & agent-browser --session $session eval --stdin | Out-Null
             & agent-browser --session $session screenshot (Join-Path $EvidenceDir "$surface-$sample-backdrop.png") | Out-Null
             if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath (Join-Path $EvidenceDir "$surface-$sample-backdrop.png"))) { throw 'Backdrop screenshot missing' }
