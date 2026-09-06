@@ -346,17 +346,26 @@ window.runSpicyTransitionChecks = async function (phase) {
       entrance.map(s=>({elapsed:s.time-enteredAt,opacity:s.opacity})));
     SpicyQA.observe({...paused,positionMs:1000});await wait(450);await waitForSteadyFrames();
     SpicyQA.observe({...paused,positionMs:2100});
-    const uninterrupted=[];let bootstrapped=false;
+    const uninterrupted=[];let bootstrappedAt=null;
     const start=performance.now();
     for(const deadline=start+420;performance.now()<deadline;){
       await frame();uninterrupted.push(sample());
-      if(!bootstrapped && performance.now()-start>=60){bootstrap(surface);bootstrapped=true;}
+      if(bootstrappedAt===null && performance.now()-start>=60){bootstrappedAt=performance.now();bootstrap(surface);}
     }
+    // PC entry is 300 ms ease: cubic-bezier(.25,.1,.25,1), whose maximum
+    // dy/dx is below 2.3. A 70 ms sampling gap can legitimately grow by .386;
+    // a fixed .32 delta incorrectly called that a snap before bootstrap ran.
+    // Bound growth by elapsed time, allow .03 for style/sample clock rounding,
+    // and still require three painted intermediate frames AFTER the input.
+    // Cancelling the old entrance at ~60 ms jumps to 1 and fails both guards.
     const jumps=uninterrupted.slice(1).map((s,i)=>({dt:s.time-uninterrupted[i].time,
-      delta:Math.abs(s.scale-uninterrupted[i].scale)})).filter(s=>s.delta>.32);
+      delta:Math.abs(s.scale-uninterrupted[i].scale)}))
+      .filter(s=>s.delta>s.dt*(2.3/300)+.03);
+    const intermediateAfterBootstrap=uninterrupted.filter(s=>s.time>bootstrappedAt && s.scale>.05 && s.scale<.99).length;
     check(`${surface}: a native bootstrap during entrance does not snap the dots to full size`,
-      uninterrupted.length>=8 && !jumps.length && uninterrupted.at(-1).scale>=.99,
-      {samples:uninterrupted,jumps});
+      bootstrappedAt!==null && uninterrupted.length>=8 && intermediateAfterBootstrap>=3
+        && !jumps.length && uninterrupted.at(-1).scale>=.99,
+      {samples:uninterrupted,jumps,bootstrappedAt,intermediateAfterBootstrap});
     SpicyQA.observe({...paused,positionMs:7520});
     const exit=[];
     for(const deadline=performance.now()+470;performance.now()<deadline;){
