@@ -386,12 +386,25 @@ window.runSpicyTransitionChecks = async function (phase) {
     Syllables: Array.from({length: 20}, (_,i) => ({Text: `Pageword${i} `,StartTime:i,EndTime:i+1})) }}];
   SpicyQA.scenario('karaoke', { ...paused, positionMs: 500 });
   await wait(350);
+  const nativeFrame = window.requestAnimationFrame;
+  const pageCallbacks = [], pageFrameTimes = [], pageStyleReads = [];
+  let recordPageFrames = true;
+  window.requestAnimationFrame = callback => nativeFrame.call(window, timestamp => {
+    const started = performance.now();
+    callback(timestamp);
+    if (recordPageFrames) pageCallbacks.push({name:callback.name,ms:performance.now()-started});
+  });
+  const pageStarted = performance.now();
   SpicyQA.observe({ ...paused, positionMs: 15500 });
   const pageOpacity = [];
   const pageGhosts = [];
   let hiddenPageWrites = 0, hiddenPageNodes = 0, hiddenPageObserver = null;
   for (const deadline = performance.now() + 350; performance.now() < deadline;) {
-    await frame(); pageOpacity.push(Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity));
+    await frame();
+    pageFrameTimes.push(performance.now()-pageStarted);
+    const pageReadStarted = performance.now();
+    pageOpacity.push(Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity));
+    pageStyleReads.push(performance.now()-pageReadStarted);
     const ghost = document.querySelector('.caption-outgoing');
     if (ghost) pageGhosts.push({ hidden: ghost.querySelectorAll('[hidden]').length,
       tokens: ghost.querySelectorAll('.token').length });
@@ -403,10 +416,13 @@ window.runSpicyTransitionChecks = async function (phase) {
         { attributes: true, attributeFilter: ['style'], subtree: true }));
     }
   }
+  recordPageFrames = false;
+  window.requestAnimationFrame = nativeFrame;
   hiddenPageObserver?.disconnect();
   const currentWord = [...document.querySelectorAll('#lyrics .inline-visible .token')].find(e=>e.textContent==='Pageword15 ');
   check('caption word-boundary pages blend and keep the actual timed word visible',
-    pageOpacity.some(o=>o>.05&&o<.95) && currentWord.getClientRects().length>0 && !document.querySelector('.caption-outgoing'),pageOpacity);
+    pageOpacity.some(o=>o>.05&&o<.95) && currentWord.getClientRects().length>0 && !document.querySelector('.caption-outgoing'),
+    {opacity:pageOpacity,frameTimes:pageFrameTimes,styleReads:pageStyleReads,callbacks:pageCallbacks});
   check('the outgoing caption snapshot contains only its visible word-boundary page',
     pageGhosts.length > 0 && pageGhosts.every(g=>g.hidden===0 && g.tokens>0 && g.tokens<20),pageGhosts);
   check('hidden caption pages do not receive repeated glyph style writes during a page transition',
