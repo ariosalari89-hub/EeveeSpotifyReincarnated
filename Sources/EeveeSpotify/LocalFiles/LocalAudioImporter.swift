@@ -1,10 +1,18 @@
 import Foundation
+import AVFoundation
+
+enum LocalAudioImportFailure: String, Error {
+    case notAFile = "local_audio_not_file"
+    case emptyFile = "local_audio_empty"
+    case unreadableAudio = "local_audio_unreadable"
+    case cannotCopy = "local_audio_cannot_copy"
+}
 
 struct LocalAudioImportResult: Identifiable {
     enum Outcome {
         case copied(URL)
         case alreadyPresent(URL)
-        case failed(String)
+        case failed(LocalAudioImportFailure)
     }
 
     let id = UUID()
@@ -31,6 +39,7 @@ final class LocalAudioImporter {
     func importFiles(_ urls: [URL]) -> [LocalAudioImportResult] {
         urls.map { source in
             do {
+                try validate(source)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 var index = 1
                 while true {
@@ -54,8 +63,34 @@ final class LocalAudioImporter {
                 }
             } catch {
                 return LocalAudioImportResult(sourceName: source.lastPathComponent,
-                                              outcome: .failed("Could not copy this audio file."))
+                                              outcome: .failed((error as? LocalAudioImportFailure) ?? .cannotCopy))
             }
+        }
+    }
+
+    private func validate(_ source: URL) throws {
+        guard source.isFileURL,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: source.path),
+              attributes[.type] as? FileAttributeType == .typeRegular else {
+            throw LocalAudioImportFailure.notAFile
+        }
+        guard (attributes[.size] as? NSNumber)?.int64Value ?? 0 > 0 else {
+            throw LocalAudioImportFailure.emptyFile
+        }
+        do {
+            let audio = try AVAudioFile(forReading: source)
+            guard audio.length > 0,
+                  let buffer = AVAudioPCMBuffer(pcmFormat: audio.processingFormat, frameCapacity: 8_192) else {
+                throw LocalAudioImportFailure.unreadableAudio
+            }
+            var decodedFrames: Int64 = 0
+            repeat {
+                try audio.read(into: buffer)
+                decodedFrames += Int64(buffer.frameLength)
+            } while buffer.frameLength > 0
+            guard decodedFrames > 0 else { throw LocalAudioImportFailure.unreadableAudio }
+        } catch {
+            throw LocalAudioImportFailure.unreadableAudio
         }
     }
 }
