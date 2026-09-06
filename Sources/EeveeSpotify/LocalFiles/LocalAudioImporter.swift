@@ -26,7 +26,16 @@ final class LocalAudioImporter {
     }
 
     func importFiles(_ urls: [URL]) -> [LocalAudioImportResult] {
-        urls.map { LocalAudioImportResult(sourceName: $0.lastPathComponent,
-                                          outcome: .failed("Could not read this audio file.")) }
+        urls.map { source in
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let destination = directory.appendingPathComponent(source.lastPathComponent)
+                try FileManager.default.copyItem(at: source, to: destination)
+                return LocalAudioImportResult(sourceName: source.lastPathComponent, outcome: .copied(destination))
+            } catch {
+                return LocalAudioImportResult(sourceName: source.lastPathComponent,
+                                              outcome: .failed("Could not copy this audio file."))
+            }
+        }
     }
 }

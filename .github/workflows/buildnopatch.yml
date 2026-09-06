@@ -134,7 +134,7 @@ jobs:
         run: bash Tests/SpicyLyricsIOS/run.sh
 
       - name: Upload iOS integration result
-        if: always()
+        if: ${{ always() && (!inputs.qa_only || inputs.qa_scope != 'local_audio') }}
         uses: actions/upload-artifact@v4
         with:
           name: SpicyLyrics-iOS-QA
