@@ -45,4 +45,8 @@ final class LocalAudioLibrary {
                                   size: size.int64Value, modified: modified, created: created)
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
+
+    func rename(_ file: LocalAudioFile, toStem stem: String) throws -> LocalAudioFile {
+        throw LocalAudioLibraryFailure.cannotRead
+    }
 }

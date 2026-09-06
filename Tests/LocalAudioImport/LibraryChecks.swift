@@ -23,4 +23,21 @@ func runLocalAudioLibraryChecks() throws {
                    "listing imports must preserve the original and its playable copy")
         print("PASS: imported-file inventory survives re-entry without changing audio")
     }
+    try withDirectories { input, output in
+        let original = input.appendingPathComponent("Before.wav")
+        try makeAudio(at: original)
+        let before = try Data(contentsOf: original)
+        _ = LocalAudioImporter(directory: output).importFiles([original])
+        let library = LocalAudioLibrary(directory: output)
+        let selected = try library.files()[0]
+        let renamed = try library.rename(selected, toStem: "音楽 — After")
+        let reopened = try LocalAudioLibrary(directory: output).files()
+        let renamedBytes = try Data(contentsOf: renamed.fileURL)
+        let originalBytes = try Data(contentsOf: original)
+        try expect(reopened.count == 1 && reopened[0] == renamed && renamed.id == selected.id &&
+                   renamed.name == "音楽 — After.wav" && renamedBytes == before && originalBytes == before &&
+                   tryAudioFrames(renamed.fileURL) == 4_410,
+                   "renaming an imported filename must preserve its identity, extension, audio and external original after re-entry")
+        print("PASS: imported filename rename survives re-entry without changing audio or external original")
+    }
 }
