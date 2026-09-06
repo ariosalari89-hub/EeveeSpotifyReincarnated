@@ -164,7 +164,23 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS: Open Local Files requests the native collection route\nPASS: stop across native page navigation retains completed songs and cancels waiting work\nPASS\n"
                 .write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
         } catch {
-            try? "FAIL: \(error)\n".write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
+            try? await capture("failure")
+            let list = table(in: navigation.view)
+            var visible: [String] = []
+            if let list = list {
+                for section in 0..<list.numberOfSections {
+                    for row in 0..<list.numberOfRows(inSection: section) {
+                        let path = IndexPath(row: row, section: section)
+                        list.scrollToRow(at: path, at: .middle, animated: false)
+                        list.layoutIfNeeded()
+                        if let cell = list.cellForRow(at: path) {
+                            visible.append("\(cell.accessibilityIdentifier ?? "no id"): \(cell.accessibilityLabel ?? "no label") | \(cell.accessibilityValue ?? "no value")")
+                        }
+                    }
+                }
+            }
+            let outputs = ((try? FileManager.default.contentsOfDirectory(atPath: documents.path)) ?? []).filter { $0.hasSuffix(".wav") }
+            try? "FAIL: \(error)\nVISIBLE: \(visible)\nOUTPUTS: \(outputs)\n".write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
         }
     }
 
@@ -202,6 +218,7 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
         try tap("local_files_stop", in: returnedList)
         try expect(cell("local_files_stop", in: returnedList)?.accessibilityTraits.contains(.notEnabled) == true,
                    "Stop must acknowledge its request while the external read is still waiting")
+        mark("Stop acknowledged; releasing the coordinated writer")
         hold.release()
         try await waitUntil("stopping must preserve the completed song and report the uncommitted selection") {
             cell("local_files_result", label: first.lastPathComponent, in: returnedList)?.accessibilityValue == "Copied" &&
