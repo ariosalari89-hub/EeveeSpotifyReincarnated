@@ -134,8 +134,13 @@ final class SpicyLyricsPlaybackBridge {
         ]
         let controls = EeveeSpicyReadControls(playerState)
         for (key, value) in controls { payload[key] = value }
-        let smart = (controls["smartShuffleEnabled"] as? NSNumber)?.boolValue ?? false
-        payload["shuffleMode"] = smart ? "smart" : (snapshot.shuffleEnabled ? "shuffle" : "off")
+        // The native three-state getter is one coherent observation. Do not
+        // rebuild it from the independently sampled clock flag: during Smart
+        // Shuffle -> Off that flag can still say Shuffle for another callback.
+        if controls["shuffleMode"] == nil {
+            let smart = (controls["smartShuffleEnabled"] as? NSNumber)?.boolValue ?? false
+            payload["shuffleMode"] = smart ? "smart" : (snapshot.shuffleEnabled ? "shuffle" : "off")
+        }
         return payload
     }
 
