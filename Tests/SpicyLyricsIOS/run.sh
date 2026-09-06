@@ -68,7 +68,9 @@ QA_VIDEO_PID=$!
 # This is setup time, not a larger app/caption/screenshot assertion deadline.
 recording_ready=false
 for attempt in {1..120}; do
-  if [ -s "$RUNNER_TEMP/qa-session.mp4" ]; then
+  # AVAssetWriter may buffer the MP4 until capture stops; its own startup
+  # acknowledgement, not on-disk file size, establishes recorder readiness.
+  if grep -Fq "Recording started" "$QA_DIR/video.log"; then
     recording_ready=true
     break
   fi
