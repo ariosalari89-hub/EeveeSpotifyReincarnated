@@ -79,6 +79,21 @@ over patching UIKit image views. Scope runtime hooks to validated classes/select
 local audio; normal catalog artwork and unsupported native versions fall through.
 Invalidate artwork/file associations on rename, remove, replacement and rescan.
 
+The 9.1.76 trace additionally establishes that the native player reads `image_url`,
+`thumbnail_image_url`, `image_large_url`, and `image_xlarge_url`. Its v1
+`spotify:localfileimage:<percent-encoded path>` requests use the AVAsset image loader;
+that loader excludes non-ID3 artwork and rejects image data lacking a separate MIME
+attribute. Both native cache-prevention methods return true.
+
+Use a marked local-image request carrying the full local URI for player metadata.
+The guarded native loader resolves that request asynchronously against imported
+copies, so a main-thread metadata getter never scans audio or waits for artwork.
+Native requests for actual imported file paths use the same bounded extraction.
+Unrecognized requests fall through, and ambiguous local identities return no artwork.
+The adapter invokes the native success/error dispatch path, preserving request
+context, delegates and cancellation. No synchronous player getter mutates audio,
+playlist identity, another track, or native view instances.
+
 ## States and constraints
 
 Gradient supports ready, absent/invalid artwork, CORS/native-color fallback, playing,

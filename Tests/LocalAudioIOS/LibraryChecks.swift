@@ -1,10 +1,10 @@
 import UIKit
 
 @MainActor
-func alert(in controller: UIViewController) -> UIAlertController? {
+private func fileAlert(in controller: UIViewController) -> UIAlertController? {
     if let result = controller as? UIAlertController { return result }
-    if let presented = controller.presentedViewController, let result = alert(in: presented) { return result }
-    return controller.children.compactMap { alert(in: $0) }.first
+    if let presented = controller.presentedViewController, let result = fileAlert(in: presented) { return result }
+    return controller.children.compactMap { fileAlert(in: $0) }.first
 }
 
 @MainActor
@@ -19,16 +19,16 @@ extension QAAppDelegate {
         let path = list.indexPath(for: row)!
         list.delegate?.tableView?(list, didSelectRowAt: path)
         try await waitUntil("selecting an imported file must open its native actions") {
-            guard let actions = alert(in: navigation) else { return false }
+            guard let actions = fileAlert(in: navigation) else { return false }
             return actions.viewIfLoaded?.window != nil && !actions.isBeingPresented
         }
-        let actions = alert(in: navigation)!
+        let actions = fileAlert(in: navigation)!
         try expect(actions.title == "Picked song.wav" && actions.actions.map(\.title) == ["Rename file", "Remove file", "Cancel"],
                    "file actions must identify the exact imported filename and offer rename, remove and cancel")
         try await capture("file-actions")
         actions.dismiss(animated: false)
         try await waitUntil("file-action cancellation must return to the unchanged inventory") {
-            alert(in: navigation) == nil && cell("local_files_file", label: "Picked song.wav", in: list) != nil
+            fileAlert(in: navigation) == nil && cell("local_files_file", label: "Picked song.wav", in: list) != nil
         }
     }
 }
