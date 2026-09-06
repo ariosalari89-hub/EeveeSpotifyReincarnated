@@ -34,4 +34,19 @@ func runLocalAudioArtworkServiceChecks() throws {
                    "the native local-track request must return its real red/blue embedded artwork")
         print("PASS: a fully encoded local track resolves embedded artwork asynchronously through the native image-URL seam")
     }
+    try withDirectories { input, output in
+        let original = input.appendingPathComponent("Cover art.mp3")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.mp3"), to: original)
+        _ = LocalAudioImporter(directory: output).importFiles([original])
+        let file = try LocalAudioLibrary(directory: output).files()[0]
+        let encodedPath = file.fileURL.path.utf8.map { String(format: "%%%02X", $0) }.joined()
+        let url = URL(string: "spotify:localfileimage:" + encodedPath)!
+        let service = LocalAudioArtworkService(directory: output)
+        let done = DispatchSemaphore(value: 0)
+        var received: Data?
+        let accepted = service.load(url, isCancelled: { false }) { received = $0; done.signal() }
+        try expect(accepted && done.wait(timeout: .now() + 5) == .success && received != nil,
+                   "native list requests for the actual imported path must use the same embedded-art recovery as the player")
+        print("PASS: the native imported-file image URL recovers actual ID3 cover art")
+    }
 }
