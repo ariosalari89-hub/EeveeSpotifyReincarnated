@@ -15,6 +15,9 @@ final class QASwiftSmartShuffle {
     @objc(shuffleStateWithEntityURL:)
     func shuffleStateWithEntityURL(_ url: NSURL) -> UInt { mode }
 
+    @objc(shuffleStateWithPlayerState:)
+    func shuffleStateWithPlayerState(_ state: NSObject) -> UInt { mode }
+
     @objc(setShuffleState:for:showConfirmationUI:completion:)
     func setShuffleState(_ next: UInt, for url: NSURL, showConfirmationUI: Bool,
                          completion: @escaping (Int) -> Void) {

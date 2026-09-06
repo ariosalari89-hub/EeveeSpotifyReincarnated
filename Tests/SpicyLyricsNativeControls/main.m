@@ -20,10 +20,12 @@ static void require(BOOL condition, NSString *message) {
 @property BOOL offeredPicker;
 @property BOOL rejectChange;
 @property NSUInteger explicitCalls;
+@property BOOL staleSmartFlag;
 @end
 @implementation FakeSmartShuffle
-- (BOOL)checkIsEntitySmartShuffled:(NSURL *)url { return self.mode == 2; }
+- (BOOL)checkIsEntitySmartShuffled:(NSURL *)url { return self.staleSmartFlag || self.mode == 2; }
 - (NSUInteger)shuffleStateWithEntityURL:(NSURL *)url { return self.mode; }
+- (NSUInteger)shuffleStateWithPlayerState:(id)state { return self.mode; }
 - (void)setShuffleState:(NSUInteger)mode for:(NSURL *)url showConfirmationUI:(BOOL)confirmation
     completion:(void (^)(NSInteger))completion {
     require([url.absoluteString isEqualToString:@"spotify:playlist:test"], @"shuffle context lost");
@@ -129,6 +131,17 @@ int main(void) {
         require(EeveeSpicyPerformControl(@"toggleShuffle", state) == 1, @"dispatch is distinct from async result");
         require(![EeveeSpicyReadControls(state)[@"smartShuffleEnabled"] boolValue], @"rejected mode must not be optimistically displayed");
         actions.smartShuffleHandler.rejectChange = NO;
+        // Spotify owns a three-state answer for the current player snapshot.
+        // Its entity recommendation flag can lag the completed mode change.
+        // The presentation must not splice that flag into another snapshot.
+        actions.smartShuffleHandler.mode = 0;
+        ((FakeSmartShuffle *)actions.smartShuffleHandler).staleSmartFlag = YES;
+        NSDictionary *settledOff = EeveeSpicyReadControls(state);
+        require([settledOff[@"shuffleMode"] isEqual:@"off"]
+                && [settledOff[@"shuffleEnabled"] isEqual:@NO]
+                && [settledOff[@"smartShuffleEnabled"] isEqual:@NO],
+                @"confirmed native Off must stay Off while an entity smart flag lags");
+        ((FakeSmartShuffle *)actions.smartShuffleHandler).staleSmartFlag = NO;
         actions.allowed = NO;
         require(EeveeSpicyPerformControl(@"play", state) == 0 && actions.paused, @"restriction must reject resume");
         require(EeveeSpicyPerformControl(@"next", state) == 0 && actions.trackNumber == 0, @"restriction must reject skip");
