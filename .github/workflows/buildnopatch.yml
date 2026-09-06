@@ -123,6 +123,7 @@ jobs:
 
       - name: Test PC background audio analysis
         run: |
+          set -euo pipefail
           xcrun swiftc -swift-version 5 Sources/EeveeSpotify/Lyrics/SpicyLyricsAudioAnalysis.swift \
             Tests/SpicyLyricsAudioAnalysis/main.swift -o "$RUNNER_TEMP/spicy-analysis-tests"
           "$RUNNER_TEMP/spicy-analysis-tests" 2>&1 | tee "$RUNNER_TEMP/spicy-analysis-result.txt"
