@@ -225,6 +225,7 @@ do {
     }
     try runLocalAudioLibraryChecks()
     try runLocalAudioArtworkChecks()
+    try runLocalAudioArtworkServiceChecks()
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)

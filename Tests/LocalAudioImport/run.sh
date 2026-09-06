@@ -5,6 +5,7 @@ xcrun swiftc -swift-version 5 -framework AVFoundation -framework ImageIO \
   Sources/EeveeSpotify/LocalFiles/LocalAudioImporter.swift \
   Sources/EeveeSpotify/LocalFiles/LocalAudioLibrary.swift \
   Sources/EeveeSpotify/LocalFiles/LocalAudioArtworkReader.swift \
+  Sources/EeveeSpotify/LocalFiles/LocalAudioArtworkService.swift \
   Tests/LocalAudioImport/main.swift Tests/LocalAudioImport/LibraryChecks.swift \
-  Tests/LocalAudioImport/ArtworkChecks.swift -o "$QA_DIR/local-audio-tests"
+  Tests/LocalAudioImport/ArtworkChecks.swift Tests/LocalAudioImport/ArtworkServiceChecks.swift -o "$QA_DIR/local-audio-tests"
 "$QA_DIR/local-audio-tests" 2>&1 | tee "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"
