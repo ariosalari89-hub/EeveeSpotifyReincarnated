@@ -29,6 +29,17 @@ scale 1. Fullscreen CSS applies `saturate(2.5) brightness(.65)` in that order.
 The playing speed without audio analysis is 1; initial speed is .1 with the
 engine's own smoothing. Initial transition is 500 ms, later transitions 1000 ms.
 
+The same desktop source optionally obtains Spotify audio analysis from its
+first-party `spclient.wg.spotify.com/audio-attributes/v1/audio-analysis/{id}`
+endpoint. Its section/track tempo and loudness plus confident beat pulses set
+the target speed (clamped .1–3). Carry over that calculation in a bounded native
+current-track provider using the already captured Spotify authorization. Never
+send the token or the analysis request through WebKit. Missing, failed, local,
+stale or malformed analysis uses 1. No analysis is inferred from lyrics or audio
+and no user file is uploaded. Test the numerical contract and URLSession boundary
+independently; the speed preference multiplies this PC target without resetting
+phase. Only the current track can accept a result.
+
 ## Alternatives and selected boundaries
 
 1. Gradient: tuning the existing palette field cannot reproduce the PC spatial
