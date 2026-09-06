@@ -84,10 +84,12 @@ final class LocalAudioImporter {
                 throw LocalAudioImportFailure.unreadableAudio
             }
             var decodedFrames: Int64 = 0
-            repeat {
-                try audio.read(into: buffer)
+            while audio.framePosition < audio.length {
+                let remaining = AVAudioFrameCount(min(Int64(buffer.frameCapacity), audio.length - audio.framePosition))
+                try audio.read(into: buffer, frameCount: remaining)
+                guard buffer.frameLength > 0 else { throw LocalAudioImportFailure.unreadableAudio }
                 decodedFrames += Int64(buffer.frameLength)
-            } while buffer.frameLength > 0
+            }
             guard decodedFrames > 0 else { throw LocalAudioImportFailure.unreadableAudio }
         } catch {
             throw LocalAudioImportFailure.unreadableAudio
