@@ -30,3 +30,18 @@ with tempfile.TemporaryDirectory(prefix="local-art-fixtures-") as work:
             str(fixtures / ("embedded-art." + extension)),
         ], check=True)
         print("Created", "embedded-art." + extension)
+
+# Actual ID3 APIC containers with unusable artwork exercise metadata decoding,
+# rather than passing raw image bytes straight into an internal image helper.
+audio = (fixtures / "synthetic-tone.mp3").read_bytes()
+if audio[:3] == b"ID3":
+    tag_size = sum(value << (7 * (3 - index)) for index, value in enumerate(audio[6:10]))
+    audio = audio[10 + tag_size:]
+wide_png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 20_000, 1, 8, 2, 0, 0, 0))
+wide_png += chunk(b"IDAT", zlib.compress(b"\0" + bytes([224, 40, 48]) * 20_000)) + chunk(b"IEND", b"")
+for name, picture in [("embedded-corrupt.mp3", b"not an image"), ("embedded-oversize.mp3", wide_png)]:
+    payload = b"\0image/png\0\x03\0" + picture
+    frame = b"APIC" + struct.pack(">I", len(payload)) + b"\0\0" + payload
+    size = bytes((len(frame) >> shift) & 127 for shift in (21, 14, 7, 0))
+    (fixtures / name).write_bytes(b"ID3\x03\0\0" + size + frame + audio)
+    print("Created", name)
