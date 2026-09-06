@@ -22,6 +22,11 @@ window.runSpicyTransitionChecks = async function (phase) {
     ? [...(token.querySelector('.letter') ? token.querySelectorAll('.letter') : [token])].every(brightGlyph)
     : Number(getComputedStyle(token,'::after').opacity)===1;
   const check = (name, pass, detail) => results.push({ name, pass, detail });
+  const backgroundPaint = backdrop => {
+    const canvas = backdrop.querySelector('canvas');
+    return getComputedStyle(backdrop).transform + (canvas && !canvas.hidden
+      && getComputedStyle(canvas).display !== 'none' ? canvas.toDataURL() : '');
+  };
   const waitForSteadyFrames = async () => {
     // A cold simulator can still be migrating system data after boot. Require
     // an observable starting cadence, not an arbitrary extra sleep or a lower
@@ -69,14 +74,17 @@ window.runSpicyTransitionChecks = async function (phase) {
     const backdrop=document.querySelector('#artwork-backdrop');
     for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(backdrop.classList.contains('is-animated'))break;}
     const originalLine=document.querySelector('#lyrics .lyric-line');
-    const moves=async()=>{await frame();await frame();const start=getComputedStyle(backdrop).transform;await wait(160);await frame();return start!==getComputedStyle(backdrop).transform;};
+    const moves=async()=>{await frame();await frame();const start=backgroundPaint(backdrop);await wait(160);await frame();return start!==backgroundPaint(backdrop);};
     for(const style of ['artwork','gradient']) {
       const pref={...preferences,backgroundStyle:style};SpicyQA.send('preferences',pref);
       const started=await moves();observe(paused);const pausedStill=!(await moves());
       observe(playing);const resumed=await moves();SpicyQA.send('lifecycle',{state:'hidden'});const hiddenStill=!(await moves());
       SpicyQA.send('preferences',{...pref,dynamicBackground:false});SpicyQA.send('lifecycle',{state:'visible'});
       const offStill=!(await moves());SpicyQA.send('preferences',pref);const reopened=await moves();
+      const beforeReduced=getComputedStyle(backdrop).transform;
       SpicyQA.send('accessibility',{reduceMotion:true});const reducedStill=!(await moves());
+      if(style==='gradient') check('Reduced Motion freezes the gradient without zooming the color field',
+        beforeReduced===getComputedStyle(backdrop).transform,{before:beforeReduced,after:getComputedStyle(backdrop).transform});
       const reducedDisabled=document.querySelector('#background-speed').disabled;
       const reason=document.querySelector('#background-motion-note');
       const explained=Boolean(reason && !reason.hidden && reason.textContent==='Reduced Motion is on');
@@ -154,9 +162,23 @@ window.runSpicyTransitionChecks = async function (phase) {
     if(!slider){check('background speed slider controls both styles without restarting motion',false,{reason:'Speed slider is absent'});return results;}
     const initial={min:slider.min,max:slider.max,value:slider.value};
     const samples=[];
+    const gradientSamples=[];
     for(const style of ['artwork','gradient']) {
       const picker=document.querySelector('#background-style');picker.value=style;picker.dispatchEvent(new Event('change',{bubbles:true}));await frame();
       for(const speed of [25,200]) {
+        if(style==='gradient' && backdrop.querySelector('canvas')) {
+          const canvas=backdrop.querySelector('canvas'),context=canvas.getContext('2d');
+          const pixels=()=>context.getImageData(0,0,canvas.width,canvas.height).data;
+          const before=canvas.toDataURL();
+          slider.value=String(speed);slider.dispatchEvent(new Event('input',{bubbles:true}));
+          slider.dispatchEvent(new Event('change',{bubbles:true}));
+          const continuous=before===canvas.toDataURL();
+          await frame();await frame();const start=pixels(),began=performance.now();
+          await wait(400);await frame();const end=pixels();
+          const change=start.reduce((total,value,index)=>total+Math.abs(value-end[index]),0)/start.length;
+          gradientSamples.push({speed,continuous,changePerSecond:change*1000/(performance.now()-began)});
+          continue;
+        }
         const animation=backdrop.getAnimations()[0],before=Number(animation.currentTime),beforeRate=animation.playbackRate,
           beforeTimeline=Number(document.timeline.currentTime);
         slider.value=String(speed);slider.dispatchEvent(new Event('input',{bubbles:true}));
@@ -173,7 +195,7 @@ window.runSpicyTransitionChecks = async function (phase) {
     }
     const request=SpicyQA.messages.at(-1),output=document.querySelector('#background-speed-output')?.textContent;
     const toggle=document.querySelector('#background-toggle');toggle.checked=false;toggle.dispatchEvent(new Event('change',{bubbles:true}));await frame();await frame();
-    const frozen=getComputedStyle(backdrop).transform;await wait(180);await frame();
+    const frozen=backgroundPaint(backdrop);await wait(180);await frame();
     check('background speed slider controls both styles without restarting motion',
       initial.min==='25' && initial.max==='200' && initial.value==='100'
         // A late frame at 2x legitimately advances over 150 animation ms.
@@ -184,9 +206,12 @@ window.runSpicyTransitionChecks = async function (phase) {
             advance>=elapsed*Math.min(s.beforeRate,s.speed/100)-20
               && advance<=elapsed*Math.max(s.beforeRate,s.speed/100)+20)
           && (s.speed===25?s.rate>.15 && s.rate<.4:s.rate>1.7 && s.rate<2.3))
+        && (gradientSamples.length===0 || (gradientSamples.length===2
+          && gradientSamples.every(s=>s.continuous && s.changePerSecond>0)
+          && gradientSamples[1].changePerSecond>gradientSamples[0].changePerSecond*2))
         && request.type==='setPreference' && request.key==='backgroundSpeed' && request.value===200
-        && output==='2×' && slider.disabled && getComputedStyle(backdrop).transform===frozen,
-      {initial,samples,request,output,disabled:slider.disabled,frozen});
+        && output==='2×' && slider.disabled && backgroundPaint(backdrop)===frozen,
+      {initial,samples,gradientSamples,request,output,disabled:slider.disabled,frozen:frozen.slice(0,80)});
     document.querySelector('#settings-close').click();
   }
   if (phase === 'background-style') {

@@ -53,11 +53,14 @@ try {
             $row=Eval-Motion @"
 (async()=>{
   const layer=document.querySelector('#artwork-backdrop');await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
-  const start=getComputedStyle(layer).transform,times=[],started=performance.now();let previous=started;
+  const canvas=layer.querySelector('canvas'),gradient='$style'==='gradient'&&canvas;
+  const paint=()=>gradient?canvas.toDataURL():getComputedStyle(layer).transform;
+  const start=paint(),times=[],started=performance.now();let previous=started;
   for(const deadline=started+3000;performance.now()<deadline;){await new Promise(requestAnimationFrame);const now=performance.now();times.push(now-previous);previous=now;}
-  const end=getComputedStyle(layer).transform,animation=layer.getAnimations()[0];times.sort((a,b)=>a-b);
-  const rate=animation?.playbackRate,playing=animation?.playState==='running';
-  return JSON.stringify({style:'$style',requested:$rate,start,end,rate,playing,
+  const end=paint(),animation=layer.getAnimations()[0];times.sort((a,b)=>a-b);
+  const configuredRate=Number(document.querySelector('#background-speed').value)/100;
+  const rate=gradient?configuredRate:animation?.playbackRate,playing=gradient?start!==end:animation?.playState==='running';
+  return JSON.stringify({style:'$style',requested:$rate,start:start.slice(0,80),end:end.slice(0,80),rate,playing,
     frames:times.length,medianFrameMs:times[Math.floor(times.length*.5)],p95FrameMs:times[Math.floor(times.length*.95)],
     pass:$rate===0 ? start===end && !playing : start!==end && playing && rate===$rate/100});
 })()

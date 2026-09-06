@@ -24,6 +24,7 @@ c_header = (ROOT / "Sources/EeveeSpotifyC/include/Tweak.h").read_text(encoding="
 # One explicit v5 contract and cache key must cover every shipping asset.
 assert 'src="renderer-model.js?v=5"' in index
 assert 'src="renderer-effects.js?v=5"' in index
+assert 'src="gradient-field.js?v=5"' in index
 assert 'src="renderer.js?v=5"' in index
 assert 'href="styles.css?v=5"' in index
 assert "const RENDERER_PROTOCOL_VERSION = 5" in renderer
@@ -188,6 +189,7 @@ assert node, "Node.js is required for renderer regression tests"
 subprocess.run([node, "--check", str(BUNDLE / "renderer-model.js")], check=True)
 subprocess.run([node, "--check", str(BUNDLE / "renderer.js")], check=True)
 subprocess.run([node, "--check", str(BUNDLE / "renderer-effects.js")], check=True)
+subprocess.run([node, "--check", str(BUNDLE / "gradient-field.js")], check=True)
 subprocess.run([node, str(ROOT / "Tests/SpicyLyricsRenderer/effects.test.js")], check=True)
 subprocess.run(
     [node, "--check", str(ROOT / "Tests/SpicyLyricsRenderer/browser-fixture.js")],

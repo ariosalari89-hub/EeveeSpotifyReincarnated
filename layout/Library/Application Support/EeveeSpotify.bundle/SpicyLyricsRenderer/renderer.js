@@ -211,6 +211,8 @@
       this.style = "artwork";
       this.speed = 100;
       this.palette = [];
+      this.gradientPalette = [];
+      this.gradient = new window.SpicyGradientField(layer);
     }
 
     setEnabled(enabled) { this.enabled = enabled; this.syncMotion(); }
@@ -224,7 +226,8 @@
 
     paint() {
       this.layer.dataset.style = this.style;
-      this.ready = this.style === "gradient" ? this.palette.length > 0 : this.artworkLoaded;
+      this.gradient.setPalette(this.gradientPalette);
+      this.ready = this.style === "gradient" ? this.gradientPalette.length > 0 : this.artworkLoaded;
       // Bright covers need protection behind the glyphs, not a dark film
       // across the entire artwork. Normal/dark covers keep this very light.
       const brightness = Math.max(0, ...this.palette.map(rgb =>
@@ -234,15 +237,15 @@
       if (!this.ready) this.layer.style.backgroundImage = "none";
       else if (this.style !== "gradient") this.layer.style.backgroundImage = `url(${JSON.stringify(this.artwork)})`;
       else {
-        const colors = this.palette.map(rgb => `rgb(${rgb.join(",")})`);
+        const colors = this.gradientPalette.map(rgb => `rgb(${rgb.join(",")})`);
         this.layer.style.backgroundImage = colors.length
-          ? `radial-gradient(ellipse at 15% 20%, ${colors[0]}, transparent 65%), radial-gradient(ellipse at 85% 25%, ${colors[1] || colors[0]}, transparent 65%), radial-gradient(ellipse at 40% 90%, ${colors[2] || colors[0]}, transparent 70%), linear-gradient(135deg, ${colors[3] || colors[0]}, ${colors[1] || colors[0]})`
+          ? `radial-gradient(ellipse 75% 75% at 20% 22%, ${colors[0]} 15%, transparent 68%), radial-gradient(ellipse 75% 75% at 80% 22%, ${colors[1] || colors[0]} 15%, transparent 68%), radial-gradient(ellipse 75% 75% at 20% 80%, ${colors[2] || colors[0]} 15%, transparent 68%), radial-gradient(ellipse 75% 75% at 80% 80%, ${colors[3] || colors[1] || colors[0]} 15%, transparent 68%), linear-gradient(135deg, ${colors[0]}, ${colors[1] || colors[0]})`
           : "none";
       }
       this.syncMotion();
     }
 
-    colorsFrom(image) {
+    colorsFrom(image, accentColors = false) {
       try {
         const canvas = document.createElement("canvas");
         canvas.width = canvas.height = 32;
@@ -259,12 +262,27 @@
           rgb.forEach((c, index) => bucket.sum[index] += c);
           buckets.set(key, bucket);
         }
-        const candidates = [...buckets.values()].map(bucket => ({
+        let candidates = [...buckets.values()].map(bucket => ({
           rgb: bucket.sum.map(c => Math.round(c / bucket.count)), count: bucket.count
         })).sort((a, b) => b.count - a.count);
+        const hue = rgb => {
+          const high = Math.max(...rgb), low = Math.min(...rgb), range = high - low;
+          if (!range) return 0;
+          const sector = high === rgb[0] ? (rgb[1] - rgb[2]) / range
+            : high === rgb[1] ? 2 + (rgb[2] - rgb[0]) / range : 4 + (rgb[0] - rgb[1]) / range;
+          return (sector * 60 + 360) % 360;
+        };
+        if (accentColors) {
+          const accents = candidates.filter(({ rgb, count }) => count >= 3
+            && Math.max(...rgb) >= 56 && Math.max(...rgb) - Math.min(...rgb) >= 24);
+          if (accents.length) candidates = accents.sort((a, b) =>
+            Math.sqrt(b.count) * (Math.max(...b.rgb) - Math.min(...b.rgb))
+            - Math.sqrt(a.count) * (Math.max(...a.rgb) - Math.min(...a.rgb)));
+        }
         const colors = [];
         for (const { rgb } of candidates) {
-          if (colors.every(color => Math.hypot(...rgb.map((c, i) => c - color[i])) > 55)) colors.push(rgb);
+          if (colors.every(color => Math.hypot(...rgb.map((c, i) => c - color[i])) > 55
+            && (!accentColors || Math.min(Math.abs(hue(rgb) - hue(color)), 360 - Math.abs(hue(rgb) - hue(color))) >= 30))) colors.push(rgb);
           if (colors.length === 4) break;
         }
         if (colors.length === 1) colors.push(colors[0].map(c => Math.round(c * .6)));
@@ -273,9 +291,11 @@
     }
 
     syncMotion() {
-      this.layer.classList.toggle("is-animated", this.ready && this.enabled && this.playing
+      const active = this.ready && this.enabled && this.playing
         && state.surface !== "inline" && state.lifecyclePhase === "visible"
-        && !document.hidden && !reduceMotion());
+        && !document.hidden && !reduceMotion();
+      this.layer.classList.toggle("is-animated", active);
+      this.gradient.setMotion(active && this.style === "gradient", this.speed);
       for (const animation of this.layer.getAnimations()) {
         if (animation.playbackRate !== this.speed / 100) animation.updatePlaybackRate(this.speed / 100);
       }
@@ -290,6 +310,7 @@
       const hex = /^#?([0-9a-f]{6})$/i.exec(dominantColor)?.[1];
       const fallback = hex ? [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16)) : null;
       this.palette = fallback ? [fallback, fallback.map(c => Math.round(c * .6))] : [];
+      this.gradientPalette = this.palette;
       this.paint();
       if (!url) return;
       const image = new Image();
@@ -300,6 +321,8 @@
         if (request !== this.artworkRequest) return;
         const sampled = this.colorsFrom(image);
         if (sampled.length) this.palette = sampled;
+        const accents = this.colorsFrom(image, true);
+        if (accents.length) this.gradientPalette = accents;
         this.artworkLoaded = true;
         this.paint();
       };
