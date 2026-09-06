@@ -35,6 +35,10 @@ extension QAAppDelegate {
 
     func verifyNativeFilenameRename(navigation: UINavigationController) async throws {
         mark("Renaming a file through its native swipe action and filename editor")
+        try await waitUntil("the recreated settings host must finish mounting its native table") {
+            guard let host = navigation.topViewController, let list = table(in: host.view) else { return false }
+            return list.window != nil
+        }
         let list = table(in: navigation.topViewController!.view)!
         try await waitUntil("the imported file must be available after native page re-entry") {
             cell("local_files_file", label: "Picked song.wav", in: list) != nil
