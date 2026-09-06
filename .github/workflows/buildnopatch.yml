@@ -133,6 +133,7 @@ jobs:
           path: |
             ${{ runner.temp }}/local-audio-result.txt
             ${{ runner.temp }}/local-audio-ui-result.txt
+            ${{ runner.temp }}/local-audio-ui-progress.txt
             ${{ runner.temp }}/local-audio-*.png
           if-no-files-found: warn
 
@@ -148,6 +149,7 @@ jobs:
           name: LocalAudio-iOS-QA
           path: |
             ${{ runner.temp }}/local-audio-ui-result.txt
+            ${{ runner.temp }}/local-audio-ui-progress.txt
             ${{ runner.temp }}/local-audio-*.png
           if-no-files-found: warn
 

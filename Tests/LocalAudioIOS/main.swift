@@ -88,8 +88,10 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
 
     func run(navigation: UINavigationController) async {
         do {
+            mark("Waiting for native settings page")
             try await waitUntil("the real local-files page did not render") { table(in: navigation.view) != nil }
             let list = table(in: navigation.view)!
+            mark("Opening native audio picker")
             try tap("local_files_import", in: list)
             try await waitUntil("Import audio files must present the actual system document picker") { picker(in: navigation) != nil }
             let systemPicker = picker(in: navigation)!
@@ -99,6 +101,7 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try expect(systemPicker.allowsMultipleSelection && systemPicker.documentPickerMode == .import,
                        "the native picker must select multiple copied files, not edit originals in place")
             try await capture("picker")
+            mark("Submitting selected audio through the native picker delegate")
             let original = FileManager.default.temporaryDirectory.appendingPathComponent("Picked song.wav")
             try makeAudio(at: original)
             let originalBytes = try Data(contentsOf: original)
@@ -113,6 +116,7 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try expect(copiedBytes == originalBytes && preservedBytes == originalBytes && playerInput.length == 4_410,
                        "the visible Copied receipt must correspond to real playable output with the source preserved")
             try await capture("imported")
+            mark("Native import output verified")
             try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS\n"
                 .write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
         } catch {
@@ -121,10 +125,16 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func capture(_ name: String) async throws {
+        mark("Capture requested: " + name)
         try name.write(to: documents.appendingPathComponent("local-audio-capture.txt"), atomically: true, encoding: .utf8)
         try await waitUntil("native screenshot was not captured", seconds: 40) {
             FileManager.default.fileExists(atPath: self.documents.appendingPathComponent("capture-\(name).done").path)
         }
+    }
+
+    func mark(_ message: String) {
+        let line = ISO8601DateFormatter().string(from: Date()) + " " + message
+        try? line.write(to: documents.appendingPathComponent("local-audio-ui-progress.txt"), atomically: true, encoding: .utf8)
     }
 }
 
