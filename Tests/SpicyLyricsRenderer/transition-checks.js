@@ -387,7 +387,7 @@ window.runSpicyTransitionChecks = async function (phase) {
   SpicyQA.scenario('karaoke', { ...paused, positionMs: 500 });
   await wait(350);
   const nativeFrame = window.requestAnimationFrame;
-  const pageCallbacks = [], pageFrameTimes = [], pageStyleReads = [];
+  const pageCallbacks = [], pageFrameTimes = [], pageStyleReads = [], pageLayerProfiles = [];
   let recordPageFrames = true;
   window.requestAnimationFrame = callback => nativeFrame.call(window, timestamp => {
     const started = performance.now();
@@ -422,7 +422,7 @@ window.runSpicyTransitionChecks = async function (phase) {
   const currentWord = [...document.querySelectorAll('#lyrics .inline-visible .token')].find(e=>e.textContent==='Pageword15 ');
   check('caption word-boundary pages blend and keep the actual timed word visible',
     pageOpacity.some(o=>o>.05&&o<.95) && currentWord.getClientRects().length>0 && !document.querySelector('.caption-outgoing'),
-    {opacity:pageOpacity,frameTimes:pageFrameTimes,styleReads:pageStyleReads,callbacks:pageCallbacks});
+    {opacity:pageOpacity,frameTimes:pageFrameTimes,styleReads:pageStyleReads,callbacks:pageCallbacks,layerProfiles:pageLayerProfiles});
   check('the outgoing caption snapshot contains only its visible word-boundary page',
     pageGhosts.length > 0 && pageGhosts.every(g=>g.hidden===0 && g.tokens>0 && g.tokens<20),pageGhosts);
   check('hidden caption pages do not receive repeated glyph style writes during a page transition',
@@ -434,6 +434,36 @@ window.runSpicyTransitionChecks = async function (phase) {
     rewoundWord.getClientRects().length>0 && Math.abs(parseFloat(rewoundWord.style.getPropertyValue('--fill'))-50)<.01
       && Math.abs(parseFloat(rewoundWord.style.getPropertyValue('--gradient-position'))-40)<.01,
     {fill:rewoundWord.style.getPropertyValue('--fill'),gradient:rewoundWord.style.getPropertyValue('--gradient-position')});
+  // Test-only A/B/A diagnosis of WebKit's frame delivery. These overrides do
+  // not change the original assertion above and are removed before any other
+  // phase. No diagnostic style is included in the shipped renderer.
+  if (desktopPaint) {
+    const profileStyle = document.createElement('style');
+    document.head.appendChild(profileStyle);
+    const flatten = ' { will-change: auto !important; backface-visibility: visible !important; }';
+    try {
+      for (const [variant, css] of [
+        ['control-before', ''],
+        ['flatten-descendants', '.lyric-line.effects-near :is(.token,.letter,.dot)' + flatten],
+        ['flatten-all', '.lyric-line.effects-near,.lyric-line.effects-near :is(.token,.letter,.dot)' + flatten],
+        ['control-after', '']
+      ]) {
+        profileStyle.textContent = css;
+        SpicyQA.scenario('karaoke', { ...paused, positionMs: 500 });
+        await wait(350);
+        const before = [];
+        for (let i = 0; i < 6; i++) { await frame(); before.push(performance.now()); }
+        const started = performance.now(), times = [], opacities = [];
+        SpicyQA.observe({ ...paused, positionMs: 15500 });
+        for (const end = started + 400; performance.now() < end;) {
+          await frame();
+          times.push(performance.now() - started);
+          opacities.push(Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity));
+        }
+        pageLayerProfiles.push({variant,before:before.slice(1).map((t,i)=>t-before[i]),times,opacities});
+      }
+    } finally { profileStyle.remove(); }
+  }
   }
 
   if (phase === 'card') {
