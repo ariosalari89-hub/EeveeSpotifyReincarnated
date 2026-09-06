@@ -7,6 +7,9 @@ func runLocalAudioArtworkServiceChecks() throws {
         let original = input.appendingPathComponent("Different filename.m4a")
         try FileManager.default.copyItem(at: URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.m4a"), to: original)
         _ = LocalAudioImporter(directory: output).importFiles([original])
+        let listed = try LocalAudioLibrary(directory: output).files()[0]
+        let lookup = LocalAudioLibrary(directory: output).file(at: listed.fileURL)
+        try expect(lookup == listed, "a native file lookup must reproduce the inventory snapshot; listed=\(listed), lookup=\(String(describing: lookup))")
         let service = LocalAudioArtworkService(directory: output)
         guard let url = service.imageURL(forTrackURI: "spotify:local:A%2FB+%2B+%E9%9F%B3:Windows%3A+Summer:Midnight+Library:0") else {
             throw TestFailure(description: "the player needs a native local-image request for a fully identified local track")
