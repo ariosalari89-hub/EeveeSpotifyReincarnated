@@ -366,13 +366,22 @@ struct QAFailure: Error { let message: String }
         func waitForBoth(_ track: String) async throws {
             for _ in 0..<100 {
                 let js = "document.querySelector('#lyrics')?.textContent.includes('\(track)') === true"
+                // Receiving the next song's DOM does not mean its first frame
+                // has selected a visible caption yet. A tap requires that row.
+                let visibleCaption = """
+                (() => { const row = document.querySelector('#lyrics .inline-visible');
+                  return row?.textContent.includes('\(track)') === true
+                    && row.getClientRects().length > 0
+                    && Number(getComputedStyle(row).opacity) > .99; })()
+                """
                 // Production can replace a slow/terminated WebKit renderer.
                 // Assert against the live UI, never a detached cached WKWebView.
                 if let currentCard = findWeb(card), let currentInline = findWeb(inline) {
                     cardWeb = currentCard
                     inlineWeb = currentInline
                     if (try await cardWeb.evaluateJavaScript(js)) as? Bool == true,
-                       (try await inlineWeb.evaluateJavaScript(js)) as? Bool == true { return }
+                       (try await inlineWeb.evaluateJavaScript(js)) as? Bool == true,
+                       (try await inlineWeb.evaluateJavaScript(visibleCaption)) as? Bool == true { return }
                 }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
@@ -592,6 +601,7 @@ struct QAFailure: Error { let message: String }
         guard resumedAtCurrentPosition else {
             throw QAFailure(message: "embedded lyrics resumed from a stale position after fullscreen closed")
         }
+        try await waitForBoth("track-5")
         checks.append("preview and caption resume from fresh playback after fullscreen closes")
         // A native track refresh may replace every child of the same caption
         // container while fullscreen covers it. Exercise that UIKit operation,

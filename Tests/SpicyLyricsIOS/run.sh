@@ -63,6 +63,28 @@ CONTAINER=$(xcrun simctl get_app_container "$DEVICE" local.spicylyrics.qa data)
 xcrun simctl io "$DEVICE" screenshot --type=png "$QA_DIR/preflight-screen.png"
 xcrun simctl io "$DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/qa-session.mp4" >"$QA_DIR/video.log" 2>&1 &
 QA_VIDEO_PID=$!
+# Cold encoder initialization can consume nearly a minute while blocking other
+# display captures. Establish the recorder before starting any app assertion.
+# This is setup time, not a larger app/caption/screenshot assertion deadline.
+recording_ready=false
+for attempt in {1..120}; do
+  if [ -s "$RUNNER_TEMP/qa-session.mp4" ]; then
+    recording_ready=true
+    break
+  fi
+  if ! kill -0 "$QA_VIDEO_PID" 2>/dev/null; then
+    cat "$QA_DIR/video.log"
+    echo "Simulator recorder exited before producing a video" >&2
+    exit 1
+  fi
+  sleep 1
+done
+cat "$QA_DIR/video.log"
+[ "$recording_ready" = true ] || { echo "Simulator recorder did not initialize before app launch" >&2; exit 1; }
+# A second actual display capture proves that the initialized encoder no longer
+# blocks the screenshot channel used by the app's 60-second handshake.
+xcrun simctl io "$DEVICE" screenshot --type=png "$QA_DIR/recording-preflight-screen.png"
+echo "Simulator recording and screenshot channels ready; launching native suite"
 xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 # Include the conditional 21-second healthy-recovery setup in the suite budget;
 # individual app, rotation, close and screenshot assertions keep their deadlines.
@@ -70,6 +92,7 @@ xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 # only the overall suite budget grows, not any assertion's sampling deadline.
 for iteration in {1..200}; do
   if [ -f "$CONTAINER/Documents/qa-availability-ready.txt" ] && [ ! -f "$CONTAINER/Documents/qa-availability-done.txt" ]; then
+    echo "Availability display capture requested at $(date -u +%FT%TZ)"
     xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/qa-availability-screen.png"
     # A ready DOM/alpha=1 can precede the cold simulator's first composited
     # frame. Keep the fixture alive until both native slots really paint.
