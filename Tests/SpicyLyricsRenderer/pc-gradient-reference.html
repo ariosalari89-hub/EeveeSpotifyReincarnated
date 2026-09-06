@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Desktop gradient parity</title>
+  <style>
+    body { margin: 24px; background: #111; color: white; font: 16px system-ui; }
+    main { display: flex; gap: 20px; }
+    section { width: 360px; }
+    .surface { width: 360px; height: 560px; background: #121212; }
+    canvas { display: block; width: 100%; height: 100%; filter: saturate(2.5) brightness(.65); }
+    canvas[hidden] { display: none; }
+    pre { white-space: pre-wrap; }
+  </style>
+  <script>
+    // Public browser clock/RAF boundary only. Both independent implementations
+    // receive exactly the same deterministic frame timestamps.
+    let now = 0, nextID = 1;
+    const callbacks = new Map();
+    performance.now = () => now;
+    window.requestAnimationFrame = callback => { const id = nextID++; callbacks.set(id, callback); return id; };
+    window.cancelAnimationFrame = id => callbacks.delete(id);
+    window.advanceGradientClock = value => {
+      now = value;
+      const pending = [...callbacks.values()]; callbacks.clear();
+      pending.forEach(callback => callback(now));
+    };
+  </script>
+</head>
+<body>
+  <h1>Desktop gradient parity</h1>
+  <main>
+    <section><h2>Pinned PC renderer</h2><div class="surface"><canvas id="reference"></canvas></div></section>
+    <section><h2>Shipping mobile adapter</h2><div id="mobile" class="surface"></div></section>
+  </main>
+  <pre id="result">Preparing identical artwork and clock…</pre>
+  <script src="../../layout/Library/Application%20Support/EeveeSpotify.bundle/SpicyLyricsRenderer/gradient-field.js"></script>
+  <script type="module" src="pc-gradient-reference.js"></script>
+</body>
+</html>
