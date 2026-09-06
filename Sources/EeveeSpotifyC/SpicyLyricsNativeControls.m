@@ -169,14 +169,10 @@ static BOOL cycleShuffle(id actions, id state) {
     id smart = readObject(actions, @"smartShuffleHandler");
     id context = shuffleContext(state);
     if (!context) return NO;
-    NSInvocation *read = invocation(smart, NSSelectorFromString(@"shuffleStateWithEntityURL:"), 1);
-    if (!read || strcmp(unqualified(read.methodSignature.methodReturnType), "Q") != 0
-        || !isObject([read.methodSignature getArgumentTypeAtIndex:2])) return NO;
-    [read setArgument:&context atIndex:2];
-    [read invoke];
-    NSUInteger current = 0;
-    [read getReturnValue:&current];
-    if (current > 2) return NO;
+    NSNumber *observed = readShuffleState(smart, @"shuffleStateWithPlayerState:", state)
+        ?: readShuffleState(smart, @"shuffleStateWithEntityURL:", context);
+    if (!observed) return NO;
+    NSUInteger current = observed.unsignedIntegerValue;
     BOOL supported = readBool(actions, @"isSmartShuffleSupported", nil, NO).boolValue;
     NSUInteger next = current == 0 ? 1 : (current == 1 && supported ? 2 : 0);
     NSInvocation *call = invocation(smart, NSSelectorFromString(
@@ -198,6 +194,7 @@ static BOOL cycleShuffle(id actions, id state) {
     [call setArgument:&showUI atIndex:4];
     [call setArgument:&completion atIndex:5];
     [call retainArguments];
+    NSLog(@"[SpicyControls] shuffle observed=%lu requested=%lu", (unsigned long)current, (unsigned long)next);
     [call invoke];
     return YES;
 }

@@ -626,7 +626,9 @@
   function blendCaption(ghost, line) {
     if (!ghost) return;
     if (!line?.element || reduceMotion()) { ghost.remove(); return; }
-    const options = { duration: 180, easing: "ease-out" };
+    const options = line.kind === "interlude"
+      ? { duration: 240, easing: "ease-in-out" }
+      : { duration: 180, easing: "ease-out" };
     const distance = Math.max(ghost.offsetHeight, line.element.offsetHeight) + 2;
     const motion = {
       ghost,

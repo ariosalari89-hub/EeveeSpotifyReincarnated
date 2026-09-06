@@ -337,7 +337,7 @@ window.runSpicyTransitionChecks = async function (phase) {
     SpicyQA.observe({...paused,positionMs:2100});
     const entrance=[];
     for(const deadline=performance.now()+420;performance.now()<deadline;){await frame();entrance.push(sample());}
-    check(`${surface}: pause-row entrance fades through the PC envelope instead of appearing fully opaque`,
+    check(`${surface}: pause-row entrance fades through intermediate frames instead of appearing fully opaque`,
       entrance.filter(s=>s.opacity>.05 && s.opacity<.95).length>=3
         && entrance.at(-1).opacity===1 && entrance.at(-1).scale>=.99,entrance);
     check(`${surface}: mobile entrance remains visibly fading beyond the short PC row fade`,

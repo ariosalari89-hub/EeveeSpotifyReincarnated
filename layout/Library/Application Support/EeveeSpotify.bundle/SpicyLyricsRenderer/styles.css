@@ -209,7 +209,9 @@ button { -webkit-tap-highlight-color: transparent; }
 .line-translation { display: block; margin-top: .38em; font-size: .46em; line-height: 1.22; letter-spacing: -.012em; color: var(--muted); font-weight: 630; }
 .lyric-line.background { font-size: calc(var(--lead-font-size) * .75); font-weight: 600; margin: -1% 0 1%; }
 .lyric-line.background.active { opacity: 1; }
-.lyric-line.interlude { min-height: 62px; display: flex; align-items: center; gap: .2em; cursor: default; opacity: 0; transition: opacity .14s ease, transform .14s ease; }
+/* Keep PC scale timing, but give mobile's uneven frame cadence a longer,
+   gently accelerating opacity entrance instead of the 140 ms PC row fade. */
+.lyric-line.interlude { min-height: 62px; display: flex; align-items: center; gap: .2em; cursor: default; opacity: 0; transition: opacity .24s ease-in-out, transform .14s ease; }
 .lyric-line.interlude.active { opacity: 1; }
 .lyric-line.interlude .dot { display: inline-block; font-size: 1.3em; line-height: .65; color: #fff; transform: translateY(calc(var(--effect-y, 0) * 1em / 1.3)); scale: var(--effect-scale, .75); opacity: var(--effect-opacity, .35); }
 .dot-group { display: inline-flex; align-items: center; gap: .18rem; scale: 1; opacity: 1; transform-origin: center; transition: scale .3s ease, opacity .3s ease; }
