@@ -121,6 +121,9 @@ func runLocalAudioArtworkServiceChecks() throws {
         }
         let elapsed = ProcessInfo.processInfo.systemUptime - start
         print(String(format: "MEASURE: 12 native path covers in a 200-song collection: %.3f seconds", elapsed))
+        // A fixture-runtime latency budget for one visible list page, not a
+        // physical-device frame-rate or universal performance claim.
+        try expect(elapsed < 1, "twelve path-based covers must finish within one second in the 200-song native fixture")
     }
 }
 
