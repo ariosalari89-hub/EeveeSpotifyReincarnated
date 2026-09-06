@@ -35,50 +35,13 @@ extension LocalFilesSettingsController {
         return configuration
     }
 
-    private func showRename(_ file: LocalAudioFile, proposed: String? = nil, failure: LocalAudioLibraryFailure? = nil) {
+    private func showRename(_ file: LocalAudioFile) {
         guard viewIfLoaded?.window != nil, presentedViewController == nil else { return }
-        let editor = UIAlertController(title: "local_files_rename".localized,
-                                       message: (failure?.rawValue ?? "local_files_rename_note").localized,
-                                       preferredStyle: .alert)
-        editor.addTextField { [weak self, weak editor] field in
-            field.text = proposed ?? file.fileURL.deletingPathExtension().lastPathComponent
-            field.accessibilityIdentifier = "local_files_filename"
-            field.accessibilityLabel = "local_files_filename".localized
-            field.autocapitalizationType = .none
-            field.autocorrectionType = .no
-            field.spellCheckingType = .no
-            field.clearButtonMode = .whileEditing
-            field.returnKeyType = .done
-            field.enablesReturnKeyAutomatically = true
-            field.addAction(UIAction { [weak self, weak editor] _ in
-                guard let editor = editor else { return }
-                self?.saveRename(file, from: editor)
-            }, for: .editingDidEndOnExit)
-        }
-        editor.addAction(UIAlertAction(title: "local_files_cancel".localized, style: .cancel))
-        editor.addAction(UIAlertAction(title: "local_files_save".localized, style: .default) { [weak self, weak editor] _ in
-            guard let editor = editor else { return }
-            self?.saveRename(file, from: editor)
-        })
-        present(editor, animated: true)
-    }
-
-    private func saveRename(_ file: LocalAudioFile, from editor: UIAlertController) {
-        // UIKit may submit the default action as well as the field's Return
-        // event. One editor can commit only once, including during dismissal.
-        guard let save = editor.actions.last, save.isEnabled else { return }
-        save.isEnabled = false
-        let proposed = editor.textFields?.first?.text ?? ""
-        // Dismissal precedes the filesystem operation, so an immediate failure
-        // can reopen the editor with the user's proposed value intact.
-        let model = self.model
-        let apply = { [weak self] in
-            model.rename(file, toStem: proposed) { [weak self] result in
-                if case .failure(let failure) = result { self?.showRename(file, proposed: proposed, failure: failure) }
-            }
-        }
-        if editor.presentingViewController != nil { editor.dismiss(animated: true, completion: apply) }
-        else { apply() }
+        let editor = LocalAudioRenameController(file: file, model: model)
+        let navigation = UINavigationController(rootViewController: editor)
+        navigation.modalPresentationStyle = .pageSheet
+        navigation.isModalInPresentation = true
+        present(navigation, animated: true)
     }
 
     private func showRemove(_ file: LocalAudioFile) {
