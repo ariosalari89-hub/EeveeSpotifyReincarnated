@@ -38,17 +38,35 @@ func picker(in controller: UIViewController) -> UIDocumentPickerViewController? 
 }
 
 @MainActor
-func tap(_ identifier: String, in table: UITableView) throws {
+func cell(_ identifier: String, in table: UITableView) -> UITableViewCell? {
+    table.layoutIfNeeded()
     for section in 0..<table.numberOfSections {
         for row in 0..<table.numberOfRows(inSection: section) {
             let path = IndexPath(row: row, section: section)
-            guard let cell = table.dataSource?.tableView(table, cellForRowAt: path),
-                  cell.accessibilityIdentifier == identifier else { continue }
-            table.delegate?.tableView?(table, didSelectRowAt: path)
-            return
+            table.scrollToRow(at: path, at: .middle, animated: false)
+            table.layoutIfNeeded()
+            if let cell = table.cellForRow(at: path), cell.accessibilityIdentifier == identifier { return cell }
         }
     }
+    return nil
+}
+
+@MainActor
+func tap(_ identifier: String, in table: UITableView) throws {
+    if let visible = cell(identifier, in: table), let path = table.indexPath(for: visible) {
+        table.delegate?.tableView?(table, didSelectRowAt: path)
+        return
+    }
     throw Failure(description: "visible native action not found: " + identifier)
+}
+
+func makeAudio(at url: URL) throws {
+    let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_410)!
+    buffer.frameLength = 4_410
+    for index in 0..<4_410 { buffer.floatChannelData![0][index] = 0.25 }
+    let file = try AVAudioFile(forWriting: url, settings: format.settings)
+    try file.write(from: buffer)
 }
 
 @MainActor
@@ -81,7 +99,21 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try expect(systemPicker.allowsMultipleSelection && systemPicker.documentPickerMode == .import,
                        "the native picker must select multiple copied files, not edit originals in place")
             try await capture("picker")
-            try "PASS: native import action presents the multi-audio copy picker\nPASS\n"
+            let original = FileManager.default.temporaryDirectory.appendingPathComponent("Picked song.wav")
+            try makeAudio(at: original)
+            let originalBytes = try Data(contentsOf: original)
+            systemPicker.delegate?.documentPicker?(systemPicker, didPickDocumentsAt: [original])
+            try await waitUntil("picker completion must copy the selected song and show its Copied result") {
+                picker(in: navigation) == nil && cell("local_files_result", in: list)?.accessibilityValue == "Copied"
+            }
+            let copied = documents.appendingPathComponent("Picked song.wav")
+            let copiedBytes = try Data(contentsOf: copied)
+            let preservedBytes = try Data(contentsOf: original)
+            let playerInput = try AVAudioFile(forReading: copied)
+            try expect(copiedBytes == originalBytes && preservedBytes == originalBytes && playerInput.length == 4_410,
+                       "the visible Copied receipt must correspond to real playable output with the source preserved")
+            try await capture("imported")
+            try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS\n"
                 .write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
         } catch {
             try? "FAIL: \(error)\n".write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
