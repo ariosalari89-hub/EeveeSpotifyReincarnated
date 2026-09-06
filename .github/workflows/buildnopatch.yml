@@ -21,6 +21,7 @@ on:
         options:
           - all
           - local_audio
+          - local_audio_core
       ipa_url:
         description: "URL to a decrypted Spotify IPA (optional — IPA build is skipped if empty)"
         default: ""
@@ -86,7 +87,7 @@ jobs:
           Tools/SwiftProtobufBuild/build-eeveeswiftprotobuf.sh
 
       - name: Test Spicy Lyrics playback clock
-        if: ${{ !inputs.qa_only || inputs.qa_scope != 'local_audio' }}
+        if: ${{ !inputs.qa_only || !startsWith(inputs.qa_scope, 'local_audio') }}
         run: |
           xcrun swiftc \
             Sources/EeveeSpotify/Lyrics/SpicyLyricsPlaybackClock.swift \
@@ -95,18 +96,18 @@ jobs:
           "$RUNNER_TEMP/spicy-lyrics-clock-tests"
 
       - name: Test Spicy Lyrics renderer bundle
-        if: ${{ !inputs.qa_only || inputs.qa_scope != 'local_audio' }}
+        if: ${{ !inputs.qa_only || !startsWith(inputs.qa_scope, 'local_audio') }}
         run: python3 Tests/SpicyLyricsRenderer/test_bundle.py
 
       - name: Test shared lyric request lifetimes
-        if: ${{ !inputs.qa_only || inputs.qa_scope != 'local_audio' }}
+        if: ${{ !inputs.qa_only || !startsWith(inputs.qa_scope, 'local_audio') }}
         run: |
           xcrun swiftc Sources/EeveeSpotify/Lyrics/SpicyLyricsRequestConsumers.swift \
             Tests/SpicyLyricsRequestConsumers/main.swift -o "$RUNNER_TEMP/spicy-request-tests"
           "$RUNNER_TEMP/spicy-request-tests"
 
       - name: Test native preview feed availability
-        if: ${{ !inputs.qa_only || inputs.qa_scope != 'local_audio' }}
+        if: ${{ !inputs.qa_only || !startsWith(inputs.qa_scope, 'local_audio') }}
         run: |
           xcrun swiftc Sources/EeveeSpotify/Lyrics/SpicyLyricsNativePreview.swift \
             Tests/SpicyLyricsIOS/NativeScrollFeedFixture.swift \
@@ -114,7 +115,7 @@ jobs:
           "$RUNNER_TEMP/spicy-native-preview-tests"
 
       - name: Test Spicy Lyrics native control dispatch
-        if: ${{ !inputs.qa_only || inputs.qa_scope != 'local_audio' }}
+        if: ${{ !inputs.qa_only || !startsWith(inputs.qa_scope, 'local_audio') }}
         run: bash Tests/SpicyLyricsNativeControls/run.sh
 
       - name: Test local audio import output
@@ -138,12 +139,12 @@ jobs:
           if-no-files-found: warn
 
       - name: Test Spicy Lyrics in iOS WebKit and UIKit
-        if: ${{ !inputs.qa_only || inputs.qa_scope != 'local_audio' }}
+        if: ${{ !inputs.qa_only || !startsWith(inputs.qa_scope, 'local_audio') }}
         timeout-minutes: 15
         run: bash Tests/SpicyLyricsIOS/run.sh
 
       - name: Upload shared-simulator local audio verification
-        if: ${{ always() && (!inputs.qa_only || inputs.qa_scope != 'local_audio') }}
+        if: ${{ always() && (!inputs.qa_only || !startsWith(inputs.qa_scope, 'local_audio')) }}
         uses: actions/upload-artifact@v4
         with:
           name: LocalAudio-iOS-QA
@@ -154,7 +155,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload iOS integration result
-        if: ${{ always() && (!inputs.qa_only || inputs.qa_scope != 'local_audio') }}
+        if: ${{ always() && (!inputs.qa_only || !startsWith(inputs.qa_scope, 'local_audio')) }}
         uses: actions/upload-artifact@v4
         with:
           name: SpicyLyrics-iOS-QA

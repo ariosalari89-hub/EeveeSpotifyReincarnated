@@ -178,6 +178,37 @@ do {
         try expect(tryAudioFrames(copied) == 4_410, "a shortened filename must retain playable audio and its extension")
         print("PASS: long Unicode collision names are byte-bounded and remain readable")
     }
+    try withDirectories { input, output in
+        let mp3 = input.appendingPathComponent("Synthetic.mp3")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/synthetic-tone.mp3"), to: mp3)
+        let aac = input.appendingPathComponent("Synthetic.m4a")
+        let pcm = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: pcm, frameCapacity: 11_025)!
+        buffer.frameLength = 11_025
+        for index in 0..<11_025 { buffer.floatChannelData![0][index] = 0.125 }
+        do {
+            let encoder = try AVAudioFile(forWriting: aac, settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44_100,
+                AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 96_000
+            ], commonFormat: .pcmFormatFloat32, interleaved: false)
+            try encoder.write(from: buffer)
+        }
+        for source in [mp3, aac] {
+            let before = try Data(contentsOf: source)
+            let results = LocalAudioImporter(directory: output).importFiles([source])
+            guard case .copied(let copied) = results[0].outcome else {
+                throw TestFailure(description: "supported \(source.pathExtension) audio must import without conversion: \(results[0].outcome)")
+            }
+            let audio = try AVAudioFile(forReading: copied)
+            let decoded = AVAudioPCMBuffer(pcmFormat: audio.processingFormat, frameCapacity: AVAudioFrameCount(min(1_024, audio.length)))!
+            try audio.read(into: decoded)
+            let after = try Data(contentsOf: copied)
+            let original = try Data(contentsOf: source)
+            try expect(decoded.frameLength > 0 && before == after && before == original,
+                       "compressed audio must remain decodable and byte-for-byte unchanged")
+            print("PASS: \(source.pathExtension) imports without transcoding (\(audio.length) readable frames)")
+        }
+    }
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)
