@@ -39,7 +39,15 @@ do {
         let result = LocalAudioImporter(directory: output).importFiles([original])
         try expect(result.count == 1, "one selected file must produce one result")
         guard case .copied(let copied) = result[0].outcome else {
-            throw TestFailure(description: "selected playable audio must be reported as copied")
+            let probe = try AVAudioFile(forReading: original)
+            let probeBuffer = AVAudioPCMBuffer(pcmFormat: probe.processingFormat, frameCapacity: 8_192)!
+            do {
+                try probe.read(into: probeBuffer)
+                print("Fixture audio probe: read=\(probeBuffer.frameLength), position=\(probe.framePosition), length=\(probe.length)")
+                try probe.read(into: probeBuffer)
+                print("Fixture EOF probe: read=\(probeBuffer.frameLength)")
+            } catch { print("Fixture audio probe error: \(error)") }
+            throw TestFailure(description: "selected playable audio must be reported as copied; outcome=\(result[0].outcome)")
         }
         try expect(copied == output.appendingPathComponent("First song.wav"), "the returned song belongs in the native Documents source")
         let copiedBytes = try Data(contentsOf: copied)
