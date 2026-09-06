@@ -12,7 +12,9 @@ xcrun swiftc -swift-version 5 -target "$ARCH-apple-ios17.0-simulator" -sdk "$SDK
   Sources/EeveeSpotify/Lyrics/SpicyLyricsFullscreenCoordinator.swift \
   Sources/EeveeSpotify/Lyrics/SpicyLyricsEmbeddedSurfaces.swift \
   Sources/EeveeSpotify/Lyrics/SpicyLyricsAvailability.swift \
+  Sources/EeveeSpotify/Lyrics/SpicyLyricsNativePreview.swift \
   Sources/EeveeSpotify/Lyrics/SpicyLyricsPreviewEntry.swift \
+  Tests/SpicyLyricsIOS/NativeScrollFeedFixture.swift \
   Tests/SpicyLyricsIOS/main.swift -o "$QA_APP/SpicyLyricsQA"
 cp -R "layout/Library/Application Support/EeveeSpotify.bundle/SpicyLyricsRenderer" "$QA_APP/"
 cp Tests/SpicyLyricsRenderer/browser-fixture.js Tests/SpicyLyricsRenderer/transition-checks.js "$QA_APP/"

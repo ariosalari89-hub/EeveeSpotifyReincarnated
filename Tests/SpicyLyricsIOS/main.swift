@@ -166,11 +166,25 @@ struct QAFailure: Error { let message: String }
         QALyricsPreference.enabled = true
         SpicyLyricsEmbeddedSurfaces.install { QALyricsPreference.enabled }
         SpicyLyricsPlaybackBridge.shared.trackIDOverride = trackID
-        let card = QACardContentView(frame: CGRect(x: 16, y: 200, width: 340, height: 320))
         let caption = QAInlineLyricsView(frame: CGRect(x: 24, y: 140, width: 320, height: 52))
-        // Spotify's native availability gate is the external boundary: it
-        // reads has_lyrics before revealing either lyrics entry surface.
         let nativeAvailable = (track.metadata()["has_lyrics"] as? String) == "true"
+        // Native metadata enables the caption, but the independent server feed
+        // must contain a Lyrics section before a preview is even instantiated.
+        // Do not precreate a card: that hid the user's missing-card regression.
+        let feedURL = URL(string: "https://spclient.wg.spotify.com/scrollsita/v1/scroll/spotify:track:" + trackID)!
+        let originalFeed = NativeScrollFeedFixture.withoutLyrics
+        guard try NativeScrollFeedFixture.cards(in: originalFeed).map(\.kind) == [3, 4] else {
+            throw QAFailure(message: "external feed fixture must start with Explore/Credits and no Lyrics card")
+        }
+        let deliveredFeed = SpicyLyricsNativePreview.restoringMissingCard(
+            in: originalFeed, for: feedURL, enabled: QALyricsPreference.enabled
+        ) ?? originalFeed
+        let nativeCards = try NativeScrollFeedFixture.cards(in: deliveredFeed)
+        guard nativeCards.map(\.kind) == [5, 3, 4],
+              nativeCards.first?.entityURI == "spotify:track:" + trackID else {
+            throw QAFailure(message: "native feed omits the preview despite working caption availability: has_lyrics=\(nativeAvailable), cards=\(nativeCards.map(\.kind))")
+        }
+        let card = QACardContentView(frame: CGRect(x: 16, y: 200, width: 340, height: 320))
         card.isHidden = !nativeAvailable
         caption.isHidden = !nativeAvailable
         source.view.addSubview(card); source.view.addSubview(caption)
@@ -215,7 +229,7 @@ struct QAFailure: Error { let message: String }
         guard track.metadata()["has_lyrics"] as? String == "false" else {
             throw QAFailure(message: "disabled Spicy Lyrics still overrides native availability")
         }
-        checks.append("native has_lyrics=false music track loads the provider in visible card and caption; original metadata, podcasts, local tracks and disabled behavior are preserved")
+        checks.append("native feed without Lyrics gains one preview before preserved Explore/Credits; has_lyrics=false music track paints card and caption; original metadata, podcasts, local tracks and disabled behavior are preserved")
     }
 
     func webView() -> WKWebView? {
