@@ -38,14 +38,15 @@ func picker(in controller: UIViewController) -> UIDocumentPickerViewController? 
 }
 
 @MainActor
-func cell(_ identifier: String, in table: UITableView) -> UITableViewCell? {
+func cell(_ identifier: String, label: String? = nil, in table: UITableView) -> UITableViewCell? {
     table.layoutIfNeeded()
     for section in 0..<table.numberOfSections {
         for row in 0..<table.numberOfRows(inSection: section) {
             let path = IndexPath(row: row, section: section)
             table.scrollToRow(at: path, at: .middle, animated: false)
             table.layoutIfNeeded()
-            if let cell = table.cellForRow(at: path), cell.accessibilityIdentifier == identifier { return cell }
+            if let cell = table.cellForRow(at: path), cell.accessibilityIdentifier == identifier,
+               label == nil || cell.accessibilityLabel == label { return cell }
         }
     }
     return nil
@@ -69,6 +70,37 @@ func makeAudio(at url: URL) throws {
     try file.write(from: buffer)
 }
 
+/// A real coordinated writer at the filesystem boundary holds one selected
+/// fixture while the native UI is exercised. No importer internals are mocked.
+final class CoordinatedInputHold {
+    private let lock = NSLock()
+    private let releaseSignal = DispatchSemaphore(value: 0)
+    private var holding = false
+
+    var isHolding: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return holding
+    }
+
+    init(_ url: URL) {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            var error: NSError?
+            NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: [], error: &error) { _ in
+                lock.lock()
+                holding = true
+                lock.unlock()
+                _ = releaseSignal.wait(timeout: .now() + 30)
+                lock.lock()
+                holding = false
+                lock.unlock()
+            }
+        }
+    }
+
+    func release() { releaseSignal.signal() }
+}
+
 @MainActor
 final class QAAppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
@@ -76,11 +108,7 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
     let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let host = UIHostingController(rootView: LocalFilesSettingsView(openURL: { [weak self] url, completion in
-            self?.openedRoutes.append(url)
-            completion(true)
-        }))
-        host.title = "local_files_title".localized
+        let host = makeHost()
         let navigation = UINavigationController(rootViewController: host)
         let window = UIWindow(frame: UIScreen.main.bounds)
         window.rootViewController = navigation
@@ -88,6 +116,15 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
         self.window = window
         Task { await run(navigation: navigation) }
         return true
+    }
+
+    func makeHost() -> UIViewController {
+        let host = UIHostingController(rootView: LocalFilesSettingsView(openURL: { [weak self] url, completion in
+            self?.openedRoutes.append(url)
+            completion(true)
+        }))
+        host.title = "local_files_title".localized
+        return host
     }
 
     func run(navigation: UINavigationController) async {
@@ -122,12 +159,60 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try tap("local_files_open", in: list)
             try expect(openedRoutes.map(\.absoluteString) == ["spotify:local-files"],
                        "Open Local Files must request Spotify's native collection through the no-effect route boundary")
+            try await stopAcrossNavigation(navigation: navigation)
             mark("Native import output verified")
-            try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS: Open Local Files requests the native collection route\nPASS\n"
+            try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS: Open Local Files requests the native collection route\nPASS: stop across native page navigation retains completed songs and cancels waiting work\nPASS\n"
                 .write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
         } catch {
             try? "FAIL: \(error)\n".write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
         }
+    }
+
+    func stopAcrossNavigation(navigation: UINavigationController) async throws {
+        mark("Testing stop across native page navigation with a coordinated input")
+        let first = FileManager.default.temporaryDirectory.appendingPathComponent("Completed before stop.wav")
+        let blocked = FileManager.default.temporaryDirectory.appendingPathComponent("Waiting to copy.wav")
+        try makeAudio(at: first)
+        try makeAudio(at: blocked)
+        let blockedBytes = try Data(contentsOf: blocked)
+        let hold = CoordinatedInputHold(blocked)
+        defer { hold.release() }
+        try await waitUntil("the external fixture writer did not acquire its file") { hold.isHolding }
+        try tap("local_files_import", in: table(in: navigation.view)!)
+        try await waitUntil("the next native audio picker did not present") {
+            guard let picker = picker(in: navigation) else { return false }
+            return picker.viewIfLoaded?.window != nil && !picker.isBeingPresented
+        }
+        let selection = picker(in: navigation)!
+        selection.delegate?.documentPicker?(selection, didPickDocumentsAt: [first, blocked])
+        try await waitUntil("the first song did not complete while the second input was in use") {
+            picker(in: navigation) == nil &&
+                FileManager.default.fileExists(atPath: self.documents.appendingPathComponent(first.lastPathComponent).path) &&
+                cell("local_files_progress", in: table(in: navigation.view)!)?.accessibilityLabel == "Importing 2 of 2"
+        }
+        navigation.setViewControllers([UIViewController()], animated: false)
+        navigation.setViewControllers([makeHost()], animated: false)
+        try await waitUntil("returning to settings lost the active import") {
+            guard let list = table(in: navigation.view) else { return false }
+            return cell("local_files_progress", in: list)?.accessibilityLabel == "Importing 2 of 2"
+        }
+        let returnedList = table(in: navigation.view)!
+        try expect(cell("local_files_import", in: returnedList)?.isUserInteractionEnabled == false,
+                   "a running import must not allow a second selection to replace it")
+        try tap("local_files_stop", in: returnedList)
+        try expect(cell("local_files_stop", in: returnedList)?.accessibilityTraits.contains(.notEnabled) == true,
+                   "Stop must acknowledge its request while the external read is still waiting")
+        hold.release()
+        try await waitUntil("stopping must preserve the completed song and report the uncommitted selection") {
+            cell("local_files_result", label: first.lastPathComponent, in: returnedList)?.accessibilityValue == "Copied" &&
+                cell("local_files_result", label: blocked.lastPathComponent, in: returnedList)?.accessibilityValue == "Not copied — stopped"
+        }
+        let kept = try AVAudioFile(forReading: documents.appendingPathComponent(first.lastPathComponent))
+        let originalAfter = try Data(contentsOf: blocked)
+        try expect(kept.length == 4_410 && originalAfter == blockedBytes &&
+                   !FileManager.default.fileExists(atPath: documents.appendingPathComponent(blocked.lastPathComponent).path),
+                   "the native cancellation receipt must agree with actual files and preserved originals")
+        try await capture("stopped")
     }
 
     func capture(_ name: String) async throws {
