@@ -56,6 +56,106 @@ window.runSpicyTransitionChecks = async function (phase) {
   const bootstrap = (surface, reduceMotion = false) => SpicyQA.send('bootstrap', {
     surface, reduceMotion, preferences: { fontSize: 100, playbackOffset: 0, dynamicBackground: false }
   });
+  if (phase === 'background-speed') {
+    SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{dynamicBackground:true}});
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=16;
+    const ctx=canvas.getContext('2d');ctx.fillStyle='#cc3333';ctx.fillRect(0,0,8,16);
+    ctx.fillStyle='#3366cc';ctx.fillRect(8,0,8,16);
+    SpicyQA.sendSession({track:{...SpicyQA.tracks.karaoke,artwork:canvas.toDataURL()},isPlaying:true,isPaused:false,isAdvancing:true});
+    const backdrop=document.querySelector('#artwork-backdrop');
+    for(const deadline=performance.now()+3000;performance.now()<deadline;) {await frame();if(backdrop.classList.contains('is-animated'))break;}
+    document.querySelector('#settings-button').click();await frame();
+    const slider=document.querySelector('#background-speed');
+    if(!slider){check('background speed slider controls both styles without restarting motion',false,{reason:'Speed slider is absent'});return results;}
+    const initial={min:slider.min,max:slider.max,value:slider.value};
+    const samples=[];
+    for(const style of ['artwork','gradient']) {
+      const picker=document.querySelector('#background-style');picker.value=style;picker.dispatchEvent(new Event('change',{bubbles:true}));await frame();
+      for(const speed of [25,200]) {
+        const animation=backdrop.getAnimations()[0],before=Number(animation.currentTime);
+        slider.value=String(speed);slider.dispatchEvent(new Event('input',{bubbles:true}));
+        slider.dispatchEvent(new Event('change',{bubbles:true}));await frame();
+        const start=performance.now(),time=Number(animation.currentTime),paint=getComputedStyle(backdrop).transform;
+        await wait(280);await frame();
+        samples.push({style,speed,rate:(Number(animation.currentTime)-time)/(performance.now()-start),jump:Math.abs(time-before),moving:paint!==getComputedStyle(backdrop).transform});
+      }
+    }
+    const request=SpicyQA.messages.at(-1),output=document.querySelector('#background-speed-output')?.textContent;
+    const toggle=document.querySelector('#background-toggle');toggle.checked=false;toggle.dispatchEvent(new Event('change',{bubbles:true}));await frame();await frame();
+    const frozen=getComputedStyle(backdrop).transform;await wait(180);await frame();
+    check('background speed slider controls both styles without restarting motion',
+      initial.min==='25' && initial.max==='200' && initial.value==='100'
+        && samples.every(s=>s.moving && s.jump<150 && (s.speed===25?s.rate>.15 && s.rate<.4:s.rate>1.7 && s.rate<2.3))
+        && request.type==='setPreference' && request.key==='backgroundSpeed' && request.value===200
+        && output==='2×' && slider.disabled && getComputedStyle(backdrop).transform===frozen,
+      {initial,samples,request,output,disabled:slider.disabled,frozen});
+  }
+  if (phase === 'background-style') {
+    bootstrap('fullscreen',true);
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=64;
+    const ctx=canvas.getContext('2d');ctx.fillStyle='#cc3333';ctx.fillRect(0,0,32,64);
+    ctx.fillStyle='#3366cc';ctx.fillRect(32,0,32,64);
+    const artwork=canvas.toDataURL(), track={...SpicyQA.tracks.karaoke,artwork};
+    SpicyQA.sendSession({...paused,track,positionMs:7400});
+    const backdrop=document.querySelector('#artwork-backdrop');
+    for(const deadline=performance.now()+3000;performance.now()<deadline;) {
+      await frame();if(getComputedStyle(backdrop).backgroundImage.includes(artwork))break;
+    }
+    document.querySelector('#settings-button').click();await frame();
+    const picker=document.querySelector('#background-style');
+    if(!picker){check('lyric settings offer cover art and a cover-derived gradient',false,{reason:'Background style control is absent'});return results;}
+    const defaultStyle=picker.value;
+    picker.value='gradient';picker.dispatchEvent(new Event('change',{bubbles:true}));await frame();
+    const gradient=getComputedStyle(backdrop).backgroundImage;
+    const request=SpicyQA.messages.at(-1);
+    check('lyric settings offer cover art and a cover-derived gradient',
+      defaultStyle==='artwork' && picker.options.length===2
+        && gradient.includes('radial-gradient') && !gradient.includes('url(')
+        && gradient.includes('204, 51, 51') && gradient.includes('51, 102, 204')
+        && request.type==='setPreference' && request.key==='backgroundStyle' && request.value==='gradient',
+      {defaultStyle,gradient,request});
+  }
+  if (phase === 'shuffle-availability') {
+    bootstrap('fullscreen', true);
+    const smart = {...paused,shuffleMode:'smart',shuffleEnabled:true,smartShuffleAvailable:true,canToggleShuffle:true};
+    const off = {...smart,shuffleMode:'off',shuffleEnabled:false};
+    SpicyQA.scenario('karaoke',smart);await frame();
+    const button=document.querySelector('#shuffle-button');
+    button.click();const request=SpicyQA.messages.at(-1);
+    SpicyQA.send('commandResult',{requestId:request.requestId,accepted:true});
+    const frames=[];
+    for(const observation of [{...smart,canToggleShuffle:false},{...off,canToggleShuffle:false},off]) {
+      SpicyQA.observe(observation);
+      for(let i=0;i<4;i++) {await frame();frames.push({mode:button.dataset.mode,
+        opacity:Number(getComputedStyle(button).opacity),disabled:button.disabled,
+        busy:button.getAttribute('aria-busy')});}
+    }
+    for(const deadline=performance.now()+500;button.classList.contains('pending') && performance.now()<deadline;) await frame();
+    check('temporary native shuffle unavailability never dims the in-flight button',
+      frames.every(s=>s.opacity>=.85) && frames.slice(0,8).every(s=>s.disabled && s.busy==='true')
+        && button.dataset.mode==='off' && !button.disabled && !button.classList.contains('pending'),{frames});
+  }
+  if (phase === 'shuffle-settlement') {
+    bootstrap('fullscreen',true);
+    const smart={...paused,shuffleMode:'smart',shuffleEnabled:true,smartShuffleAvailable:true};
+    const off={...smart,shuffleMode:'off',shuffleEnabled:false};
+    const ordinary={...smart,shuffleMode:'shuffle'};
+    SpicyQA.scenario('karaoke',smart);await frame();await frame();
+    const button=document.querySelector('#shuffle-button');
+    button.click();const request=SpicyQA.messages.at(-1);
+    SpicyQA.send('commandResult',{requestId:request.requestId,accepted:true});
+    // Two native publications may run before WebKit paints either one. An
+    // early target observation must not release an unfinished transition.
+    SpicyQA.observe(off);SpicyQA.observe(ordinary);
+    const frames=[];
+    for(let i=0;i<4;i++){await frame();frames.push({mode:button.dataset.mode,busy:button.getAttribute('aria-busy')});}
+    SpicyQA.observe(off);await wait(160);SpicyQA.observe(off);
+    for(let i=0;i<4;i++){await frame();frames.push({mode:button.dataset.mode,busy:button.getAttribute('aria-busy')});}
+    check('an early Off publication cannot expose intermediate ordinary Shuffle before final Off',
+      frames.slice(0,4).every(s=>s.mode==='smart' && s.busy==='true')
+        && frames.every(s=>s.mode!=='shuffle') && frames.at(-1).mode==='off'
+        && !button.classList.contains('pending'),{frames});
+  }
   if (phase.startsWith('desktop-layout-')) {
     const surface=phase.slice('desktop-layout-'.length);
     bootstrap(surface,true);
@@ -148,7 +248,7 @@ window.runSpicyTransitionChecks = async function (phase) {
     SpicyQA.send('commandResult',{requestId:request.requestId,accepted:true});
     SpicyQA.observe(ordinary);await frame();
     const transient={mode:button.dataset.mode,label:button.getAttribute('aria-label'),pending:button.classList.contains('pending')};
-    SpicyQA.observe(off);await frame();
+    SpicyQA.observe(off);await wait(160);SpicyQA.observe(off);await frame();
     check('Smart Shuffle to Off does not flash the intermediate ordinary Shuffle state',
       transient.mode==='smart' && transient.pending && button.dataset.mode==='off' && !button.classList.contains('pending'),transient);
     SpicyQA.observe(smart);button.click();request=SpicyQA.messages.at(-1);
@@ -159,11 +259,13 @@ window.runSpicyTransitionChecks = async function (phase) {
     for(const deadline=performance.now()+100;performance.now()<deadline;){
       await frame();beforeAcknowledgement.push({mode:button.dataset.mode,opacity:getComputedStyle(button).opacity});
     }
-    SpicyQA.send('commandResult',{requestId:request.requestId,accepted:true});await frame();
-    const confirmedOpacity=getComputedStyle(button).opacity;
+    SpicyQA.send('commandResult',{requestId:request.requestId,accepted:true});
+    SpicyQA.observe(off);await wait(160);SpicyQA.observe(off);await frame();
+    const confirmedOpacity=Number(getComputedStyle(button).opacity);
     check('native Off arriving before dispatch acknowledgement never paints a temporary dim flash',
-      beforeAcknowledgement.length>=3 && beforeAcknowledgement.every(s=>s.mode==='off' && s.opacity===confirmedOpacity)
-        && !button.classList.contains('pending'),{beforeAcknowledgement,confirmedOpacity});
+      beforeAcknowledgement.length>=3 && beforeAcknowledgement.every(s=>s.mode==='smart' && Number(s.opacity)>=.85)
+        && button.dataset.mode==='off' && confirmedOpacity>=.85 && !button.classList.contains('pending'),
+      {beforeAcknowledgement,confirmedOpacity});
     check('a pending shuffle command cannot dispatch a duplicate',
       SpicyQA.messages.filter(m=>m.type==='toggleShuffle').length===count);
     SpicyQA.observe(smart);button.click();request=SpicyQA.messages.at(-1);

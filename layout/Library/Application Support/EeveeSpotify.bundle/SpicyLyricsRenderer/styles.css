@@ -45,6 +45,17 @@ button { -webkit-tap-highlight-color: transparent; }
   animation-play-state: paused;
 }
 #artwork-backdrop.is-animated { animation-play-state: running; }
+#artwork-backdrop[data-style="gradient"] {
+  filter: saturate(1.18);
+  background-size: 100% 100%;
+  transform: scale(1.5);
+  animation-name: gradient-drift;
+}
+@keyframes gradient-drift {
+  0%, 100% { transform: scale(1.5) translate3d(-5%, -3%, 0) rotate(-6deg); }
+  33% { transform: scale(1.6) translate3d(5%, 4%, 0) rotate(6deg); }
+  66% { transform: scale(1.55) translate3d(-2%, 5%, 0) rotate(-3deg); }
+}
 @keyframes artwork-drift {
   from { transform: scale(1.24) translate3d(-1%, 1%, 0); }
   to { transform: scale(1.28) translate3d(1%, -1%, 0); }
@@ -261,6 +272,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .transport-button svg.smart-shuffle-mark { display: none; position: absolute; top: 0; left: 1px; width: 13px; height: 13px; }
 #shuffle-button[data-mode="smart"] .smart-shuffle-mark { display: block; }
 .transport-button:disabled { opacity: .28; pointer-events: none; }
+#shuffle-button.pending:disabled { opacity: .9; }
+#shuffle-button.pending.active:disabled { opacity: 1; }
 .repeat-one { display: none; position: absolute; inset: 0; place-items: center; padding-top: 1px; font-size: 8px; font-weight: 900; color: currentColor; }
 #repeat-button[data-mode="track"] .repeat-one { display: grid; }
 #repeat-button[data-mode="track"] svg { opacity: .82; }
@@ -289,6 +302,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-off
 .setting-row input::after { content: ""; display: block; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.3); transition: transform .25s var(--ease-spring); }
 .setting-row input:checked { background: #1ed760; }
 .setting-row input:checked::after { transform: translateX(20px); }
+.setting-row select { max-width: 55%; min-height: 44px; border: 1px solid rgba(255,255,255,.24); border-radius: 8px; padding: 0 10px; background: #292929; color: #fff; font: inherit; font-size: 14px; }
 .setting-range { display: block; padding: 17px 0 12px; border-top: 1px solid rgba(255,255,255,.09); }
 .setting-range span { display: flex; justify-content: space-between; margin-bottom: 9px; }
 .setting-range output { color: var(--muted); font-size: 12px; }

@@ -719,8 +719,69 @@ struct QAFailure: Error { let message: String }
         SpicyLyricsFullscreenCoordinator.shared.close()
         try await Task.sleep(nanoseconds: 500_000_000)
     }
+    func testBackgroundPreferences() async throws {
+        let full = UIViewController(), preview = UIViewController()
+        for (index, child) in [full, preview].enumerated() {
+            source.addChild(child)
+            child.view.frame = CGRect(x: 0, y: 40 + index * 350, width: 360, height: 340)
+            source.view.addSubview(child.view)
+            child.didMove(toParent: source)
+        }
+        var fullHost = SpicyLyricsFullscreenHost(controller: full)
+        let previewHost = SpicyLyricsFullscreenHost(controller: preview, surface: .card)
+        defer {
+            fullHost.detach(); previewHost.detach()
+            for child in [full, preview] {
+                child.willMove(toParent: nil); child.view.removeFromSuperview(); child.removeFromParent()
+            }
+        }
+        guard fullHost.attach(), previewHost.attach() else { throw QAFailure(message: "settings hosts did not attach") }
+        func web(_ controller: UIViewController) -> WKWebView? {
+            controller.view.subviews.compactMap { $0 as? WKWebView }.first
+        }
+        func require(_ controller: UIViewController, _ predicate: String, _ label: String) async throws {
+            for _ in 0..<100 {
+                if let current = web(controller),
+                   (try? await current.evaluateJavaScript("Boolean(window.SpicyNative && (\(predicate)))")) as? Bool == true { return }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            let detail = try? await web(controller)?.evaluateJavaScript("JSON.stringify({style:document.querySelector('#background-style')?.value,speed:document.querySelector('#background-speed')?.value,dynamic:document.querySelector('#background-toggle')?.checked})")
+            throw QAFailure(message: "\(label): \(String(describing: detail))")
+        }
+        try await require(full, "document.querySelector('#lyrics .lyric-line')", "fullscreen settings ready")
+        try await require(preview, "document.querySelector('#lyrics .lyric-line')", "preview settings ready")
+        previewHost.setContentFrame(CGRect(x: 16, y: 40, width: 328, height: 280))
+        _ = try await web(preview)?.evaluateJavaScript("window.qaPreferenceLine = document.querySelector('#lyrics .lyric-line'); true")
+        _ = try await web(full)?.evaluateJavaScript("""
+        (() => {
+          document.querySelector('#settings-button').click();
+          const style=document.querySelector('#background-style'); style.value='gradient'; style.dispatchEvent(new Event('change',{bubbles:true}));
+          const speed=document.querySelector('#background-speed'); speed.value='175'; speed.dispatchEvent(new Event('input',{bubbles:true})); speed.dispatchEvent(new Event('change',{bubbles:true}));
+          const dynamic=document.querySelector('#background-toggle'); dynamic.checked=false; dynamic.dispatchEvent(new Event('change',{bubbles:true})); return true;
+        })()
+        """)
+        let saved = "document.querySelector('#background-style').value === 'gradient' && document.querySelector('#background-speed').value === '175' && !document.querySelector('#background-toggle').checked"
+        try await require(preview, saved, "live preview did not receive saved background preferences")
+        try await require(preview, "window.qaPreferenceLine === document.querySelector('#lyrics .lyric-line') && getComputedStyle(document.documentElement).getPropertyValue('--card-content-y') === '40px'", "settings reset preview lyrics or native layout")
+        fullHost.detach()
+        fullHost = SpicyLyricsFullscreenHost(controller: full)
+        guard fullHost.attach() else { throw QAFailure(message: "settings reopen did not attach") }
+        try await require(full, saved, "background preferences did not survive a new native host")
+        _ = try await web(full)?.evaluateJavaScript("""
+        (() => {
+          const style=document.querySelector('#background-style'); style.value='artwork'; style.dispatchEvent(new Event('change',{bubbles:true}));
+          const speed=document.querySelector('#background-speed'); speed.value='100'; speed.dispatchEvent(new Event('input',{bubbles:true})); speed.dispatchEvent(new Event('change',{bubbles:true}));
+          const dynamic=document.querySelector('#background-toggle'); dynamic.checked=true; dynamic.dispatchEvent(new Event('change',{bubbles:true})); return true;
+        })()
+        """)
+        try await require(preview, "document.querySelector('#background-style').value === 'artwork' && document.querySelector('#background-speed').value === '100' && document.querySelector('#background-toggle').checked", "restored settings did not reach preview")
+        checks.append("native settings persist style, speed and dynamic mode across hosts; live preview retains its lyric DOM and native content frame")
+    }
+
     func run() async {
         do {
+            checkpoint("testing native background preferences")
+            try await testBackgroundPreferences()
             checkpoint("starting native availability")
             try await testNativeAvailability()
             checkpoint("native availability and actual display capture passed")

@@ -99,7 +99,9 @@
     </div>
     <label class="setting-row"><span><strong>Romanized lyrics</strong><small>Use transliterated text when available</small></span><input id="romanized-toggle" type="checkbox"></label>
     <label class="setting-row"><span><strong>Translations</strong><small>Show translated lines below lyrics</small></span><input id="translation-toggle" type="checkbox" checked></label>
-    <label class="setting-row"><span><strong>Dynamic background</strong><small>Slowly move the blurred cover art</small></span><input id="background-toggle" type="checkbox" checked></label>
+    <label class="setting-row"><strong>Background style</strong><select id="background-style"><option value="artwork">Cover art</option><option value="gradient">Gradient</option></select></label>
+    <label class="setting-row"><strong>Dynamic background</strong><input id="background-toggle" type="checkbox" checked></label>
+    <label class="setting-range"><span><strong>Background speed</strong><output id="background-speed-output">1×</output></span><input id="background-speed" type="range" min="25" max="200" value="100" step="5" aria-label="Background speed"></label>
     <label class="setting-range"><span><strong>Lyric size</strong><output id="font-output">100%</output></span><input id="font-size" type="range" min="82" max="126" value="100" step="2" aria-label="Lyric size"></label>
     <label class="setting-range"><span><strong>Playback offset</strong><output id="offset-output">0 ms</output></span><small>Positive values delay lyrics; negative values show them earlier.</small><input id="playback-offset" type="range" min="-5000" max="5000" value="0" step="10" aria-label="Playback offset in milliseconds"></label>
     <p class="provider-note">Lyrics provided by Spicy Lyrics</p>

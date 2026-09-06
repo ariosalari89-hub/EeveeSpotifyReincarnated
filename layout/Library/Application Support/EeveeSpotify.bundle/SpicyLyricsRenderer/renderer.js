@@ -39,6 +39,9 @@
     romanized: $("#romanized-toggle"),
     translations: $("#translation-toggle"),
     background: $("#background-toggle"),
+    backgroundStyle: $("#background-style"),
+    backgroundSpeed: $("#background-speed"),
+    backgroundSpeedOutput: $("#background-speed-output"),
     fontSize: $("#font-size"),
     fontOutput: $("#font-output"),
     playbackOffset: $("#playback-offset"),
@@ -83,6 +86,8 @@
       romanized: Boolean(storedPreferences.romanized),
       translations: storedPreferences.translations !== false,
       dynamicBackground: storedPreferences.dynamicBackground !== false,
+      backgroundStyle: storedPreferences.backgroundStyle === "gradient" ? "gradient" : "artwork",
+      backgroundSpeed: model.clamp(model.finite(storedPreferences.backgroundSpeed, 100), 25, 200),
       fontSize: model.clamp(model.finite(storedPreferences.fontSize, 100), 82, 126),
       playbackOffset: model.clamp(storedOffset, -5000, 5000)
     }
@@ -170,6 +175,22 @@
         }
         return;
       }
+      if (pending.type === "toggleShuffle") {
+        const session = state.session;
+        if (!session || pending.baseline?.generation !== session.generation
+            || pending.baseline?.trackId !== session.trackId
+            || !model.commandObserved(pending.type, pending.baseline, session)) {
+          pending.shuffleObservation = null;
+          return;
+        }
+        // Native recommendation/player updates can briefly publish the target
+        // before an intermediate mode. Keep the last confirmed presentation
+        // until another fresh observation agrees across a short quiet window.
+        pending.shuffleObservation ||= { since: performance.now(), sequence: session.sequence };
+        if (session.canToggleShuffle && session.sequence !== pending.shuffleObservation.sequence
+            && performance.now() - pending.shuffleObservation.since >= 120) settleCommand(requestId);
+        return;
+      }
       if (model.commandObserved(pending.type, pending.baseline, state.session)) {
         settleCommand(requestId);
       }
@@ -184,15 +205,70 @@
       this.enabled = true;
       this.playing = false;
       this.ready = false;
+      this.style = "artwork";
+      this.speed = 100;
+      this.palette = [];
     }
 
     setEnabled(enabled) { this.enabled = enabled; this.syncMotion(); }
     setPlaying(playing) { this.playing = playing; this.syncMotion(); }
+    setSpeed(speed) { this.speed = speed; this.syncMotion(); }
+    setStyle(style) {
+      if (this.style === style) return;
+      this.style = style;
+      this.paint();
+    }
+
+    paint() {
+      this.layer.dataset.style = this.style;
+      if (!this.ready) this.layer.style.backgroundImage = "none";
+      else if (this.style !== "gradient") this.layer.style.backgroundImage = `url(${JSON.stringify(this.artwork)})`;
+      else {
+        const colors = this.palette.map(rgb => `rgb(${rgb.join(",")})`);
+        this.layer.style.backgroundImage = colors.length
+          ? `radial-gradient(ellipse at 15% 20%, ${colors[0]}, transparent 65%), radial-gradient(ellipse at 85% 25%, ${colors[1] || colors[0]}, transparent 65%), radial-gradient(ellipse at 40% 90%, ${colors[2] || colors[0]}, transparent 70%), linear-gradient(135deg, ${colors[3] || colors[0]}, ${colors[1] || colors[0]})`
+          : "none";
+      }
+      this.syncMotion();
+    }
+
+    colorsFrom(image) {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 32;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        context.drawImage(image, 0, 0, 32, 32);
+        const pixels = context.getImageData(0, 0, 32, 32).data;
+        const buckets = new Map();
+        for (let i = 0; i < pixels.length; i += 4) {
+          if (pixels[i + 3] < 128) continue;
+          const rgb = [pixels[i], pixels[i + 1], pixels[i + 2]];
+          const key = rgb.map(c => c >> 5).join(",");
+          const bucket = buckets.get(key) || { count: 0, sum: [0, 0, 0] };
+          bucket.count++;
+          rgb.forEach((c, index) => bucket.sum[index] += c);
+          buckets.set(key, bucket);
+        }
+        const candidates = [...buckets.values()].map(bucket => ({
+          rgb: bucket.sum.map(c => Math.round(c / bucket.count)), count: bucket.count
+        })).sort((a, b) => b.count - a.count);
+        const colors = [];
+        for (const { rgb } of candidates) {
+          if (colors.every(color => Math.hypot(...rgb.map((c, i) => c - color[i])) > 55)) colors.push(rgb);
+          if (colors.length === 4) break;
+        }
+        if (colors.length === 1) colors.push(colors[0].map(c => Math.round(c * .6)));
+        return colors;
+      } catch (_) { return []; }
+    }
 
     syncMotion() {
       this.layer.classList.toggle("is-animated", this.ready && this.enabled && this.playing
         && state.surface !== "inline" && state.lifecyclePhase === "visible"
         && !document.hidden && !reduceMotion());
+      for (const animation of this.layer.getAnimations()) {
+        if (animation.playbackRate !== this.speed / 100) animation.updatePlaybackRate(this.speed / 100);
+      }
     }
 
     setArtwork(url) {
@@ -200,6 +276,7 @@
       this.artwork = url;
       const request = ++this.artworkRequest;
       this.ready = false;
+      this.palette = [];
       this.layer.style.backgroundImage = "none";
       this.syncMotion();
       if (!url) return;
@@ -207,9 +284,9 @@
       image.decoding = "async";
       image.onload = () => {
         if (request !== this.artworkRequest) return;
-        this.layer.style.backgroundImage = `url(${JSON.stringify(url)})`;
+        this.palette = this.colorsFrom(image);
         this.ready = true;
-        this.syncMotion();
+        this.paint();
       };
       // A failed image stays on the neutral background, never the prior song.
       image.onerror = () => {
@@ -346,8 +423,7 @@
     dom.shuffle.disabled = !session.canToggleShuffle;
     const shuffleCommand = [...state.pendingCommands.values()].find(command => command.type === "toggleShuffle"
       && command.baseline?.generation === session.generation && command.baseline?.trackId === session.trackId);
-    const shuffleMode = shuffleCommand && !model.commandObserved("toggleShuffle", shuffleCommand.baseline, session)
-      ? shuffleCommand.baseline.shuffleMode : session.shuffleMode;
+    const shuffleMode = shuffleCommand ? shuffleCommand.baseline.shuffleMode : session.shuffleMode;
     dom.shuffle.dataset.mode = shuffleMode;
     dom.shuffle.classList.toggle("active", shuffleMode !== "off");
     dom.shuffle.setAttribute("aria-pressed", String(shuffleMode !== "off"));
@@ -976,6 +1052,12 @@
     dom.romanized.checked = state.preferences.romanized;
     dom.translations.checked = state.preferences.translations;
     dom.background.checked = state.preferences.dynamicBackground;
+    dom.backgroundStyle.value = state.preferences.backgroundStyle;
+    dom.backgroundSpeed.value = String(state.preferences.backgroundSpeed);
+    const backgroundRate = `${state.preferences.backgroundSpeed / 100}×`;
+    dom.backgroundSpeedOutput.value = backgroundRate;
+    dom.backgroundSpeed.setAttribute("aria-valuetext", backgroundRate);
+    dom.backgroundSpeed.disabled = !state.preferences.dynamicBackground || reduceMotion();
     dom.fontSize.value = String(state.preferences.fontSize);
     dom.fontOutput.value = `${state.preferences.fontSize}%`;
     dom.playbackOffset.value = String(state.preferences.playbackOffset);
@@ -986,6 +1068,8 @@
       "--lyric-scale",
       String(state.preferences.fontSize / 100)
     );
+    ambient.setStyle(state.preferences.backgroundStyle);
+    ambient.setSpeed(state.preferences.backgroundSpeed);
     ambient.setEnabled(state.surface !== "inline" && state.preferences.dynamicBackground && !reduceMotion());
     if (rerender && state.rawLyrics) {
       renderLyrics(state.rawLyrics, state.lyricsTrackId, state.lyricsGeneration);
@@ -1051,6 +1135,8 @@
           state.preferences.romanized = Boolean(payload.preferences.romanized);
           state.preferences.translations = payload.preferences.translations !== false;
           state.preferences.dynamicBackground = payload.preferences.dynamicBackground !== false;
+          state.preferences.backgroundStyle = payload.preferences.backgroundStyle === "gradient" ? "gradient" : "artwork";
+          state.preferences.backgroundSpeed = model.clamp(model.finite(payload.preferences.backgroundSpeed, 100), 25, 200);
           state.preferences.fontSize = model.clamp(
             model.finite(payload.preferences.fontSize, 100),
             82,
@@ -1291,10 +1377,22 @@
       value: state.preferences.dynamicBackground
     });
   });
+  dom.backgroundStyle.addEventListener("change", () => {
+    state.preferences.backgroundStyle = dom.backgroundStyle.value === "gradient" ? "gradient" : "artwork";
+    applyPreferences();
+    post("setPreference", { key: "backgroundStyle", value: state.preferences.backgroundStyle });
+  });
   dom.fontSize.addEventListener("input", () => {
     state.preferences.fontSize = model.clamp(model.finite(dom.fontSize.value, 100), 82, 126);
     applyPreferences();
   });
+  dom.backgroundSpeed.addEventListener("input", () => {
+    state.preferences.backgroundSpeed = model.clamp(model.finite(dom.backgroundSpeed.value, 100), 25, 200);
+    applyPreferences();
+  });
+  dom.backgroundSpeed.addEventListener("change", () => post("setPreference", {
+    key: "backgroundSpeed", value: state.preferences.backgroundSpeed
+  }));
   dom.fontSize.addEventListener("change", () => post("setPreference", {
     key: "fontSize",
     value: state.preferences.fontSize
