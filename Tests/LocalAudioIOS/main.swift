@@ -72,10 +72,14 @@ func makeAudio(at url: URL) throws {
 @MainActor
 final class QAAppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
+    var openedRoutes: [URL] = []
     let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let host = UIHostingController(rootView: LocalFilesSettingsView())
+        let host = UIHostingController(rootView: LocalFilesSettingsView(openURL: { [weak self] url, completion in
+            self?.openedRoutes.append(url)
+            completion(true)
+        }))
         host.title = "local_files_title".localized
         let navigation = UINavigationController(rootViewController: host)
         let window = UIWindow(frame: UIScreen.main.bounds)
@@ -116,8 +120,11 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try expect(copiedBytes == originalBytes && preservedBytes == originalBytes && playerInput.length == 4_410,
                        "the visible Copied receipt must correspond to real playable output with the source preserved")
             try await capture("imported")
+            try tap("local_files_open", in: list)
+            try expect(openedRoutes.map(\.absoluteString) == ["spotify:local-files"],
+                       "Open Local Files must request Spotify's native collection through the no-effect route boundary")
             mark("Native import output verified")
-            try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS\n"
+            try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS: Open Local Files requests the native collection route\nPASS\n"
                 .write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
         } catch {
             try? "FAIL: \(error)\n".write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)

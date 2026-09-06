@@ -3,11 +3,16 @@ import UIKit
 import UniformTypeIdentifiers
 import Combine
 
+typealias LocalFilesRouteOpener = (URL, @escaping (Bool) -> Void) -> Void
+
 struct LocalFilesSettingsView: UIViewControllerRepresentable {
     var model: LocalFilesImportModel = .shared
+    var openURL: LocalFilesRouteOpener = { url, completion in
+        UIApplication.shared.open(url, options: [:], completionHandler: completion)
+    }
 
     func makeUIViewController(context: Context) -> LocalFilesSettingsController {
-        LocalFilesSettingsController(model: model)
+        LocalFilesSettingsController(model: model, openURL: openURL)
     }
 
     func updateUIViewController(_ controller: LocalFilesSettingsController, context: Context) {}
@@ -15,6 +20,7 @@ struct LocalFilesSettingsView: UIViewControllerRepresentable {
 
 final class LocalFilesSettingsController: UITableViewController, UIDocumentPickerDelegate {
     private let model: LocalFilesImportModel
+    private let openURL: LocalFilesRouteOpener
     private var state: LocalFilesImportModel.State
     private var observation: AnyCancellable?
     private weak var activePicker: UIDocumentPickerViewController?
@@ -24,8 +30,9 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
             : UIColor(red: 16 / 255, green: 112 / 255, blue: 49 / 255, alpha: 1)
     }
 
-    init(model: LocalFilesImportModel) {
+    init(model: LocalFilesImportModel, openURL: @escaping LocalFilesRouteOpener) {
         self.model = model
+        self.openURL = openURL
         state = model.state
         super.init(style: .insetGrouped)
         title = "local_files_title".localized
