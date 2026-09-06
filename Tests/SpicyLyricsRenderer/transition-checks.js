@@ -157,12 +157,18 @@ window.runSpicyTransitionChecks = async function (phase) {
     for(const style of ['artwork','gradient']) {
       const picker=document.querySelector('#background-style');picker.value=style;picker.dispatchEvent(new Event('change',{bubbles:true}));await frame();
       for(const speed of [25,200]) {
-        const animation=backdrop.getAnimations()[0],before=Number(animation.currentTime);
+        const animation=backdrop.getAnimations()[0],before=Number(animation.currentTime),beforeRate=animation.playbackRate,
+          beforeTimeline=Number(document.timeline.currentTime);
         slider.value=String(speed);slider.dispatchEvent(new Event('input',{bubbles:true}));
-        slider.dispatchEvent(new Event('change',{bubbles:true}));await frame();
-        const start=performance.now(),time=Number(animation.currentTime),paint=getComputedStyle(backdrop).transform;
+        slider.dispatchEvent(new Event('change',{bubbles:true}));
+        const immediateAdvance=Number(animation.currentTime)-before,
+          immediateElapsed=Number(document.timeline.currentTime)-beforeTimeline;
+        await frame();
+        const start=performance.now(),time=Number(animation.currentTime),paint=getComputedStyle(backdrop).transform,
+          elapsed=Number(document.timeline.currentTime)-beforeTimeline;
         await wait(280);await frame();
-        samples.push({style,speed,rate:(Number(animation.currentTime)-time)/(performance.now()-start),jump:Math.abs(time-before),moving:paint!==getComputedStyle(backdrop).transform});
+        samples.push({style,speed,beforeRate,elapsed,before,after:time,advance:time-before,immediateAdvance,immediateElapsed,
+          rate:(Number(animation.currentTime)-time)/(performance.now()-start),jump:Math.abs(time-before),moving:paint!==getComputedStyle(backdrop).transform});
       }
     }
     const request=SpicyQA.messages.at(-1),output=document.querySelector('#background-speed-output')?.textContent;
@@ -170,7 +176,14 @@ window.runSpicyTransitionChecks = async function (phase) {
     const frozen=getComputedStyle(backdrop).transform;await wait(180);await frame();
     check('background speed slider controls both styles without restarting motion',
       initial.min==='25' && initial.max==='200' && initial.value==='100'
-        && samples.every(s=>s.moving && s.jump<150 && (s.speed===25?s.rate>.15 && s.rate<.4:s.rate>1.7 && s.rate<2.3))
+        // A late frame at 2x legitimately advances over 150 animation ms.
+        // Bound continuity by actual timeline elapsed at the old/new rates,
+        // including the synchronous change, instead of assuming frame cadence.
+        && samples.every(s=>s.moving
+          && [[s.advance,s.elapsed],[s.immediateAdvance,s.immediateElapsed]].every(([advance,elapsed])=>
+            advance>=elapsed*Math.min(s.beforeRate,s.speed/100)-20
+              && advance<=elapsed*Math.max(s.beforeRate,s.speed/100)+20)
+          && (s.speed===25?s.rate>.15 && s.rate<.4:s.rate>1.7 && s.rate<2.3))
         && request.type==='setPreference' && request.key==='backgroundSpeed' && request.value===200
         && output==='2×' && slider.disabled && getComputedStyle(backdrop).transform===frozen,
       {initial,samples,request,output,disabled:slider.disabled,frozen});
