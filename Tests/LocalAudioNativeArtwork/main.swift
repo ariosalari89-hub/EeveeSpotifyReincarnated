@@ -41,6 +41,7 @@ do {
                 EeveeArtworkFixtureErrors(request) == 0 && EeveeArtworkFixtureOriginalLoads(request) == 0,
                 "an owned native request must deliver one actual cover without also starting the failing legacy load")
     print("PASS: real imported artwork flows through the guarded native player getter, image request and native callback")
+    try verifyNativeArtworkBoundaries(service: service, directory: directory, imageURL: imageURL, uri: uri)
 } catch {
     fputs("FAIL: \(error)\n", stderr)
     exit(1)

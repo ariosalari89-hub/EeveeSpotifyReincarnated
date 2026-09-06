@@ -18,12 +18,20 @@
 @property NSInteger originalLoads;
 @property NSInteger errors;
 @property NSInteger successes;
+#ifdef EEVEE_ARTWORK_INVALID_LOAD
+- (id)loadLocalFileImage;
+#else
 - (void)loadLocalFileImage;
+#endif
 - (void)dispatchSuccess:(NSData *)data;
 - (void)dispatchError;
 @end
 @implementation SPTLocalAVAssetImageLoaderRequest
+#ifdef EEVEE_ARTWORK_INVALID_LOAD
+- (id)loadLocalFileImage { self.originalLoads += 1; return nil; }
+#else
 - (void)loadLocalFileImage { self.originalLoads += 1; }
+#endif
 - (void)dispatchSuccess:(NSData *)data { if (!self.cancelled) { self.data = data; self.successes += 1; } }
 - (void)dispatchError { if (!self.cancelled) self.errors += 1; }
 @end
@@ -38,6 +46,7 @@ id EeveeArtworkFixtureRequest(NSURL *URL) {
 }
 void EeveeArtworkFixtureLoad(id request) { [request loadLocalFileImage]; }
 void EeveeArtworkFixtureCancel(id request) { [request setCancelled:YES]; }
+void EeveeArtworkFixtureSetURL(id request, NSURL *URL) { [request setURL:URL]; }
 NSData *EeveeArtworkFixtureData(id request) { return [request data]; }
 NSInteger EeveeArtworkFixtureOriginalLoads(id request) { return [request originalLoads]; }
 NSInteger EeveeArtworkFixtureErrors(id request) { return [request errors]; }
