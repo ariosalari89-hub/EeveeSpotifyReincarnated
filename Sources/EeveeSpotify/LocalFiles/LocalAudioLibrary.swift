@@ -91,4 +91,8 @@ final class LocalAudioLibrary {
             throw LocalAudioLibraryFailure.changed
         }
     }
+
+    func remove(_ file: LocalAudioFile) throws {
+        throw LocalAudioLibraryFailure.cannotRead
+    }
 }

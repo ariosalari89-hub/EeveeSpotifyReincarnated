@@ -40,4 +40,21 @@ func runLocalAudioLibraryChecks() throws {
                    "renaming an imported filename must preserve its identity, extension, audio and external original after re-entry")
         print("PASS: imported filename rename survives re-entry without changing audio or external original")
     }
+    try withDirectories { input, output in
+        let original = input.appendingPathComponent("Remove this copy.wav")
+        let other = input.appendingPathComponent("Keep this copy.wav")
+        try makeAudio(at: original)
+        try makeAudio(at: other, value: 0.5)
+        let originalBytes = try Data(contentsOf: original)
+        _ = LocalAudioImporter(directory: output).importFiles([original, other])
+        let library = LocalAudioLibrary(directory: output)
+        let selected = try library.files().first { $0.name == "Remove this copy.wav" }!
+        try library.remove(selected)
+        let reopened = try LocalAudioLibrary(directory: output).files()
+        let preservedOriginal = try Data(contentsOf: original)
+        try expect(reopened.count == 1 && reopened[0].name == "Keep this copy.wav" &&
+                   tryAudioFrames(reopened[0].fileURL) == 4_410 && originalBytes == preservedOriginal,
+                   "confirmed removal must remove only the selected imported copy while preserving the other song and external original")
+        print("PASS: removing an imported copy preserves the external original and every other song")
+    }
 }
