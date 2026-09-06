@@ -11,4 +11,6 @@ NSData * _Nullable EeveeArtworkFixtureData(id request);
 NSInteger EeveeArtworkFixtureOriginalLoads(id request);
 NSInteger EeveeArtworkFixtureErrors(id request);
 NSInteger EeveeArtworkFixtureSuccesses(id request);
+NSError * _Nullable EeveeArtworkFixtureError(id request);
+NSString * _Nullable EeveeArtworkFixtureEncoding(NSString *className, NSString *selector);
 NS_ASSUME_NONNULL_END

@@ -10,12 +10,21 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
 let directory = FileManager.default.temporaryDirectory.appendingPathComponent("native-local-art-" + UUID().uuidString)
 defer { try? FileManager.default.removeItem(at: directory) }
 do {
+    let contractData = try Data(contentsOf: URL(fileURLWithPath: "Tests/LocalAudioNativeArtwork/Spotify9176Contract.json"))
+    let contract = try JSONSerialization.jsonObject(with: contractData) as! [String: Any]
+    for (className, selectors) in contract["classes"] as! [String: [String: String]] {
+        for (selector, encoding) in selectors {
+            try require(EeveeArtworkFixtureEncoding(className, selector) == encoding,
+                        "native fixture must match the independently extracted Spotify ABI: \(className).\(selector)")
+        }
+    }
     let source = URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.m4a")
     let imports = LocalAudioImporter(directory: directory).importFiles([source])
     try require(imports.first?.fileURL != nil, "native artwork scenario requires a real imported audio copy")
     let service = LocalAudioArtworkService(directory: directory)
-    _ = EeveeLocalAudioInstallArtwork({ uri in service.imageURL(forTrackURI: uri)?.absoluteString },
+    let installed = EeveeLocalAudioInstallArtwork({ uri in service.imageURL(forTrackURI: uri)?.absoluteString },
                                       { url, cancelled, completion in service.load(url, isCancelled: cancelled, completion: completion) })
+    try require(installed, "the local artwork adapter must install against the real Spotify 9.1.76 method signatures")
     let uri = "spotify:local:A%2FB+%2B+%E9%9F%B3:Windows%3A+Summer:Midnight+Library:0"
     let original: [String: Any] = ["title": "Midnight Library", "artist_name": "A/B + 音"]
     let track = EeveeArtworkFixtureTrack(uri, original)

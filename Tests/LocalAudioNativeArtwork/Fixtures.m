@@ -1,4 +1,5 @@
 #import "Fixtures.h"
+#import <objc/runtime.h>
 
 // System-boundary fixtures reproduce the observed Spotify 9.1.76 selectors
 // and Objective-C types. They do not replace any shipping artwork component.
@@ -18,13 +19,14 @@
 @property NSInteger originalLoads;
 @property NSInteger errors;
 @property NSInteger successes;
+@property NSError *error;
 #ifdef EEVEE_ARTWORK_INVALID_LOAD
 - (id)loadLocalFileImage;
 #else
 - (void)loadLocalFileImage;
 #endif
 - (void)dispatchSuccess:(NSData *)data;
-- (void)dispatchError;
+- (void)dispatchError:(NSError *)error;
 @end
 @implementation SPTLocalAVAssetImageLoaderRequest
 #ifdef EEVEE_ARTWORK_INVALID_LOAD
@@ -33,7 +35,7 @@
 - (void)loadLocalFileImage { self.originalLoads += 1; }
 #endif
 - (void)dispatchSuccess:(NSData *)data { if (!self.cancelled) { self.data = data; self.successes += 1; } }
-- (void)dispatchError { if (!self.cancelled) self.errors += 1; }
+- (void)dispatchError:(NSError *)error { if (!self.cancelled) { self.error = error; self.errors += 1; } }
 @end
 
 id EeveeArtworkFixtureTrack(NSString *URI, NSDictionary *metadata) {
@@ -51,3 +53,8 @@ NSData *EeveeArtworkFixtureData(id request) { return [request data]; }
 NSInteger EeveeArtworkFixtureOriginalLoads(id request) { return [request originalLoads]; }
 NSInteger EeveeArtworkFixtureErrors(id request) { return [request errors]; }
 NSInteger EeveeArtworkFixtureSuccesses(id request) { return [request successes]; }
+NSError *EeveeArtworkFixtureError(id request) { return [request error]; }
+NSString *EeveeArtworkFixtureEncoding(NSString *className, NSString *selector) {
+    Method method = class_getInstanceMethod(NSClassFromString(className), NSSelectorFromString(selector));
+    return method ? [NSString stringWithUTF8String:method_getTypeEncoding(method)] : nil;
+}

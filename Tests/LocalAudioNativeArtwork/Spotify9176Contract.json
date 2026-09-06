@@ -1,0 +1,15 @@
+{
+  "spotifyVersion": "9.1.76",
+  "executableSHA256": "8ec29afac67d2a068e3b47f8fe6727c055f65472e1a96b0b9171fd29e9db05bd",
+  "source": "Read-only Objective-C method-list extraction from the supplied ARM64 executable; no application binary is included.",
+  "classes": {
+    "SPTPlayerTrack": { "metadata": "@16@0:8", "URI": "@16@0:8" },
+    "SPTLocalAVAssetImageLoaderRequest": {
+      "URL": "@16@0:8",
+      "cancelled": "B16@0:8",
+      "loadLocalFileImage": "v16@0:8",
+      "dispatchSuccess:": "v24@0:8@16",
+      "dispatchError:": "v24@0:8@16"
+    }
+  }
+}

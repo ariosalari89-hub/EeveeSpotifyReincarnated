@@ -32,7 +32,7 @@ func verifyNativeArtworkBoundaries(service: LocalAudioArtworkService, directory:
     EeveeArtworkFixtureLoad(cancelled)
     try drain()
     try require(EeveeArtworkFixtureErrors(absent) == 1 && EeveeArtworkFixtureSuccesses(absent) == 0 &&
-                EeveeArtworkFixtureOriginalLoads(absent) == 0,
+                EeveeArtworkFixtureOriginalLoads(absent) == 0 && EeveeArtworkFixtureError(absent) != nil,
                 "missing embedded art must produce a single native absence without borrowing or starting a legacy load")
     try require(EeveeArtworkFixtureErrors(cancelled) == 0 && EeveeArtworkFixtureSuccesses(cancelled) == 0 &&
                 EeveeArtworkFixtureOriginalLoads(cancelled) == 0,
