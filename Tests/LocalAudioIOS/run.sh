@@ -6,8 +6,9 @@ mkdir -p "$QA_APP/en.lproj"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun swiftc -swift-version 5 -target "$(uname -m)-apple-ios17.0-simulator" -sdk "$SDK" \
   -framework UIKit -framework SwiftUI -framework UniformTypeIdentifiers -framework AVFoundation \
-  Sources/EeveeSpotify/LocalFiles/*.swift Tests/LocalAudioIOS/main.swift -o "$QA_APP/LocalAudioQA"
+  Sources/EeveeSpotify/LocalFiles/*.swift Tests/LocalAudioIOS/*.swift -o "$QA_APP/LocalAudioQA"
 cp "layout/Library/Application Support/EeveeSpotify.bundle/en.lproj/Localizable.strings" "$QA_APP/en.lproj/"
+cp Tests/LocalAudioImport/Fixtures/synthetic-tone.mp3 "$QA_APP/"
 python3 - "$QA_APP/Info.plist" <<'PY'
 import plistlib, sys
 with open(sys.argv[1], 'wb') as output:

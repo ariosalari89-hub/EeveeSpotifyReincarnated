@@ -160,8 +160,9 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try expect(openedRoutes.map(\.absoluteString) == ["spotify:local-files"],
                        "Open Local Files must request Spotify's native collection through the no-effect route boundary")
             try await stopAcrossNavigation(navigation: navigation)
+            try await cancelAndRetry(navigation: navigation)
             mark("Native import output verified")
-            try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS: Open Local Files requests the native collection route\nPASS: stop across native page navigation retains completed songs and cancels waiting work\nPASS\n"
+            try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS: Open Local Files requests the native collection route\nPASS: stop across native page navigation retains completed songs and cancels waiting work\nPASS: cancelling the picker preserves results and a mixed retry reports real WAV/MP3/AAC copies, duplicate and failed audio\nPASS\n"
                 .write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
         } catch {
             try? await capture("failure")
