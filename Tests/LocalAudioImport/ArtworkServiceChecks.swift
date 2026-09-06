@@ -106,6 +106,22 @@ func runLocalAudioArtworkServiceChecks() throws {
         try expect(removed == nil, "a removed imported file must not survive as a stale artwork association")
         print("PASS: ambiguous identities, filename changes and removal resolve from the current imported copies")
     }
+    try withDirectories { input, output in
+        let manager = FileManager.default
+        let source = URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.m4a")
+        try manager.createDirectory(at: output, withIntermediateDirectories: true)
+        for index in 0..<200 {
+            try manager.copyItem(at: source, to: output.appendingPathComponent("Song \(index).m4a"))
+        }
+        let service = LocalAudioArtworkService(directory: output)
+        let start = ProcessInfo.processInfo.systemUptime
+        for index in 0..<12 {
+            let cover = try serviceArtwork(service, nativeArtworkURL(output.appendingPathComponent("Song \(index).m4a")))
+            try expect(cover != nil, "a visible imported-file row must resolve its embedded artwork in a larger collection")
+        }
+        let elapsed = ProcessInfo.processInfo.systemUptime - start
+        print(String(format: "MEASURE: 12 native path covers in a 200-song collection: %.3f seconds", elapsed))
+    }
 }
 
 private func nativeArtworkURL(_ file: URL) -> URL {
