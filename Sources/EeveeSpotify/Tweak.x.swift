@@ -322,6 +322,13 @@ struct EeveeSpotify: Tweak {
         let iosVersion = UIDevice.current.systemVersion
         let deviceModel = UIDevice.current.model
 
+        // The image request ABI and URL factory were traced on this exact
+        // Spotify version. Unsupported builds retain their native artwork path.
+        if EeveeSpotify.hookTarget == .v91 && spotifyVersion == "9.1.76" {
+            let localArtworkInstalled = NativeLocalAudioArtwork.install()
+            writeDebugLog("[INIT] Local artwork adapter: \(localArtworkInstalled ? "installed" : "native ABI unavailable")")
+        }
+
         writeDebugLog("=== EeveeSpotify \(EeveeSpotify.version) (build \(EeveeSpotify.buildNumber)) starting ===")
         writeDebugLog("[INIT] Spotify: \(spotifyVersion) (build \(spotifyBuild))")
         writeDebugLog("[INIT] iOS: \(iosVersion), Device: \(deviceModel)")
