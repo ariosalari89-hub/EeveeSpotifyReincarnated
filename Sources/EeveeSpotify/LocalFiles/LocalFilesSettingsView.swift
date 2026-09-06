@@ -19,11 +19,13 @@ struct LocalFilesSettingsView: UIViewControllerRepresentable {
 }
 
 final class LocalFilesSettingsController: UITableViewController, UIDocumentPickerDelegate {
-    private let model: LocalFilesImportModel
+    let model: LocalFilesImportModel
     private let openURL: LocalFilesRouteOpener
     private var state: LocalFilesImportModel.State
     private var observation: AnyCancellable?
     private weak var activePicker: UIDocumentPickerViewController?
+    private var foregroundObservation: AnyCancellable?
+    private var filesSection: Int { state.isImporting ? 2 : (state.results.isEmpty ? 1 : 3) }
     private let accent = UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 30 / 255, green: 215 / 255, blue: 96 / 255, alpha: 1)
@@ -48,19 +50,37 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 72
         tableView.tintColor = accent
+        refreshControl = UIRefreshControl()
+        refreshControl?.addTarget(self, action: #selector(refreshFiles), for: .valueChanged)
         observation = model.$state.sink { [weak self] state in
             guard let self = self else { return }
             self.state = state
             self.tableView.reloadData()
+            if !state.isLoadingFiles { self.refreshControl?.endRefreshing() }
         }
+        foregroundObservation = NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in self?.model.refreshFiles() }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        model.refreshFiles()
+    }
+
+    @objc private func refreshFiles() {
+        model.refreshFiles()
+        if !model.state.isLoadingFiles { refreshControl?.endRefreshing() }
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int {
-        state.isImporting ? 2 : (state.results.isEmpty ? 1 : 3)
+        filesSection + 1
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        section == 0 || (section == 1 && state.isImporting) ? 2 : (section == 2 ? state.results.count : 1)
+        if section == filesSection {
+            return state.files.count + (state.filesError != nil || state.files.isEmpty ? 1 : 0)
+        }
+        return section == 0 || (section == 1 && state.isImporting) ? 2 : (section == 2 ? state.results.count : 1)
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
@@ -68,7 +88,8 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        section == 2 ? "local_files_results".localized : nil
+        if section == filesSection { return "local_files_imported".localized }
+        return section == 2 ? "local_files_results".localized : nil
     }
 
     override func tableView(_ tableView: UITableView, willDisplayFooterView view: UIView, forSection section: Int) {
@@ -80,6 +101,27 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        if indexPath.section == filesSection {
+            if state.filesError != nil && indexPath.row == 0 {
+                let cell = makeCell("local_files_load_failed".localized, detail: "local_files_retry".localized,
+                                    identifier: "local_files_retry")
+                cell.accessibilityTraits = .button
+                cell.selectionStyle = .default
+                return cell
+            }
+            if state.files.isEmpty {
+                let key = state.isLoadingFiles ? "local_files_loading" : "local_files_empty"
+                return makeCell(key.localized, identifier: key)
+            }
+            let file = state.files[indexPath.row - (state.filesError == nil ? 0 : 1)]
+            let cell = makeCell(file.name, detail: ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file),
+                                identifier: "local_files_file")
+            cell.accessoryType = .disclosureIndicator
+            cell.accessibilityTraits = state.isImporting ? [.button, .notEnabled] : .button
+            cell.isUserInteractionEnabled = !state.isImporting
+            cell.selectionStyle = .default
+            return cell
+        }
         if indexPath.section == 0 {
             let key = indexPath.row == 0 ? "local_files_import" : "local_files_open"
             let disabled = indexPath.row == 0 && state.isImporting
@@ -148,6 +190,14 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        if indexPath.section == filesSection {
+            guard !state.isImporting, presentedViewController == nil else { return }
+            if state.filesError != nil && indexPath.row == 0 { model.refreshFiles(); return }
+            let fileIndex = indexPath.row - (state.filesError == nil ? 0 : 1)
+            guard state.files.indices.contains(fileIndex) else { return }
+            showFileActions(state.files[fileIndex], from: tableView.cellForRow(at: indexPath) ?? tableView)
+            return
+        }
         if indexPath.section == 1 && indexPath.row == 1 && state.isImporting {
             model.stop()
             return

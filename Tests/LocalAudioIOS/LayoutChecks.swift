@@ -78,7 +78,8 @@ extension QAAppDelegate {
             try await waitUntil("the requested native viewport did not render") {
                 guard let host = navigation.topViewController, let list = table(in: host.view) else { return false }
                 list.layoutIfNeeded()
-                return list.window != nil && abs(list.bounds.width - size.width) < 1 && list.numberOfSections == 3
+                return list.window != nil && abs(list.bounds.width - size.width) < 1 &&
+                    cell("local_files_result", in: list) != nil && cell("local_files_file", in: list) != nil
             }
             let list = table(in: navigation.topViewController!.view)!
             try expect(list.traitCollection.preferredContentSizeCategory == category &&
@@ -102,7 +103,7 @@ extension QAAppDelegate {
                     try expect(visible.isAccessibilityElement && visible.accessibilityLabel == visible.textLabel?.text &&
                                visible.accessibilityValue == visible.detailTextLabel?.text,
                                "native labels and results must remain available to accessibility")
-                    if section == 0 {
+                    if section == 0 || visible.accessibilityIdentifier == "local_files_file" {
                         try expect(visible.bounds.height >= 44 && visible.accessibilityTraits.contains(.button) &&
                                    visible.isUserInteractionEnabled, "native actions need a usable 44-point target and button semantics")
                     }
@@ -137,6 +138,9 @@ extension QAAppDelegate {
             let last = IndexPath(row: list.numberOfRows(inSection: 2) - 1, section: 2)
             list.scrollToRow(at: last, at: .bottom, animated: false)
             try await capture("layout-" + name + "-results")
+            let filesSection = list.numberOfSections - 1
+            list.scrollToRow(at: IndexPath(row: 0, section: filesSection), at: .top, animated: false)
+            try await capture("layout-" + name + "-files")
             evidence.append(["variant": name, "width": list.bounds.width, "height": list.bounds.height,
                              "contentSizeCategory": category.rawValue, "rtl": rtl, "rows": rows])
         }
