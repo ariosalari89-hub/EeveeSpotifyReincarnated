@@ -223,6 +223,7 @@ do {
         try expect(before == after, "rejecting or normalizing an encoded alias must preserve the original")
         print("PASS: encoded URL path aliases cannot escape the native song source")
     }
+    try runLocalAudioLibraryChecks()
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)
