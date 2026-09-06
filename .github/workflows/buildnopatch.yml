@@ -123,7 +123,9 @@ jobs:
 
       - name: Test local audio native UI
         if: ${{ inputs.qa_only && inputs.qa_scope == 'local_audio' }}
-        timeout-minutes: 6
+        # Cold simulator migration/display setup consumed the six-minute step
+        # before app launch in 34059046408. App/interaction deadlines do not grow.
+        timeout-minutes: 10
         run: bash Tests/LocalAudioIOS/run.sh
 
       - name: Upload local audio verification

@@ -47,8 +47,14 @@ extension QAAppDelegate {
         try expect(selected.count > 20, "the regression must really select a large part of the filename")
         field.cut(nil)
         try expect(!field.text.contains(selected), "native Cut must remove the selected range from the draft")
+        try expect(UIPasteboard.general.string == selected, "native Cut must place the actual selected range on the system pasteboard")
         field.paste(nil)
-        try expect(field.text.contains(selected), "native Paste must restore the selected draft text")
+        // UIKit paste uses item providers and incorporates their result on the
+        // main run loop. Await its visible completion, not the return from
+        // paste(_:). The expected text/editor identity are unchanged.
+        try await waitUntil("native Paste must restore the selected draft text", seconds: 2) {
+            field.text.contains(selected) && filenameEditor(in: navigation) === editor
+        }
         field.selectAll(nil)
         field.deleteBackward()
         try expect(field.text.isEmpty, "native selected deletion must be editable without closing an empty draft")

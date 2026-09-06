@@ -55,7 +55,8 @@ extension QAAppDelegate {
         try await waitUntil("Rename file must open a persistent native filename editor, not an alert") {
             guard let editor = filenameEditor(in: navigation) else { return false }
             return editor.title == "Rename file" && filenameInput(in: editor.view)?.text == "Picked song" &&
-                editor.viewIfLoaded?.window != nil && !editor.isBeingPresented
+                editor.viewIfLoaded?.window != nil && editor.navigationController?.isBeingPresented == false &&
+                filenameInput(in: editor.view)?.isFirstResponder == true
         }
         let editor = filenameEditor(in: navigation)!
         let field = filenameInput(in: editor.view)!
