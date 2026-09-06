@@ -83,4 +83,51 @@ extension QAAppDelegate {
         }
         try await capture("rename-reopened")
     }
+
+    func verifyNativeRenameRecovery(navigation: UINavigationController) async throws {
+        mark("Checking filename collision recovery without overwriting another imported song")
+        let list = table(in: navigation.topViewController!.view)!
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent("Existing name.wav")
+        try makeAudio(at: other)
+        try tap("local_files_import", in: list)
+        try await waitUntil("the collision fixture must use the actual audio picker") {
+            guard let picker = picker(in: navigation) else { return false }
+            return picker.viewIfLoaded?.window != nil && !picker.isBeingPresented
+        }
+        let selection = picker(in: navigation)!
+        selection.delegate?.documentPicker?(selection, didPickDocumentsAt: [other])
+        try await waitUntil("the second file must appear before testing its occupied name") {
+            picker(in: navigation) == nil && cell("local_files_file", label: "Existing name.wav", in: list) != nil
+        }
+        let original = documents.appendingPathComponent("Renamed on phone.wav")
+        let occupied = documents.appendingPathComponent("Existing name.wav")
+        let originalBytes = try Data(contentsOf: original), occupiedBytes = try Data(contentsOf: occupied)
+        let row = cell("local_files_file", label: "Renamed on phone.wav", in: list)!
+        let path = list.indexPath(for: row)!
+        let configuration = list.delegate!.tableView!(list, trailingSwipeActionsConfigurationForRowAt: path)!
+        let rename = configuration.actions.first { $0.title == "Rename file" }!
+        rename.handler(rename, row) { _ in }
+        try await waitUntil("the existing file must open its filename editor") {
+            guard let editor = fileAlert(in: navigation) else { return false }
+            return editor.textFields?.first?.text == "Renamed on phone" && !editor.isBeingPresented
+        }
+        let editor = fileAlert(in: navigation)!
+        editor.textFields!.first!.text = "Existing name"
+        editor.textFields!.first!.sendActions(for: .editingDidEndOnExit)
+        try await waitUntil("a filename collision must preserve the proposed value with a corrective error") {
+            guard let error = fileAlert(in: navigation) else { return false }
+            return error !== editor && error.textFields?.first?.text == "Existing name" && !error.isBeingPresented &&
+                error.message == "A file with that name already exists. Choose another name."
+        }
+        let afterOriginal = try Data(contentsOf: original), afterOccupied = try Data(contentsOf: occupied)
+        try expect(afterOriginal == originalBytes && afterOccupied == occupiedBytes,
+                   "a failed native filename edit must preserve both files byte for byte")
+        try await capture("rename-collision")
+        let retry = fileAlert(in: navigation)!
+        retry.textFields!.first!.text = "Renamed on phone"
+        retry.textFields!.first!.sendActions(for: .editingDidEndOnExit)
+        try await waitUntil("correcting a filename error must close the editor and retain the selected copy") {
+            fileAlert(in: navigation) == nil && cell("local_files_file", label: "Renamed on phone.wav", in: list) != nil
+        }
+    }
 }
