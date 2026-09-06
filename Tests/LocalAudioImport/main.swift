@@ -107,6 +107,23 @@ do {
         try expect(tryAudioFrames(song) == 4_410, "the successful part of a mixed batch remains readable")
         print("PASS: invalid inputs fail individually while valid selected audio survives")
     }
+    try withDirectories { input, output in
+        let first = input.appendingPathComponent("Completed.wav")
+        let second = input.appendingPathComponent("Not started.wav")
+        try makeAudio(at: first)
+        try makeAudio(at: second)
+        let cancellation = LocalAudioImportCancellation()
+        let results = LocalAudioImporter(directory: output).importFiles([first, second], cancellation: cancellation) { progress in
+            if progress.completedFiles == 1 { cancellation.cancel() }
+        }
+        guard case .copied(let kept) = results[0].outcome, case .cancelled = results[1].outcome else {
+            throw TestFailure(description: "stopping after one completed song must keep it and cancel the unstarted song")
+        }
+        let files = try FileManager.default.contentsOfDirectory(atPath: output.path)
+        try expect(files == ["Completed.wav"] && tryAudioFrames(kept) == 4_410,
+                   "cancellation retains completed playable output without adding unfinished selections")
+        print("PASS: stop retains the completed song and reports unstarted items as cancelled")
+    }
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)

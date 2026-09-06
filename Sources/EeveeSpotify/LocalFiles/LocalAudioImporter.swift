@@ -8,11 +8,37 @@ enum LocalAudioImportFailure: String, Error {
     case cannotCopy = "local_audio_cannot_copy"
 }
 
+final class LocalAudioImportCancellation {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+}
+
+struct LocalAudioImportProgress {
+    let completedFiles: Int
+    let totalFiles: Int
+    var currentName: String? = nil
+    var copiedBytes: Int64 = 0
+    var totalBytes: Int64 = 0
+}
+
 struct LocalAudioImportResult: Identifiable {
     enum Outcome {
         case copied(URL)
         case alreadyPresent(URL)
         case failed(LocalAudioImportFailure)
+        case cancelled
     }
 
     let id = UUID()
@@ -22,7 +48,7 @@ struct LocalAudioImportResult: Identifiable {
     var fileURL: URL? {
         switch outcome {
         case .copied(let url), .alreadyPresent(let url): return url
-        case .failed: return nil
+        case .failed, .cancelled: return nil
         }
     }
 }
@@ -36,8 +62,10 @@ final class LocalAudioImporter {
         self.directory = directory
     }
 
-    func importFiles(_ urls: [URL]) -> [LocalAudioImportResult] {
-        urls.map { source in
+    func importFiles(_ urls: [URL], cancellation: LocalAudioImportCancellation = LocalAudioImportCancellation(),
+                     progress: (LocalAudioImportProgress) -> Void = { _ in }) -> [LocalAudioImportResult] {
+        urls.enumerated().map { index, source in
+            defer { progress(LocalAudioImportProgress(completedFiles: index + 1, totalFiles: urls.count)) }
             do {
                 try validate(source)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
