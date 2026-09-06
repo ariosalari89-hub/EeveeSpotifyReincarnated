@@ -209,10 +209,13 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
         navigation.setViewControllers([UIViewController()], animated: false)
         navigation.setViewControllers([makeHost()], animated: false)
         try await waitUntil("returning to settings lost the active import") {
-            guard let list = table(in: navigation.view) else { return false }
+            // A navigation container can still contain the outgoing host's
+            // table during UIKit teardown. Observe only the new top page.
+            guard let host = navigation.topViewController,
+                  let list = table(in: host.view), list.window != nil else { return false }
             return cell("local_files_progress", in: list)?.accessibilityLabel == "Importing 2 of 2"
         }
-        let returnedList = table(in: navigation.view)!
+        let returnedList = table(in: navigation.topViewController!.view)!
         try expect(cell("local_files_import", in: returnedList)?.isUserInteractionEnabled == false,
                    "a running import must not allow a second selection to replace it")
         try tap("local_files_stop", in: returnedList)
@@ -221,7 +224,8 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
         mark("Stop acknowledged; releasing the coordinated writer")
         hold.release()
         try await waitUntil("stopping must preserve the completed song and report the uncommitted selection") {
-            cell("local_files_result", label: first.lastPathComponent, in: returnedList)?.accessibilityValue == "Copied" &&
+            returnedList.window != nil &&
+                cell("local_files_result", label: first.lastPathComponent, in: returnedList)?.accessibilityValue == "Copied" &&
                 cell("local_files_result", label: blocked.lastPathComponent, in: returnedList)?.accessibilityValue == "Not copied — stopped"
         }
         let kept = try AVAudioFile(forReading: documents.appendingPathComponent(first.lastPathComponent))
