@@ -826,7 +826,7 @@ struct QAFailure: Error { let message: String }
             finish(result: "FAIL: \(error)\n\(await failureDiagnostics())")
         }
     }
-    func testRendererTransitions(baseline: Bool) async throws {
+    func rendererTransitionPhase(_ phase: String, baseline: Bool) async throws -> [[String: Any]] {
         guard var root = scene.keyWindow?.rootViewController,
               let page = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: baseline ? "SpicyLyricsBefore" : "SpicyLyricsRenderer") else {
             throw QAFailure(message: "transition fixture has no root or renderer")
@@ -835,11 +835,18 @@ struct QAFailure: Error { let message: String }
         guard root.viewIfLoaded?.window != nil else {
             throw QAFailure(message: "transition fixture controller must be on screen for frame sampling")
         }
-        // Use the same storage/compositing configuration as the real host.
+        // Production has separate fixed-surface hosts, not one WKWebView that
+        // rapidly alternates between caption/card/fullscreen for every test.
+        // Give each independent case a fresh host at its final native size.
+        // The real same-host track-skip/reopen stress tests still run below.
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.allowsInlineMediaPlayback = true
-        let web = WKWebView(frame: CGRect(x: 0, y: 100, width: 360, height: 320), configuration: configuration)
+        let inline = phase == "inline" || phase.hasSuffix("-inline")
+        let fullscreen = phase == "background" || phase == "highlight" || phase.hasSuffix("-fullscreen")
+        let height: CGFloat = inline ? 52 : (phase == "background" || phase.hasSuffix("-fullscreen") ? 640 : (phase == "card-layout" ? 392 : 320))
+        let surface = inline ? "inline" : (fullscreen ? "fullscreen" : "card")
+        let web = WKWebView(frame: CGRect(x: 0, y: 100, width: 360, height: height), configuration: configuration)
         web.isOpaque = false
         web.backgroundColor = .clear
         web.scrollView.backgroundColor = .clear
@@ -862,12 +869,47 @@ struct QAFailure: Error { let message: String }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
         guard ready else { throw QAFailure(message: "transition renderer not ready") }
+        _ = try await evaluateTransitionScript("window.SpicyNative.receive({type:'bootstrap',payload:{surface:'\(surface)',preferences:{fontSize:100,playbackOffset:0,dynamicBackground:false}}});true")
         for name in ["browser-fixture", "transition-checks"] {
             guard let file = Bundle.main.url(forResource: name, withExtension: "js") else {
                 throw QAFailure(message: "missing isolated transition test")
             }
             _ = try await evaluateTransitionScript(String(contentsOf: file, encoding: .utf8) + "\n;true")
         }
+        let script = """
+        const frame = () => new Promise(requestAnimationFrame);
+        let stable = 0;
+        for (const deadline=performance.now()+5000; performance.now()<deadline && stable<6;) {
+          await frame();
+          const viewport = visualViewport;
+          const matches = !document.hidden && Math.abs(innerWidth-width)<1 && Math.abs(innerHeight-height)<1
+            && Math.abs(viewport.width-width)<1 && Math.abs(viewport.height-height)<1;
+          stable = matches ? stable+1 : 0;
+        }
+        if (stable<6) throw new Error('Native/visual viewport did not settle before '+phase);
+        try { return JSON.stringify(await runSpicyTransitionChecks(phase)); }
+        catch (error) {
+          return JSON.stringify([{name:phase+': isolated renderer fixture completes',pass:false,
+            detail:{message:String(error),stack:String(error.stack||''),width:innerWidth,height:innerHeight,
+              state:SpicyQA.inspect()}}]);
+        }
+        """
+        // Await the actual viewport and the complete test promise. Test errors
+        // remain failing rows so other independent cases can still be checked.
+        let result: Any = try await withCheckedThrowingContinuation { continuation in
+            web.callAsyncJavaScript(script, arguments: ["phase": phase, "width": 360, "height": Double(height)], in: nil, in: .page) {
+                continuation.resume(with: $0)
+            }
+        }
+        guard let text = result as? String,
+              let data = text.data(using: .utf8),
+              let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw QAFailure(message: "no transition results for \(phase)")
+        }
+        return rows
+    }
+
+    func testRendererTransitions(baseline: Bool) async throws {
         var rows = [[String: Any]]()
         let desktopPhases = ["interlude", "dot-envelope", "paint", "motion", "emphasis", "type", "layout", "contrast"]
             .flatMap { phase in ["fullscreen", "card", "inline"].map { "desktop-\(phase)-\($0)" } }
@@ -875,22 +917,7 @@ struct QAFailure: Error { let message: String }
         let phases = baseline ? ["inline", "card"]
             : ["inline", "card", "background", "highlight", "card-layout"] + desktopPhases
         for phase in phases {
-            web.frame.size.height = phase == "inline" || phase.hasSuffix("-inline") ? 52
-                : (phase == "background" || phase.hasSuffix("-fullscreen") ? 640 : (phase == "card-layout" ? 392 : 320))
-            try await Task.sleep(nanoseconds: 100_000_000)
-            // Explicit completion avoids selecting the fire-and-forget Void
-            // overload; await the JavaScript promise and preserve its result.
-            let result: Any = try await withCheckedThrowingContinuation { continuation in
-                web.callAsyncJavaScript("return JSON.stringify(await runSpicyTransitionChecks(phase))",
-                                        arguments: ["phase": phase], in: nil, in: .page) {
-                    continuation.resume(with: $0)
-                }
-            }
-            guard let text = result as? String,
-                  let data = text.data(using: .utf8),
-                  let phaseRows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-                throw QAFailure(message: "no transition results")
-            }
+            let phaseRows = try await rendererTransitionPhase(phase, baseline: baseline)
             rows += phaseRows
             let reportURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent(baseline ? "qa-renderer-baseline.json" : "qa-renderer-results.json")
