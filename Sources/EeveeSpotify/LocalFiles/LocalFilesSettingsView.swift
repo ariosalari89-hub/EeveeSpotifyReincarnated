@@ -60,7 +60,7 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        section == 0 ? 2 : (section == 2 ? state.results.count : 1)
+        section == 0 || (section == 1 && state.isImporting) ? 2 : (section == 2 ? state.results.count : 1)
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
@@ -93,6 +93,15 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
         }
         if indexPath.section == 1 {
             if state.isImporting {
+                if indexPath.row == 1 {
+                    let key = state.isStopping ? "local_files_stopping" : "local_files_stop"
+                    let cell = makeCell(key.localized, identifier: "local_files_stop")
+                    cell.textLabel?.textColor = state.isStopping ? .secondaryLabel : accent
+                    cell.accessibilityTraits = state.isStopping ? [.button, .notEnabled] : .button
+                    cell.isUserInteractionEnabled = !state.isStopping
+                    cell.selectionStyle = .default
+                    return cell
+                }
                 let title = String(format: "local_files_progress".localized,
                                    min(state.progress.completedFiles + 1, state.progress.totalFiles), state.progress.totalFiles)
                 return makeCell(title, detail: state.progress.currentName, identifier: "local_files_progress")
@@ -139,6 +148,10 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        if indexPath.section == 1 && indexPath.row == 1 && state.isImporting {
+            model.stop()
+            return
+        }
         guard indexPath.section == 0, presentedViewController == nil else { return }
         if indexPath.row == 1 {
             guard let route = URL(string: "spotify:local-files") else { return }
