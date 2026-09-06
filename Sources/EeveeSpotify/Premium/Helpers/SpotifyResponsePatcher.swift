@@ -104,6 +104,7 @@ enum SpotifyResponsePatcher {
         case planOverview = "PlanOverview"
         case dacEmpty    = "dac"
         case casitaStrip = "casitaStrip"
+        case spicyPreview = "spicyPreview"
     }
 
     struct PatchResult {
@@ -146,7 +147,13 @@ enum SpotifyResponsePatcher {
             return PatchResult(data: Data(), tag: .dacEmpty)
         }
         if BrowsitaSectionStripper.shouldHandle(url) {
-            if let stripped = BrowsitaSectionStripper.strip(buffer, url: url) {
+            let stripped = BrowsitaSectionStripper.strip(buffer, url: url)
+            if let restored = SpicyLyricsNativePreview.restoringMissingCard(
+                in: stripped ?? buffer, for: url, enabled: UserDefaults.lyricsSource == .spicylyrics
+            ) {
+                return PatchResult(data: restored, tag: .spicyPreview)
+            }
+            if let stripped {
                 return PatchResult(data: stripped, tag: .casitaStrip)
             }
             return nil
