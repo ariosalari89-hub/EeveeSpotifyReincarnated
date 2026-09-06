@@ -1,6 +1,7 @@
 import Foundation
 import MediaPlayer
 import UIKit
+import EeveeSpotifyC
 
 // Spotify is the external boundary. Compile the shipping bridge and clock;
 // supply the verified Objective-C state/track selectors, not a second bridge.
@@ -22,6 +23,10 @@ func writeDebugLog(_ message: String) { print(message) }
     }
 }
 
+@objc final class MetadataOptions: NSObject {
+    @objc dynamic var shufflingContext = false
+}
+
 @objc final class MetadataState: NSObject {
     @objc dynamic var track: MetadataTrack
     @objc dynamic var position: Double = 62
@@ -33,7 +38,23 @@ func writeDebugLog(_ message: String) { print(message) }
     @objc dynamic var playbackSpeed: Double = 1
     @objc dynamic var timestamp = NSDate()
     @objc dynamic var playbackId: String
+    @objc dynamic var options = MetadataOptions()
+    @objc dynamic var contextURI = NSURL(string: "spotify:playlist:metadata-qa")!
     init(track: MetadataTrack) { self.track = track; self.playbackId = track.URI.absoluteString! }
+}
+
+@objc final class MetadataSmartShuffle: NSObject {
+    @objc(shuffleStateWithPlayerState:) dynamic func shuffleState(_ state: NSObject) -> UInt { 0 }
+    @objc(shuffleStateWithEntityURL:) dynamic func shuffleState(_ url: NSURL) -> UInt { 0 }
+    @objc(checkIsEntitySmartShuffled:) dynamic func isSmartShuffled(_ url: NSURL) -> Bool { false }
+}
+
+@objc(SPTNowPlayingPlaybackActionsHandlerImplementation)
+final class MetadataPlaybackActions: NSObject {
+    @objc dynamic var smartShuffleHandler = MetadataSmartShuffle()
+    @objc dynamic func model() -> NSObject { self }
+    @objc dynamic func playPause() { fatalError("Read-only bridge check issued playback") }
+    @objc dynamic func toggleRepeat() { fatalError("Read-only bridge check issued repeat") }
 }
 
 @objc(SPTEsperantoPlayer) final class MetadataPlayer: NSObject {
@@ -97,4 +118,16 @@ let correctedPass = corrected["title"] as? String == "Corrected song title"
     && corrected["artist"] as? String == "Corrected artist"
     && corrected["artwork"] as? String == "https://i.scdn.co/image/replaced"
 print("\(correctedPass ? "PASS" : "FAIL") real current-song corrections replace the cached presentation")
-exit(correctedPass ? 0 : 1)
+guard correctedPass else { exit(1) }
+
+EeveeSpicyInstallPlaybackControls()
+let actions = MetadataPlaybackActions()
+_ = actions.model()
+player.state.options.shufflingContext = true
+player.state.timestamp = NSDate()
+let offSnapshot = bridge.sessionPayload() ?? [:]
+let coherentOff = offSnapshot["shuffleMode"] as? String == "off"
+    && offSnapshot["shuffleEnabled"] as? Bool == false
+print("\(coherentOff ? "PASS" : "FAIL") native three-state Off reaches the renderer without stale snapshot reconstruction")
+print("mode=\(offSnapshot["shuffleMode"] ?? "nil") enabled=\(offSnapshot["shuffleEnabled"] ?? "nil")")
+exit(coherentOff ? 0 : 1)

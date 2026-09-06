@@ -59,6 +59,18 @@ static NSNumber *readBool(id target, NSString *selectorName, id argument, BOOL t
     return @(result);
 }
 
+static NSNumber *readShuffleState(id target, NSString *selectorName, id argument) {
+    if (!argument) return nil;
+    NSInvocation *call = invocation(target, NSSelectorFromString(selectorName), 1);
+    if (!call || strcmp(unqualified(call.methodSignature.methodReturnType), "Q") != 0
+        || !isObject([call.methodSignature getArgumentTypeAtIndex:2])) return nil;
+    [call setArgument:&argument atIndex:2];
+    [call invoke];
+    NSUInteger mode = 0;
+    [call getReturnValue:&mode];
+    return mode <= 2 ? @(mode) : nil;
+}
+
 static id currentActions(void) {
     @synchronized(captureLock) { return playbackActions; }
 }
@@ -127,9 +139,19 @@ NSDictionary<NSString *, id> *EeveeSpicyReadControls(id state) {
         }
         id smart = readObject(actions, @"smartShuffleHandler");
         id context = shuffleContext(state);
-        NSNumber *enabled = context ? readBool(smart, @"checkIsEntitySmartShuffled:", context, YES) : nil;
+        // Use Spotify's complete state for this player snapshot. Its native
+        // implementation handles the in-flight Smart Shuffle state machine;
+        // an entity recommendation flag plus a separate boolean does not.
+        NSNumber *mode = context ? readShuffleState(smart, @"shuffleStateWithPlayerState:", state) : nil;
+        if (!mode && context) mode = readShuffleState(smart, @"shuffleStateWithEntityURL:", context);
+        NSNumber *enabled = mode ? @(mode.unsignedIntegerValue == 2)
+            : (context ? readBool(smart, @"checkIsEntitySmartShuffled:", context, YES) : nil);
         NSNumber *supported = readBool(actions, @"isSmartShuffleSupported", nil, NO);
         if (enabled) result[@"smartShuffleEnabled"] = enabled;
+        if (mode) {
+            result[@"shuffleMode"] = @[@"off", @"shuffle", @"smart"][mode.unsignedIntegerValue];
+            result[@"shuffleEnabled"] = @(mode.unsignedIntegerValue != 0);
+        }
         if (supported) result[@"smartShuffleAvailable"] = supported;
         return result;
     } @catch (NSException *exception) {

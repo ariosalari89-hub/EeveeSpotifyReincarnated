@@ -151,6 +151,21 @@ window.runSpicyTransitionChecks = async function (phase) {
     check('Smart Shuffle to Off does not flash the intermediate ordinary Shuffle state',
       transient.mode==='smart' && transient.pending && button.dataset.mode==='off' && !button.classList.contains('pending'),transient);
     SpicyQA.observe(smart);button.click();request=SpicyQA.messages.at(-1);
+    const count=SpicyQA.messages.filter(m=>m.type==='toggleShuffle').length;
+    button.click();
+    SpicyQA.observe(off);
+    const beforeAcknowledgement=[];
+    for(const deadline=performance.now()+100;performance.now()<deadline;){
+      await frame();beforeAcknowledgement.push({mode:button.dataset.mode,opacity:getComputedStyle(button).opacity});
+    }
+    SpicyQA.send('commandResult',{requestId:request.requestId,accepted:true});await frame();
+    const confirmedOpacity=getComputedStyle(button).opacity;
+    check('native Off arriving before dispatch acknowledgement never paints a temporary dim flash',
+      beforeAcknowledgement.length>=3 && beforeAcknowledgement.every(s=>s.mode==='off' && s.opacity===confirmedOpacity)
+        && !button.classList.contains('pending'),{beforeAcknowledgement,confirmedOpacity});
+    check('a pending shuffle command cannot dispatch a duplicate',
+      SpicyQA.messages.filter(m=>m.type==='toggleShuffle').length===count);
+    SpicyQA.observe(smart);button.click();request=SpicyQA.messages.at(-1);
     SpicyQA.observe(ordinary);SpicyQA.send('commandResult',{requestId:request.requestId,accepted:false});await frame();
     check('a failed Smart Shuffle command reveals the actual latest native state',
       button.dataset.mode==='shuffle' && !button.classList.contains('pending'));
