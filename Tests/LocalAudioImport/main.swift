@@ -209,6 +209,20 @@ do {
             print("PASS: \(source.pathExtension) imports without transcoding (\(audio.length) readable frames)")
         }
     }
+    try withDirectories { input, output in
+        let original = input.appendingPathComponent("Canonical.wav")
+        try makeAudio(at: original)
+        let before = try Data(contentsOf: original)
+        let encodedAlias = URL(string: input.absoluteString + "..%2Finput%2FCanonical.wav")!
+        let results = LocalAudioImporter(directory: output).importFiles([encodedAlias])
+        if let song = results[0].fileURL {
+            try expect(song.resolvingSymlinksInPath().deletingLastPathComponent() == output.resolvingSymlinksInPath(),
+                       "an encoded path separator must never redirect a successful output outside the song folder")
+        }
+        let after = try Data(contentsOf: original)
+        try expect(before == after, "rejecting or normalizing an encoded alias must preserve the original")
+        print("PASS: encoded URL path aliases cannot escape the native song source")
+    }
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)
