@@ -75,6 +75,9 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try tap("local_files_import", in: list)
             try await waitUntil("Import audio files must present the actual system document picker") { picker(in: navigation) != nil }
             let systemPicker = picker(in: navigation)!
+            try await waitUntil("the native picker presentation did not finish") {
+                systemPicker.viewIfLoaded?.window != nil && !systemPicker.isBeingPresented
+            }
             try expect(systemPicker.allowsMultipleSelection && systemPicker.documentPickerMode == .import,
                        "the native picker must select multiple copied files, not edit originals in place")
             try await capture("picker")
