@@ -24,26 +24,27 @@ final class LocalAudioArtworkService {
     func load(_ url: URL, isCancelled: @escaping () -> Bool, completion: @escaping (Data?) -> Void) -> Bool {
         guard let request = request(for: url) else { return false }
         queue.async { [library] in
-            guard !isCancelled(), let files = try? library.files() else { completion(nil); return }
+            guard !isCancelled() else { completion(nil); return }
             var matches: [LocalAudioFile] = []
-            for file in files {
-                guard !isCancelled() else { completion(nil); return }
-                switch request {
-                case .track(let identity):
+            switch request {
+            case .track(let identity):
+                guard let files = try? library.files() else { completion(nil); return }
+                for file in files {
+                    guard !isCancelled() else { completion(nil); return }
                     if identity.matches(file) { matches.append(file) }
-                case .file(let location):
-                    if location.resolvingSymlinksInPath() == file.fileURL.resolvingSymlinksInPath() { matches.append(file) }
+                    if matches.count > 1 { completion(nil); return }
                 }
-                if matches.count > 1 { completion(nil); return }
+            case .file(let location):
+                if let file = library.file(at: location) { matches = [file] }
             }
             guard let file = matches.first else { completion(nil); return }
             var error: NSError?
             var artwork: Data?
             NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: file.fileURL, options: [], error: &error) { location in
                 guard !isCancelled(), location.resolvingSymlinksInPath() == file.fileURL.resolvingSymlinksInPath(),
-                      (try? library.files().contains(file)) == true else { return }
+                      library.file(at: location) == file else { return }
                 artwork = LocalAudioArtworkReader.artwork(in: location)
-                if (try? library.files().contains(file)) != true { artwork = nil }
+                if library.file(at: location) != file { artwork = nil }
             }
             completion(isCancelled() ? nil : artwork)
         }

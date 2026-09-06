@@ -37,19 +37,32 @@ final class LocalAudioLibrary {
         }
         let urls = try manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil,
                                                    options: [.skipsHiddenFiles])
-        return urls.compactMap { url in
-            guard url.deletingLastPathComponent().standardizedFileURL == directory,
-                  let attributes = try? manager.attributesOfItem(atPath: url.path),
-                  attributes[.type] as? FileAttributeType == .typeRegular,
-                  let device = attributes[.systemNumber] as? NSNumber,
-                  let inode = attributes[.systemFileNumber] as? NSNumber,
-                  let size = attributes[.size] as? NSNumber,
-                  let modified = attributes[.modificationDate] as? Date,
-                  let created = attributes[.creationDate] as? Date,
-                  let audio = try? AVAudioFile(forReading: url), audio.length > 0 else { return nil }
-            return LocalAudioFile(id: device.stringValue + ":" + inode.stringValue, fileURL: url,
-                                  size: size.int64Value, modified: modified, created: created)
-        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return urls.compactMap(entry).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func file(at url: URL) -> LocalAudioFile? {
+        guard url.isFileURL,
+              url.deletingLastPathComponent().resolvingSymlinksInPath() == directory.resolvingSymlinksInPath(),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: directory.path),
+              attributes[.type] as? FileAttributeType == .typeDirectory else { return nil }
+        // Keep the library's canonical URL spelling while accepting the system
+        // coordinator's /private/var alias for the same containing directory.
+        return entry(at: directory.appendingPathComponent(url.lastPathComponent))
+    }
+
+    private func entry(at url: URL) -> LocalAudioFile? {
+        guard url.deletingLastPathComponent().standardizedFileURL == directory,
+              !url.lastPathComponent.hasPrefix("."),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let device = attributes[.systemNumber] as? NSNumber,
+              let inode = attributes[.systemFileNumber] as? NSNumber,
+              let size = attributes[.size] as? NSNumber,
+              let modified = attributes[.modificationDate] as? Date,
+              let created = attributes[.creationDate] as? Date,
+              let audio = try? AVAudioFile(forReading: url), audio.length > 0 else { return nil }
+        return LocalAudioFile(id: device.stringValue + ":" + inode.stringValue, fileURL: url,
+                              size: size.int64Value, modified: modified, created: created)
     }
 
     func rename(_ file: LocalAudioFile, toStem stem: String) throws -> LocalAudioFile {
