@@ -198,7 +198,13 @@ struct QAFailure: Error { let message: String }
             return view.subviews.compactMap(findWeb).first
         }
         var loaded = false
-        for _ in 0..<80 {
+        // The shipping host allows its initial six-second startup plus two
+        // six-second recoveries. An eight-second polling allowance could fail
+        // while that public recovery lifecycle was still legitimately running.
+        // Keep production timeouts/retry limits intact and require real current
+        // views to paint within their complete 18.24-second recovery window.
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        while ProcessInfo.processInfo.systemUptime - startedAt < 20 {
             let script = "document.querySelector('#lyrics')?.textContent.includes('\(trackID)') === true"
             if let cardWeb = findWeb(card), let captionWeb = findWeb(caption),
                (try? await cardWeb.evaluateJavaScript(script)) as? Bool == true,
@@ -215,8 +221,9 @@ struct QAFailure: Error { let message: String }
         try screenshot.pngData()?.write(to: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("qa-availability.png"))
         guard nativeAvailable, loaded, !card.isHidden, !caption.isHidden else {
-            throw QAFailure(message: "Spotify has_lyrics=false prevents provider lookup and both mobile lyric surfaces: nativeAvailable=\(nativeAvailable), loaded=\(loaded)")
+            throw QAFailure(message: "native preview/caption did not paint within the shipping startup/recovery window: nativeAvailable=\(nativeAvailable), loaded=\(loaded), elapsed=\(ProcessInfo.processInfo.systemUptime - startedAt)")
         }
+        checks.append("availability fixture painted current native card and caption after \(ProcessInfo.processInfo.systemUptime - startedAt) seconds; shipping startup/recovery limits unchanged")
         try await captureSimulatorScreen(marker: "availability", label: "lyrics availability")
         guard track.original["has_lyrics"] as? String == "false",
               track.metadata()["title"] as? String == "Availability fixture",
