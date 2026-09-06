@@ -44,7 +44,7 @@ BOOL EeveeLocalAudioInstallArtwork(EeveeLocalArtworkURLProvider provider, EeveeL
         SEL urlSelector = NSSelectorFromString(@"URL");
         SEL loadSelector = NSSelectorFromString(@"loadLocalFileImage");
         SEL successSelector = NSSelectorFromString(@"dispatchSuccess:");
-        SEL errorSelector = NSSelectorFromString(@"dispatchError");
+        SEL errorSelector = NSSelectorFromString(@"dispatchError:");
         Method metadata = class_getInstanceMethod(trackClass, metadataSelector);
         Method load = class_getInstanceMethod(requestClass, loadSelector);
         if (!provider || !loader || !compatible(metadata, '@', 0, NO) ||
@@ -53,7 +53,7 @@ BOOL EeveeLocalAudioInstallArtwork(EeveeLocalArtworkURLProvider provider, EeveeL
             !compatible(class_getInstanceMethod(requestClass, urlSelector), '@', 0, NO) ||
             !compatible(class_getInstanceMethod(requestClass, NSSelectorFromString(@"cancelled")), 'B', 0, NO) ||
             !compatible(class_getInstanceMethod(requestClass, successSelector), 'v', 1, YES) ||
-            !compatible(class_getInstanceMethod(requestClass, errorSelector), 'v', 0, NO)) return;
+            !compatible(class_getInstanceMethod(requestClass, errorSelector), 'v', 1, YES)) return;
 
         IMP originalLoad = method_getImplementation(load);
         IMP originalMetadata = method_getImplementation(metadata);
@@ -78,8 +78,10 @@ BOOL EeveeLocalAudioInstallArtwork(EeveeLocalArtworkURLProvider provider, EeveeL
                     }
                 } else {
                     Method failure = class_getInstanceMethod(object_getClass(request), errorSelector);
-                    if (compatible(failure, 'v', 0, NO)) {
-                        ((void (*)(id, SEL))method_getImplementation(failure))(request, errorSelector);
+                    if (compatible(failure, 'v', 1, YES)) {
+                        NSError *error = [NSError errorWithDomain:@"EeveeSpotify.LocalArtwork" code:1
+                            userInfo:@{NSLocalizedDescriptionKey: @"Embedded artwork is unavailable."}];
+                        ((void (*)(id, SEL, id))method_getImplementation(failure))(request, errorSelector, error);
                     }
                 }
             });
