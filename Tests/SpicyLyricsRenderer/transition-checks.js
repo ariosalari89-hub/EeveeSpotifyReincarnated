@@ -394,10 +394,14 @@ window.runSpicyTransitionChecks = async function (phase) {
       entering.push({scale:parseFloat(s.scale)||1,opacity:Number(getComputedStyle(row).opacity)});
     }
     const activeHeight = row.getBoundingClientRect().height;
+    const exitStarted = performance.now(), exitStartedAtMs = Date.now();
     SpicyQA.observe({...paused,positionMs:7520});
-    const exiting = [];
+    const exiting = [], exitFrames = [];
     for (const end = performance.now()+470; performance.now()<end;) {
-      await frame(); exiting.push(parseFloat(getComputedStyle(group()).scale));
+      await frame();
+      const style = getComputedStyle(group()), scale = parseFloat(style.scale);
+      exiting.push(scale);
+      exitFrames.push({elapsed:performance.now()-exitStarted,scale,opacity:Number(style.opacity)});
     }
     const exitedScale = getComputedStyle(group()).scale;
     SpicyQA.observe({...paused,positionMs:8100}); await wait(300);
@@ -407,7 +411,7 @@ window.runSpicyTransitionChecks = async function (phase) {
         && entering.some(s=>s.scale>.05&&s.scale<.95)
         && entering.at(-1).scale>=.99
         && exiting.some(s=>s>.05&&s<.95) && Number(exitedScale)===0 && after===0,
-      {before,activeHeight,entering,exiting,exitedScale,after});
+      {before,activeHeight,entering,exiting,exitFrames,exitStartedAtMs,exitedScale,after});
     SpicyQA.observe({...paused,positionMs:4000}); await wait(420);
     check(`${surface}: seeking back restores the pause dots`,
       row.getBoundingClientRect().height>0 && parseFloat(getComputedStyle(group()).scale)>=.99);
