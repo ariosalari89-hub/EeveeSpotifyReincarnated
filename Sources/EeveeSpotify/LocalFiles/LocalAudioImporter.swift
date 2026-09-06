@@ -66,6 +66,9 @@ final class LocalAudioImporter {
                      progress: (LocalAudioImportProgress) -> Void = { _ in }) -> [LocalAudioImportResult] {
         urls.enumerated().map { index, source in
             defer { progress(LocalAudioImportProgress(completedFiles: index + 1, totalFiles: urls.count)) }
+            guard !cancellation.isCancelled else {
+                return LocalAudioImportResult(sourceName: source.lastPathComponent, outcome: .cancelled)
+            }
             do {
                 try validate(source)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
