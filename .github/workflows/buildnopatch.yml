@@ -135,6 +135,7 @@ jobs:
             ${{ runner.temp }}/local-audio-result.txt
             ${{ runner.temp }}/local-audio-ui-result.txt
             ${{ runner.temp }}/local-audio-ui-progress.txt
+            ${{ runner.temp }}/local-audio-layout.json
             ${{ runner.temp }}/local-audio-*.png
           if-no-files-found: warn
 
@@ -151,6 +152,7 @@ jobs:
           path: |
             ${{ runner.temp }}/local-audio-ui-result.txt
             ${{ runner.temp }}/local-audio-ui-progress.txt
+            ${{ runner.temp }}/local-audio-layout.json
             ${{ runner.temp }}/local-audio-*.png
           if-no-files-found: warn
 

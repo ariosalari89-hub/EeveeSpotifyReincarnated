@@ -105,6 +105,7 @@ final class CoordinatedInputHold {
 final class QAAppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     var openedRoutes: [URL] = []
+    var routeAccepted = true
     let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
@@ -121,7 +122,7 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
     func makeHost() -> UIViewController {
         let host = UIHostingController(rootView: LocalFilesSettingsView(openURL: { [weak self] url, completion in
             self?.openedRoutes.append(url)
-            completion(true)
+            completion(self?.routeAccepted ?? false)
         }))
         host.title = "local_files_title".localized
         return host
@@ -161,8 +162,10 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
                        "Open Local Files must request Spotify's native collection through the no-effect route boundary")
             try await stopAcrossNavigation(navigation: navigation)
             try await cancelAndRetry(navigation: navigation)
+            try await verifyRouteFallback(navigation: navigation)
+            try await verifyLayouts(returningTo: navigation)
             mark("Native import output verified")
-            try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS: Open Local Files requests the native collection route\nPASS: stop across native page navigation retains completed songs and cancels waiting work\nPASS: cancelling the picker preserves results and a mixed retry reports real WAV/MP3/AAC copies, duplicate and failed audio\nPASS\n"
+            try "PASS: native import action presents the multi-audio copy picker\nPASS: real picker completion produces playable output and a visible Copied receipt\nPASS: Open Local Files requests the native collection route\nPASS: stop across native page navigation retains completed songs and cancels waiting work\nPASS: cancelling the picker preserves results and a mixed retry reports real WAV/MP3/AAC copies, duplicate and failed audio\nPASS: an unavailable native route presents a manual collection path\nPASS: native light, dark, narrow, landscape, large-text and RTL layout/accessibility checks\nPASS\n"
                 .write(to: documents.appendingPathComponent("local-audio-ui-result.txt"), atomically: true, encoding: .utf8)
         } catch {
             try? await capture("failure")

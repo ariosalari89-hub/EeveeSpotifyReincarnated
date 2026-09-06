@@ -58,6 +58,7 @@ for iteration in {1..150}; do
   fi
   if [ -s "$CONTAINER/Documents/local-audio-ui-result.txt" ]; then
     cp "$CONTAINER/Documents/local-audio-ui-result.txt" "$RUNNER_TEMP/local-audio-ui-result.txt"
+    [ ! -f "$CONTAINER/Documents/local-audio-layout.json" ] || cp "$CONTAINER/Documents/local-audio-layout.json" "$RUNNER_TEMP/"
     for CAPTURE in "$CONTAINER/Documents/local-audio-"*.png; do
       [ ! -f "$CAPTURE" ] || cp "$CAPTURE" "$RUNNER_TEMP/$(basename "$CAPTURE")"
     done
