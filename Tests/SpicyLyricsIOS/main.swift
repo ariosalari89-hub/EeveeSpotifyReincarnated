@@ -977,7 +977,7 @@ struct QAFailure: Error { let message: String }
             .flatMap { phase in ["fullscreen", "card", "inline"].map { "desktop-\(phase)-\($0)" } }
             + ["desktop-shuffle-fullscreen", "desktop-backdrop-fullscreen"]
         let phases = baseline ? ["inline", "card"]
-            : ["inline", "card", "background", "highlight", "card-layout", "background-style", "background-speed",
+            : ["inline", "card", "background", "highlight", "card-layout", "background-style", "background-speed", "background-motion-perception", "background-lifecycle",
                "gradient-recovery", "shuffle-availability", "shuffle-settlement"] + desktopPhases
         for phase in phases {
             let phaseRows = try await rendererTransitionPhase(phase, baseline: baseline)

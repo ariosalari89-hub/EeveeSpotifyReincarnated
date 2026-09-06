@@ -1,5 +1,5 @@
 #requires -Version 7.0
-param([Parameter(Mandatory)][string]$EvidenceDir, [Parameter(Mandatory)][string]$ArtworkPath)
+param([Parameter(Mandatory)][string]$EvidenceDir, [Parameter(Mandatory)][string]$ArtworkPath, [ValidateSet('artwork','gradient')][string]$BackgroundStyle = 'artwork')
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $page = Join-Path $repo 'layout\Library\Application Support\EeveeSpotify.bundle\SpicyLyricsRenderer\index.html'
@@ -31,6 +31,7 @@ try {
 })()
 '@
     $null = Eval-Visual "(async()=>{SpicyQA.sendSession({trackId:'qa-line',positionMs:62000,durationMs:221000,isPlaying:false,isPaused:true,isAdvancing:false,track:{id:'qa-line',title:'make you mine',artist:'Madison Beer',artwork:'$artwork'}});await document.fonts.ready;await new Promise(r=>setTimeout(r,650));return JSON.stringify({ready:true});})()"
+    $null = Eval-Visual "(()=>{const picker=document.querySelector('#background-style');picker.value='$BackgroundStyle';picker.dispatchEvent(new Event('change',{bubbles:true}));return JSON.stringify({style:picker.value});})()"
     foreach ($size in @(@(393,852),@(852,393),@(320,568),@(568,320))) {
         & agent-browser --session $session set viewport $size[0] $size[1] | Out-Null
         $result = Eval-Visual @'
@@ -59,7 +60,7 @@ try {
     & agent-browser --session $session a11y --json | Write-Host
     foreach ($size in @(@(360,320),@(280,240))) {
         & agent-browser --session $session set viewport $size[0] $size[1] | Out-Null
-        $null = Eval-Visual "(async()=>{SpicyQA.send('bootstrap',{surface:'card',preferences:{fontSize:100,dynamicBackground:false}});SpicyQA.sendSession({trackId:'qa-line',positionMs:62000,durationMs:221000,isPlaying:false,isPaused:true,isAdvancing:false,track:{id:'qa-line',title:'make you mine',artist:'Madison Beer',artwork:'$artwork'}});await new Promise(r=>setTimeout(r,650));return JSON.stringify({ready:true});})()"
+        $null = Eval-Visual "(async()=>{SpicyQA.send('bootstrap',{surface:'card',preferences:{fontSize:100,dynamicBackground:false,backgroundStyle:'$BackgroundStyle'}});SpicyQA.sendSession({trackId:'qa-line',positionMs:62000,durationMs:221000,isPlaying:false,isPaused:true,isAdvancing:false,track:{id:'qa-line',title:'make you mine',artist:'Madison Beer',artwork:'$artwork'}});await new Promise(r=>setTimeout(r,650));return JSON.stringify({ready:true});})()"
         & agent-browser --session $session screenshot (Join-Path $EvidenceDir "preview-$($size[0])x$($size[1]).png") | Out-Null
         & agent-browser --session $session a11y --json | Write-Host
     }

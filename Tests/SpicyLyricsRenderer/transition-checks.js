@@ -56,8 +56,56 @@ window.runSpicyTransitionChecks = async function (phase) {
   const bootstrap = (surface, reduceMotion = false) => SpicyQA.send('bootstrap', {
     surface, reduceMotion, preferences: { fontSize: 100, playbackOffset: 0, dynamicBackground: false }
   });
+  if (phase === 'background-lifecycle') {
+    const playing={isPlaying:true,isPaused:false,isAdvancing:true};
+    const preferences={romanized:false,translations:true,dynamicBackground:true,backgroundStyle:'artwork',backgroundSpeed:175,fontSize:100,playbackOffset:0};
+    SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences});
+    SpicyQA.scenario('karaoke',playing);
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=32;
+    const context=canvas.getContext('2d');context.fillStyle='#365b87';context.fillRect(0,0,32,32);
+    context.fillStyle='#b96b40';context.fillRect(16,0,16,32);
+    const track={...SpicyQA.tracks.karaoke,artwork:canvas.toDataURL()};
+    const observe=options=>SpicyQA.sendSession({track,...options});observe(playing);
+    const backdrop=document.querySelector('#artwork-backdrop');
+    for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(backdrop.classList.contains('is-animated'))break;}
+    const originalLine=document.querySelector('#lyrics .lyric-line');
+    const moves=async()=>{await frame();await frame();const start=getComputedStyle(backdrop).transform;await wait(160);await frame();return start!==getComputedStyle(backdrop).transform;};
+    for(const style of ['artwork','gradient']) {
+      const pref={...preferences,backgroundStyle:style};SpicyQA.send('preferences',pref);
+      const started=await moves();observe(paused);const pausedStill=!(await moves());
+      observe(playing);const resumed=await moves();SpicyQA.send('lifecycle',{state:'hidden'});const hiddenStill=!(await moves());
+      SpicyQA.send('preferences',{...pref,dynamicBackground:false});SpicyQA.send('lifecycle',{state:'visible'});
+      const offStill=!(await moves());SpicyQA.send('preferences',pref);const reopened=await moves();
+      SpicyQA.send('accessibility',{reduceMotion:true});const reducedStill=!(await moves());
+      const reducedDisabled=document.querySelector('#background-speed').disabled;
+      const reason=document.querySelector('#background-motion-note');
+      const explained=Boolean(reason && !reason.hidden && reason.textContent==='Reduced Motion is on');
+      SpicyQA.send('accessibility',{reduceMotion:false});const restored=await moves();
+      check(`${style}: saved motion survives pause, hide, live settings and Reduced Motion changes`,
+        started && pausedStill && resumed && hiddenStill && offStill && reopened && reducedStill && reducedDisabled && explained && restored
+          && reason.hidden && !document.querySelector('#background-speed').disabled
+          && document.querySelector('#background-speed').value==='175' && document.querySelector('#lyrics .lyric-line')===originalLine,
+        {started,pausedStill,resumed,hiddenStill,offStill,reopened,reducedStill,reducedDisabled,explained,restored});
+    }
+  }
+  if (phase === 'background-motion-perception') {
+    SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{dynamicBackground:true,backgroundSpeed:100}});
+    SpicyQA.scenario('karaoke',{isPlaying:true,isPaused:false,isAdvancing:true});
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=32;
+    const context=canvas.getContext('2d');context.fillStyle='#365b87';context.fillRect(0,0,32,32);
+    context.fillStyle='#b96b40';context.fillRect(16,0,16,16);context.fillRect(0,16,16,16);
+    SpicyQA.sendSession({track:{...SpicyQA.tracks.karaoke,artwork:canvas.toDataURL()},isPlaying:true,isPaused:false,isAdvancing:true});
+    const backdrop=document.querySelector('#artwork-backdrop');
+    for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(backdrop.classList.contains('is-animated'))break;}
+    await waitForSteadyFrames();
+    const matrix=()=>new DOMMatrixReadOnly(getComputedStyle(backdrop).transform);
+    const start=matrix();await wait(1000);await frame();const end=matrix();
+    const movement=Math.hypot(end.e-start.e,end.f-start.f);
+    check('default cover motion is perceptible within one second of opening lyrics',movement>=2,{movement,start:start.toString(),end:end.toString()});
+  }
   if (phase === 'gradient-network') {
     SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:true,preferences:{backgroundStyle:'gradient'}});
+    SpicyQA.scenario('karaoke',paused);
     const backdrop=document.querySelector('#artwork-backdrop'),origin=SpicyQA.artworkOrigin;
     if(!origin)throw new Error('Artwork network fixture origin is required');
     SpicyQA.sendSession({...paused,track:{...SpicyQA.tracks.karaoke,artwork:origin+'/cors.svg',dominantColor:''}});
@@ -76,6 +124,7 @@ window.runSpicyTransitionChecks = async function (phase) {
   }
   if (phase === 'gradient-recovery') {
     SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:true,preferences:{backgroundStyle:'gradient',dynamicBackground:true}});
+    SpicyQA.scenario('karaoke',paused);
     const backdrop=document.querySelector('#artwork-backdrop');
     const send=track=>SpicyQA.sendSession({...paused,track:{...SpicyQA.tracks.karaoke,...track}});
     send({artwork:'',dominantColor:'#2a7e91'});await frame();
@@ -93,6 +142,7 @@ window.runSpicyTransitionChecks = async function (phase) {
   }
   if (phase === 'background-speed') {
     SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{dynamicBackground:true}});
+    SpicyQA.scenario('karaoke',{isPlaying:true,isPaused:false,isAdvancing:true});
     const canvas=document.createElement('canvas');canvas.width=canvas.height=16;
     const ctx=canvas.getContext('2d');ctx.fillStyle='#cc3333';ctx.fillRect(0,0,8,16);
     ctx.fillStyle='#3366cc';ctx.fillRect(8,0,8,16);
@@ -128,6 +178,7 @@ window.runSpicyTransitionChecks = async function (phase) {
   }
   if (phase === 'background-style') {
     bootstrap('fullscreen',true);
+    SpicyQA.scenario('karaoke',paused);
     const canvas=document.createElement('canvas');canvas.width=canvas.height=64;
     const ctx=canvas.getContext('2d');ctx.fillStyle='#cc3333';ctx.fillRect(0,0,32,64);
     ctx.fillStyle='#3366cc';ctx.fillRect(32,0,32,64);
@@ -197,7 +248,18 @@ window.runSpicyTransitionChecks = async function (phase) {
     const surface=phase.slice('desktop-layout-'.length);
     bootstrap(surface,true);
     SpicyQA.lyrics.line.Content=Array.from({length:40},(_,i)=>({Type:'Vocal',Text:`Phrase ${i}`,StartTime:i*2,EndTime:i*2+2}));
-    SpicyQA.scenario('line',{...paused,positionMs:40100,durationMs:80000});await document.fonts.ready;await wait(350);
+    SpicyQA.scenario('line',{...paused,positionMs:40100,durationMs:80000});await document.fonts.ready;
+    // Retain the original layout-settlement interval: surface and viewport
+    // resizing can finish after the first current-lyric frames. The additional
+    // paint precondition handles cold native startup, not a shorter deadline.
+    await wait(350);
+    let layoutReadyFrames=0;
+    for(const deadline=performance.now()+3000;performance.now()<deadline && layoutReadyFrames<2;) {
+      await frame();
+      layoutReadyFrames=document.querySelector('#lyrics [aria-current]')?.textContent==='Phrase 20'
+        && Number(document.querySelector('#seek').value)===40100 ? layoutReadyFrames+1 : 0;
+    }
+    if(layoutReadyFrames<2)throw new Error('Current lyric did not paint before measuring the layout anchor');
     if (surface!=='inline') {
       const line=document.querySelector('.lead.active').getBoundingClientRect();
       const scroller=document.querySelector('#lyrics-scroller').getBoundingClientRect();
@@ -269,9 +331,9 @@ window.runSpicyTransitionChecks = async function (phase) {
     const veilStyle = getComputedStyle(document.querySelector('.contrast-veil'));
     const veil = veilStyle.backgroundImage;
     const backdrop = getComputedStyle(document.querySelector('#artwork-backdrop'));
-    check(`${surface}: artwork has a single lighter veil without a stacked dark base at the existing blur`,
+    check(`${surface}: cover keeps a clear central veil without an opaque base or heavy blur`,
       veilStyle.backgroundColor==='rgba(0, 0, 0, 0)'
-        && veil.includes('0.5) 48%') && backdrop.filter.includes('blur(6px)'),
+        && veil.includes('0.1) 36%') && backdrop.filter.includes('blur(2px)'),
       {veil,base:veilStyle.backgroundColor,filter:backdrop.filter});
   }
   if (phase === 'desktop-shuffle-fullscreen') {

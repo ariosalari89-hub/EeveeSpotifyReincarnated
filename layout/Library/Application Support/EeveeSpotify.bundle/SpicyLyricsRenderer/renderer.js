@@ -42,6 +42,7 @@
     backgroundStyle: $("#background-style"),
     backgroundSpeed: $("#background-speed"),
     backgroundSpeedOutput: $("#background-speed-output"),
+    backgroundMotionNote: $("#background-motion-note"),
     fontSize: $("#font-size"),
     fontOutput: $("#font-output"),
     playbackOffset: $("#playback-offset"),
@@ -1089,6 +1090,9 @@
     dom.backgroundSpeedOutput.value = backgroundRate;
     dom.backgroundSpeed.setAttribute("aria-valuetext", backgroundRate);
     dom.backgroundSpeed.disabled = !state.preferences.dynamicBackground || reduceMotion();
+    dom.backgroundMotionNote.hidden = !state.preferences.dynamicBackground || !reduceMotion();
+    if (dom.backgroundMotionNote.hidden) dom.backgroundSpeed.removeAttribute("aria-describedby");
+    else dom.backgroundSpeed.setAttribute("aria-describedby", "background-motion-note");
     dom.fontSize.value = String(state.preferences.fontSize);
     dom.fontOutput.value = `${state.preferences.fontSize}%`;
     dom.playbackOffset.value = String(state.preferences.playbackOffset);
@@ -1446,7 +1450,7 @@
     }
     if (event.key !== "Tab" || !settingsOpen) return;
     const focusable = [...dom.settingsSheet.querySelectorAll(
-      'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
     )].filter((element) => !element.hidden);
     if (!focusable.length) return;
     const first = focusable[0];

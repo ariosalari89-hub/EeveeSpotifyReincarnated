@@ -42,6 +42,7 @@ button { -webkit-tap-highlight-color: transparent; }
   opacity: 1;
   transform: scale(1.24);
   animation: artwork-drift 24s ease-in-out infinite alternate;
+  animation-delay: -6s;
   animation-play-state: paused;
 }
 #artwork-backdrop.is-animated { animation-play-state: running; }
@@ -57,8 +58,8 @@ button { -webkit-tap-highlight-color: transparent; }
   66% { transform: scale(1.55) translate3d(-2%, 5%, 0) rotate(-3deg); }
 }
 @keyframes artwork-drift {
-  from { transform: scale(1.24) translate3d(-1%, 1%, 0); }
-  to { transform: scale(1.28) translate3d(1%, -1%, 0); }
+  from { transform: scale(1.24) translate3d(-4%, 4%, 0); }
+  to { transform: scale(1.28) translate3d(4%, -4%, 0); }
 }
 .contrast-veil {
   z-index: 1;
@@ -287,7 +288,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .is-playing .pause-icon { display: block; }
 button.pending { pointer-events: none; }
 button.pending:not(#shuffle-button) { opacity: .55; }
-button:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 
 .settings-scrim { position: fixed; z-index: 8; inset: 0; background: rgba(0,0,0,.48); backdrop-filter: blur(5px); animation: fade-in .2s ease; }
 .settings-sheet { position: fixed; z-index: 9; right: max(14px, var(--safe-right)); top: calc(var(--safe-top) + 60px); width: min(370px, calc(100vw - var(--safe-left) - var(--safe-right) - 28px)); max-height: calc(100vh - var(--safe-top) - var(--safe-bottom) - 72px); overflow-y: auto; overscroll-behavior: contain; padding: 8px 18px calc(20px + var(--safe-bottom)); border: 1px solid rgba(255,255,255,.11); border-radius: 22px; background: rgba(20,20,20,.9); box-shadow: 0 24px 80px rgba(0,0,0,.5); backdrop-filter: blur(34px) saturate(1.25); animation: sheet-in .32s var(--ease-spring); }
