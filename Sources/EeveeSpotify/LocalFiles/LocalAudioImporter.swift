@@ -89,7 +89,11 @@ final class LocalAudioImporter {
                     try checkCancellation(cancellation)
                     let suffix = index == 1 ? "" : " (\(index))"
                     let ext = source.pathExtension.isEmpty ? "" : "." + source.pathExtension
-                    let name = source.deletingPathExtension().lastPathComponent + suffix + ext
+                    var stem = source.deletingPathExtension().lastPathComponent
+                    let byteBudget = 255 - (suffix + ext).utf8.count
+                    while !stem.isEmpty && stem.utf8.count > byteBudget { stem.removeLast() }
+                    guard !stem.isEmpty else { throw LocalAudioImportFailure.cannotCopy }
+                    let name = stem + suffix + ext
                     let destination = directory.appendingPathComponent(name)
                     if FileManager.default.fileExists(atPath: destination.path) {
                         if FileManager.default.contentsEqual(atPath: stage.path, andPath: destination.path) {
