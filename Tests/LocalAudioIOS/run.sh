@@ -41,8 +41,8 @@ if [ "$OWN_DEVICE" = true ]; then
 fi
 xcrun simctl install "$DEVICE" "$QA_APP"
 CONTAINER=$(xcrun simctl get_app_container "$DEVICE" local.eevee.audioqa data)
-# Warm the cold display-capture channel before the app's bounded screenshot
-# handshakes begin. Simulator setup is not part of a picker/import deadline.
+# Confirm the cold display channel before app launch. Simulator setup is not
+# part of a picker/import deadline.
 xcrun simctl io "$DEVICE" screenshot --type=png "$QA_DIR/preflight-screen.png"
 xcrun simctl launch "$DEVICE" local.eevee.audioqa
 LAST_PROGRESS=""
@@ -55,17 +55,16 @@ for iteration in {1..150}; do
       LAST_PROGRESS="$PROGRESS"
     fi
   fi
-  if [ -s "$CONTAINER/Documents/local-audio-capture.txt" ]; then
-    CAPTURE=$(cat "$CONTAINER/Documents/local-audio-capture.txt")
-    if [[ "$CAPTURE" =~ ^[a-z-]+$ ]] && [ ! -f "$CONTAINER/Documents/capture-$CAPTURE.done" ]; then
-      xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/local-audio-$CAPTURE.png"
-      touch "$CONTAINER/Documents/capture-$CAPTURE.done"
-    fi
-  fi
   if [ -s "$CONTAINER/Documents/local-audio-ui-result.txt" ]; then
     cp "$CONTAINER/Documents/local-audio-ui-result.txt" "$RUNNER_TEMP/local-audio-ui-result.txt"
+    for CAPTURE in "$CONTAINER/Documents/local-audio-"*.png; do
+      [ ! -f "$CAPTURE" ] || cp "$CAPTURE" "$RUNNER_TEMP/$(basename "$CAPTURE")"
+    done
     cat "$RUNNER_TEMP/local-audio-ui-result.txt"
     grep -q '^PASS$' "$RUNNER_TEMP/local-audio-ui-result.txt"
+    # The app remains on its finished screen. A slow external display service
+    # can no longer prevent the next independent UI behavior from being tested.
+    xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/local-audio-screen.png"
     exit
   fi
   sleep 1

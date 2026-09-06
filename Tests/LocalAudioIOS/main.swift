@@ -104,7 +104,6 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             }
             try expect(systemPicker.allowsMultipleSelection && systemPicker.documentPickerMode == .import,
                        "the native picker must select multiple copied files, not edit originals in place")
-            try await capture("picker")
             mark("Submitting selected audio through the native picker delegate")
             let original = FileManager.default.temporaryDirectory.appendingPathComponent("Picked song.wav")
             try makeAudio(at: original)
@@ -132,11 +131,19 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func capture(_ name: String) async throws {
-        mark("Capture requested: " + name)
-        try name.write(to: documents.appendingPathComponent("local-audio-capture.txt"), atomically: true, encoding: .utf8)
-        try await waitUntil("native screenshot was not captured", seconds: 40) {
-            FileManager.default.fileExists(atPath: self.documents.appendingPathComponent("capture-\(name).done").path)
+        // Capture the real owned UIKit view without waiting on simctl's display
+        // service. The runner takes a separate compositor screenshot after all
+        // behavior checks finish; the real system picker capture is retained
+        // from its first successful integration run.
+        guard let window = window else { throw Failure(description: "no native window to render") }
+        window.layoutIfNeeded()
+        var rendered = false
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            rendered = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
+        guard rendered, let png = image.pngData() else { throw Failure(description: "native view rendering failed") }
+        try png.write(to: documents.appendingPathComponent("local-audio-\(name).png"))
+        mark("UIKit view captured: " + name)
     }
 
     func mark(_ message: String) {
