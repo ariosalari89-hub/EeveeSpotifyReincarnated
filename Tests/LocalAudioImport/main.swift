@@ -9,11 +9,11 @@ func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     guard condition() else { throw TestFailure(description: message) }
 }
 
-func makeAudio(at url: URL, value: Float = 0.125) throws {
+func makeAudio(at url: URL, value: Float = 0.125, frames: AVAudioFrameCount = 4_410) throws {
     let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
-    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_410)!
-    buffer.frameLength = 4_410
-    for frame in 0..<4_410 { buffer.floatChannelData![0][frame] = value }
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+    buffer.frameLength = frames
+    for frame in 0..<Int(frames) { buffer.floatChannelData![0][frame] = value }
     let file = try AVAudioFile(forWriting: url, settings: format.settings)
     try file.write(from: buffer)
 }
@@ -123,6 +123,29 @@ do {
         try expect(files == ["Completed.wav"] && tryAudioFrames(kept) == 4_410,
                    "cancellation retains completed playable output without adding unfinished selections")
         print("PASS: stop retains the completed song and reports unstarted items as cancelled")
+    }
+    try withDirectories { input, output in
+        let original = input.appendingPathComponent("Stop during copy.wav")
+        try makeAudio(at: original, frames: 800_000)
+        let originalBytes = try Data(contentsOf: original)
+        let cancellation = LocalAudioImportCancellation()
+        var observedByteProgress = false
+        var exposedIncompleteSong = false
+        let results = LocalAudioImporter(directory: output).importFiles([original], cancellation: cancellation) { progress in
+            if progress.copiedBytes > 0 && progress.copiedBytes < progress.totalBytes {
+                observedByteProgress = true
+                exposedIncompleteSong = !((try? FileManager.default.contentsOfDirectory(atPath: output.path)) ?? []).isEmpty
+                cancellation.cancel()
+            }
+        }
+        guard observedByteProgress, case .cancelled = results[0].outcome else {
+            throw TestFailure(description: "a running file copy must expose real progress and be stoppable before it commits")
+        }
+        let finalFiles = (try? FileManager.default.contentsOfDirectory(atPath: output.path)) ?? []
+        let preserved = try Data(contentsOf: original)
+        try expect(!exposedIncompleteSong && finalFiles.isEmpty && preserved == originalBytes,
+                   "an interrupted file must never appear in the native song folder or modify the original")
+        print("PASS: a running copy can stop without exposing a partial song")
     }
     print("PASS")
 } catch {
