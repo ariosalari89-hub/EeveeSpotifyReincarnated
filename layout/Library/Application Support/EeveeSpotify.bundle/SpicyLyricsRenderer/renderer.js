@@ -607,6 +607,10 @@
     const parent = dom.scroller.parentElement;
     const bounds = parent.getBoundingClientRect();
     const ghost = line.element.cloneNode(true);
+    // A paged caption needs only its painted phrase in the frozen outgoing
+    // layer, not every hidden word/letter and their compositor hints.
+    ghost.querySelectorAll("[hidden]").forEach(node => node.remove());
+    ghost.classList.remove("effects-near");
     ghost.classList.add("caption-outgoing");
     ghost.removeAttribute("aria-current");
     ghost.setAttribute("aria-hidden", "true");
@@ -714,12 +718,15 @@
     return nextIsNear ? index : -1;
   }
 
-  function paintEffects(owner, element, kind, progress, dt, snap, override) {
+  function paintEffects(owner, element, kind, progress, dt, snap, override, shouldPaint = true) {
     owner.effects ||= effects.create(kind);
     const target = override || effects.targets(kind, progress);
     if (reduceMotion()) Object.assign(target, { scale: 1, y: 0, glow: 0 });
     const value = effects.step(owner.effects, target, dt, snap);
     state.effectsMoving ||= value.moving;
+    // Keep hidden caption spring state on the same clock, but defer its DOM
+    // paint until that word's actual page becomes visible (including rewinds).
+    if (!shouldPaint) return;
     const glow = Math.max(0, value.glow);
     const paint = {
       "--text-shadow-blur-radius": `${(4 + (kind === "dot" ? 6 : kind === "line" ? 8 : kind === "letter" ? 12 : 2) * glow).toFixed(3)}px`,
@@ -872,25 +879,27 @@
       }
       (line.tokens || []).forEach((token) => {
         if (!token.element) return;
+        const shouldPaint = state.surface !== "inline"
+          || !token.element.parentElement?.hidden;
         const progress = model.tokenProgress(token, position);
         const fill = `${(progress * 100).toFixed(2)}%`;
         const gradient = `${(-20 + progress * 120).toFixed(2)}%`;
-        if (token.paintFill !== fill) {
+        if (shouldPaint && token.paintFill !== fill) {
           token.paintFill = fill;
           token.element.style.setProperty("--fill", fill);
           token.element.style.setProperty("--gradient-position", gradient);
         }
         const motionProgress = token.letters.length
           ? (position - token.start) / (token.end - token.start - 250) : progress;
-        paintEffects(token, token.element, "word", motionProgress, dt, snapEffects);
+        paintEffects(token, token.element, "word", motionProgress, dt, snapEffects, undefined, shouldPaint);
         token.letters.forEach((letter, letterIndex) => {
           const target = effects.letterTargets(letterIndex, token.letters.length, motionProgress);
           const letterGradient = `${target.gradient.toFixed(2)}%`;
-          if (letter.paintGradient !== letterGradient) {
+          if (shouldPaint && letter.paintGradient !== letterGradient) {
             letter.paintGradient = letterGradient;
             letter.element.style.setProperty("--gradient-position", letterGradient);
           }
-          paintEffects(letter, letter.element, "letter", 0, dt, snapEffects, target);
+          paintEffects(letter, letter.element, "letter", 0, dt, snapEffects, target, shouldPaint);
         });
       });
     }

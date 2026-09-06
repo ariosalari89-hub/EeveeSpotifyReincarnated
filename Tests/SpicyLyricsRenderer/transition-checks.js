@@ -388,12 +388,36 @@ window.runSpicyTransitionChecks = async function (phase) {
   await wait(350);
   SpicyQA.observe({ ...paused, positionMs: 15500 });
   const pageOpacity = [];
+  const pageGhosts = [];
+  let hiddenPageWrites = 0, hiddenPageNodes = 0, hiddenPageObserver = null;
   for (const deadline = performance.now() + 350; performance.now() < deadline;) {
     await frame(); pageOpacity.push(Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity));
+    const ghost = document.querySelector('.caption-outgoing');
+    if (ghost) pageGhosts.push({ hidden: ghost.querySelectorAll('[hidden]').length,
+      tokens: ghost.querySelectorAll('.token').length });
+    if (!hiddenPageObserver) {
+      const hidden = [...document.querySelectorAll('#lyrics .inline-visible .word-group[hidden]')];
+      hiddenPageNodes = hidden.length;
+      hiddenPageObserver = new MutationObserver(records => { hiddenPageWrites += records.length; });
+      hidden.forEach(node => hiddenPageObserver.observe(node,
+        { attributes: true, attributeFilter: ['style'], subtree: true }));
+    }
   }
+  hiddenPageObserver?.disconnect();
   const currentWord = [...document.querySelectorAll('#lyrics .inline-visible .token')].find(e=>e.textContent==='Pageword15 ');
   check('caption word-boundary pages blend and keep the actual timed word visible',
     pageOpacity.some(o=>o>.05&&o<.95) && currentWord.getClientRects().length>0 && !document.querySelector('.caption-outgoing'),pageOpacity);
+  check('the outgoing caption snapshot contains only its visible word-boundary page',
+    pageGhosts.length > 0 && pageGhosts.every(g=>g.hidden===0 && g.tokens>0 && g.tokens<20),pageGhosts);
+  check('hidden caption pages do not receive repeated glyph style writes during a page transition',
+    hiddenPageNodes > 0 && hiddenPageWrites === 0,{hiddenPageNodes,hiddenPageWrites});
+  SpicyQA.observe({ ...paused, positionMs: 500 });
+  await frame();
+  const rewoundWord = [...document.querySelectorAll('#lyrics .inline-visible .token')].find(e=>e.textContent==='Pageword0 ');
+  check('rewinding to an earlier caption page restores its real provider word progress',
+    rewoundWord.getClientRects().length>0 && Math.abs(parseFloat(rewoundWord.style.getPropertyValue('--fill'))-50)<.01
+      && Math.abs(parseFloat(rewoundWord.style.getPropertyValue('--gradient-position'))-40)<.01,
+    {fill:rewoundWord.style.getPropertyValue('--fill'),gradient:rewoundWord.style.getPropertyValue('--gradient-position')});
   }
 
   if (phase === 'card') {
