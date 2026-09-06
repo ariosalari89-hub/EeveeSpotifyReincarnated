@@ -29,9 +29,23 @@ final class LocalAudioImporter {
         urls.map { source in
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let destination = directory.appendingPathComponent(source.lastPathComponent)
-                try FileManager.default.copyItem(at: source, to: destination)
-                return LocalAudioImportResult(sourceName: source.lastPathComponent, outcome: .copied(destination))
+                var index = 1
+                while true {
+                    let suffix = index == 1 ? "" : " (\(index))"
+                    let ext = source.pathExtension.isEmpty ? "" : "." + source.pathExtension
+                    let name = source.deletingPathExtension().lastPathComponent + suffix + ext
+                    let destination = directory.appendingPathComponent(name)
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        index += 1
+                        continue
+                    }
+                    do {
+                        try FileManager.default.copyItem(at: source, to: destination)
+                        return LocalAudioImportResult(sourceName: source.lastPathComponent, outcome: .copied(destination))
+                    } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileWriteFileExistsError {
+                        index += 1
+                    }
+                }
             } catch {
                 return LocalAudioImportResult(sourceName: source.lastPathComponent,
                                               outcome: .failed("Could not copy this audio file."))
