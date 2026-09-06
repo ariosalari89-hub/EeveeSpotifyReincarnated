@@ -109,6 +109,7 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
     let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        precondition(QAInstallAlertActionBoundary(), "the native alert factory boundary must be available")
         let host = makeHost()
         let navigation = UINavigationController(rootViewController: host)
         let window = UIWindow(frame: UIScreen.main.bounds)

@@ -4,9 +4,12 @@ QA_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/local-audio-ios.XXXXXX")
 QA_APP="$QA_DIR/LocalAudioQA.app"
 mkdir -p "$QA_APP/en.lproj"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+xcrun clang -fobjc-arc -target "$(uname -m)-apple-ios17.0-simulator" -isysroot "$SDK" \
+  -c Tests/LocalAudioIOS/AlertActionBoundary.m -o "$QA_DIR/alert-action-boundary.o"
 xcrun swiftc -swift-version 5 -target "$(uname -m)-apple-ios17.0-simulator" -sdk "$SDK" \
   -framework UIKit -framework SwiftUI -framework UniformTypeIdentifiers -framework AVFoundation \
-  Sources/EeveeSpotify/LocalFiles/*.swift Tests/LocalAudioIOS/*.swift -o "$QA_APP/LocalAudioQA"
+  -import-objc-header Tests/LocalAudioIOS/AlertActionBoundary.h \
+  Sources/EeveeSpotify/LocalFiles/*.swift Tests/LocalAudioIOS/*.swift "$QA_DIR/alert-action-boundary.o" -o "$QA_APP/LocalAudioQA"
 cp "layout/Library/Application Support/EeveeSpotify.bundle/en.lproj/Localizable.strings" "$QA_APP/en.lproj/"
 cp Tests/LocalAudioImport/Fixtures/synthetic-tone.mp3 "$QA_APP/"
 python3 - "$QA_APP/Info.plist" <<'PY'

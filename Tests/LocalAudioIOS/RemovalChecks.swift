@@ -8,37 +8,6 @@ private func removalAlert(in controller: UIViewController) -> UIAlertController?
 }
 
 @MainActor
-private func containsActionLabel(_ title: String, in view: UIView) -> Bool {
-    view.accessibilityLabel == title || (view as? UILabel)?.text == title ||
-        view.subviews.contains { containsActionLabel(title, in: $0) }
-}
-
-@MainActor
-private func activateNativeAction(_ title: String, in view: UIView) -> Bool {
-    if let control = view as? UIControl, containsActionLabel(title, in: control) {
-        control.sendActions(for: .touchUpInside)
-        control.sendActions(for: .primaryActionTriggered)
-        return true
-    }
-    if view.accessibilityLabel == title && view.accessibilityActivate() { return true }
-    if let list = view as? UITableView,
-       let row = list.visibleCells.first(where: { containsActionLabel(title, in: $0) }),
-       let path = list.indexPath(for: row),
-       list.delegate?.responds(to: #selector(UITableViewDelegate.tableView(_:didSelectRowAt:))) == true {
-        list.delegate?.tableView?(list, didSelectRowAt: path)
-        return true
-    }
-    if let list = view as? UICollectionView,
-       let row = list.visibleCells.first(where: { containsActionLabel(title, in: $0) }),
-       let path = list.indexPath(for: row),
-       list.delegate?.responds(to: #selector(UICollectionViewDelegate.collectionView(_:didSelectItemAt:))) == true {
-        list.delegate?.collectionView?(list, didSelectItemAt: path)
-        return true
-    }
-    return view.subviews.contains { activateNativeAction(title, in: $0) }
-}
-
-@MainActor
 extension QAAppDelegate {
     func verifyNativeRemovalConfirmation(navigation: UINavigationController) async throws {
         mark("Reviewing and cancelling native removal of the exact imported copy")
@@ -75,15 +44,15 @@ extension QAAppDelegate {
         let preserved = try Data(contentsOf: original)
         try expect(cancelled == before && preserved == before,
                    "cancelling removal must preserve the imported copy and external original byte for byte")
-        mark("Confirming removal through the rendered native dialog action")
+        mark("Confirming removal through the rendered dialog's public UIKit callback boundary")
         remove.handler(remove, row) { _ in }
         try await waitUntil("the second removal confirmation must finish appearing") {
             guard let alert = removalAlert(in: navigation) else { return false }
             return alert.viewIfLoaded?.window != nil && !alert.isBeingPresented
         }
         let confirmed = removalAlert(in: navigation)!
-        try expect(activateNativeAction("Remove file", in: confirmed.view),
-                   "the native confirmation must expose an activatable public UI control or accessibility action")
+        try expect(QAActivateAlertAction(confirmed.actions.last!),
+                   "the rendered confirmation must supply a removal callback to UIKit's public action factory")
         try await waitUntil("confirmed removal must reconcile the authoritative file inventory") {
             removalAlert(in: navigation) == nil && cell("local_files_file", label: "Renamed on phone.wav", in: list) == nil &&
                 !FileManager.default.fileExists(atPath: copy.path)
