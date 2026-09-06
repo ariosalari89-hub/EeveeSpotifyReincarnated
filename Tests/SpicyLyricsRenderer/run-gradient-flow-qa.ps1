@@ -1,5 +1,5 @@
 #requires -Version 7.0
-param([Parameter(Mandatory)][string]$EvidenceDir)
+param([Parameter(Mandatory)][string]$EvidenceDir, [ValidateRange(1,300)][int[]]$SampleTimes = @(4,8))
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $page = Join-Path $repo 'layout\Library\Application Support\EeveeSpotify.bundle\SpicyLyricsRenderer\index.html'
@@ -45,9 +45,17 @@ try {
 '@
     & agent-browser --session $session screenshot (Join-Path $EvidenceDir 'flow-0.png') | Out-Null
     Eval-Flow "SpicyQA.send('preferences',{dynamicBackground:true,backgroundStyle:'gradient',backgroundSpeed:100});true"
-    foreach ($phase in @(4,8)) {
-        Eval-Flow '(async()=>{const end=performance.now()+4000;while(performance.now()<end)await new Promise(requestAnimationFrame);return true;})()'
+    $previousPhase = 0
+    foreach ($phase in ($SampleTimes | Sort-Object -Unique)) {
+        $remaining = ($phase - $previousPhase) * 1000
+        while ($remaining -gt 0) {
+            $step = [Math]::Min(10000, $remaining)
+            Eval-Flow "(async()=>{const end=performance.now()+$step;while(performance.now()<end)await new Promise(requestAnimationFrame);return true;})()"
+            $remaining -= $step
+        }
         & agent-browser --session $session screenshot (Join-Path $EvidenceDir "flow-$phase.png") | Out-Null
+        Write-Host "Captured internal gradient flow at $phase seconds"
+        $previousPhase = $phase
     }
     Eval-Flow "SpicyQA.sendSession({isPlaying:false,isPaused:true,isAdvancing:false});true"
     & agent-browser --session $session screenshot (Join-Path $EvidenceDir 'paused-0.png') | Out-Null

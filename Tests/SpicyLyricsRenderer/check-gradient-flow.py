@@ -8,8 +8,10 @@ from PIL import Image
 
 
 root = Path(sys.argv[1])
+flow_names = sorted((path.stem for path in root.glob("flow-*.png")), key=lambda name: int(name.split("-")[1]))
+assert all(name in flow_names for name in ("flow-0", "flow-4", "flow-8")), "Missing required motion captures"
 images = {name: Image.open(root / f"{name}.png").convert("RGB")
-          for name in ("flow-0", "flow-4", "flow-8", "paused-0", "paused-1")}
+          for name in flow_names + ["paused-0", "paused-1"]}
 
 
 def pixels(image):
@@ -23,7 +25,7 @@ def changed(first, second):
 
 
 rows = []
-for name in ("flow-4", "flow-8"):
+for name in flow_names[1:]:
     fraction = changed(images["flow-0"], images[name])
     rows.append({"name": f"{name}: internal color flow while outer surface is fixed",
                  "changedFraction": fraction, "passed": fraction >= .10})

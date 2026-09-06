@@ -12,6 +12,9 @@ final class LocalFilesImportModel: ObservableObject {
         var files: [LocalAudioFile] = []
         var isLoadingFiles = false
         var filesError: String?
+        var changingFileID: String?
+        var fileOperation: String?
+        var isBusy: Bool { isImporting || changingFileID != nil }
     }
 
     static let shared = LocalFilesImportModel(directory: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first)
@@ -29,7 +32,7 @@ final class LocalFilesImportModel: ObservableObject {
 
     func refreshFiles() {
         precondition(Thread.isMainThread)
-        guard !state.isLoadingFiles, !state.isImporting else { return }
+        guard !state.isLoadingFiles, !state.isBusy else { return }
         state.isLoadingFiles = true
         state.filesError = nil
         queue.async { [self] in
@@ -47,9 +50,31 @@ final class LocalFilesImportModel: ObservableObject {
         }
     }
 
+    func rename(_ file: LocalAudioFile, toStem stem: String,
+                completion: @escaping (Result<Void, LocalAudioLibraryFailure>) -> Void) {
+        precondition(Thread.isMainThread)
+        guard !state.isBusy else { completion(.failure(.busy)); return }
+        state.changingFileID = file.id
+        state.fileOperation = "local_files_renaming"
+        queue.async { [self] in
+            let result: Result<Void, LocalAudioLibraryFailure>
+            do {
+                guard let library = library else { throw LocalAudioLibraryFailure.cannotRename }
+                _ = try library.rename(file, toStem: stem)
+                result = .success(())
+            } catch { result = .failure((error as? LocalAudioLibraryFailure) ?? .cannotRename) }
+            DispatchQueue.main.async { [self] in
+                state.changingFileID = nil
+                state.fileOperation = nil
+                refreshFiles()
+                completion(result)
+            }
+        }
+    }
+
     func importSelection(_ urls: [URL]) {
         precondition(Thread.isMainThread)
-        guard !state.isImporting, !urls.isEmpty else { return }
+        guard !state.isBusy, !urls.isEmpty else { return }
         let cancellation = LocalAudioImportCancellation()
         activeCancellation = cancellation
         state.isImporting = true

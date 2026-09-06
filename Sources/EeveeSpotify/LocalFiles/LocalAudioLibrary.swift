@@ -8,6 +8,7 @@ enum LocalAudioLibraryFailure: String, Error {
     case nameExists = "local_files_name_exists"
     case cannotRename = "local_files_rename_failed"
     case cannotRemove = "local_files_remove_failed"
+    case busy = "local_files_busy"
 }
 
 struct LocalAudioFile: Identifiable, Equatable {

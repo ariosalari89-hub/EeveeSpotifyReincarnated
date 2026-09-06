@@ -114,17 +114,19 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
                 return makeCell(key.localized, identifier: key)
             }
             let file = state.files[indexPath.row - (state.filesError == nil ? 0 : 1)]
-            let cell = makeCell(file.name, detail: ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file),
+            let detail = state.changingFileID == file.id ? state.fileOperation?.localized
+                : ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file)
+            let cell = makeCell(file.name, detail: detail,
                                 identifier: "local_files_file")
             cell.accessoryType = .disclosureIndicator
-            cell.accessibilityTraits = state.isImporting ? [.button, .notEnabled] : .button
-            cell.isUserInteractionEnabled = !state.isImporting
+            cell.accessibilityTraits = state.isBusy ? [.button, .notEnabled] : .button
+            cell.isUserInteractionEnabled = !state.isBusy
             cell.selectionStyle = .default
             return cell
         }
         if indexPath.section == 0 {
             let key = indexPath.row == 0 ? "local_files_import" : "local_files_open"
-            let disabled = indexPath.row == 0 && state.isImporting
+            let disabled = indexPath.row == 0 && state.isBusy
             let cell = makeCell(key.localized, identifier: key)
             cell.textLabel?.textColor = disabled ? .secondaryLabel : accent
             cell.accessibilityTraits = disabled ? [.button, .notEnabled] : .button
@@ -188,10 +190,17 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
         }
     }
 
+    override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard indexPath.section == filesSection, !state.isBusy, presentedViewController == nil else { return nil }
+        let index = indexPath.row - (state.filesError == nil ? 0 : 1)
+        guard state.files.indices.contains(index) else { return nil }
+        return swipeActions(for: state.files[index])
+    }
+
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         if indexPath.section == filesSection {
-            guard !state.isImporting, presentedViewController == nil else { return }
+            guard !state.isBusy, presentedViewController == nil else { return }
             if state.filesError != nil && indexPath.row == 0 { model.refreshFiles(); return }
             let fileIndex = indexPath.row - (state.filesError == nil ? 0 : 1)
             guard state.files.indices.contains(fileIndex) else { return }
@@ -217,7 +226,7 @@ final class LocalFilesSettingsController: UITableViewController, UIDocumentPicke
             }
             return
         }
-        guard indexPath.row == 0, !state.isImporting else { return }
+        guard indexPath.row == 0, !state.isBusy else { return }
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.audio], asCopy: true)
         picker.allowsMultipleSelection = true
         picker.delegate = self
