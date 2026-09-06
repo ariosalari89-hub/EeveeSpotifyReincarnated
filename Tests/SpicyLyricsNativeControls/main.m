@@ -21,10 +21,11 @@ static void require(BOOL condition, NSString *message) {
 @property BOOL rejectChange;
 @property NSUInteger explicitCalls;
 @property BOOL staleSmartFlag;
+@property BOOL staleEntityMode;
 @end
 @implementation FakeSmartShuffle
 - (BOOL)checkIsEntitySmartShuffled:(NSURL *)url { return self.staleSmartFlag || self.mode == 2; }
-- (NSUInteger)shuffleStateWithEntityURL:(NSURL *)url { return self.mode; }
+- (NSUInteger)shuffleStateWithEntityURL:(NSURL *)url { return self.staleEntityMode ? 2 : self.mode; }
 - (NSUInteger)shuffleStateWithPlayerState:(id)state { return self.mode; }
 - (void)setShuffleState:(NSUInteger)mode for:(NSURL *)url showConfirmationUI:(BOOL)confirmation
     completion:(void (^)(NSInteger))completion {
@@ -142,6 +143,17 @@ int main(void) {
                 && [settledOff[@"smartShuffleEnabled"] isEqual:@NO],
                 @"confirmed native Off must stay Off while an entity smart flag lags");
         ((FakeSmartShuffle *)actions.smartShuffleHandler).staleSmartFlag = NO;
+        // Dispatch must use the same authoritative state as presentation. An
+        // entity cache still reporting Smart after Off must not consume the
+        // next click by asking for Off a second time.
+        ((FakeSmartShuffle *)actions.smartShuffleHandler).staleEntityMode = YES;
+        NSUInteger callsBeforeNext = actions.smartShuffleHandler.explicitCalls;
+        require(EeveeSpicyPerformControl(@"toggleShuffle", state) == 1
+                && actions.smartShuffleHandler.mode == 1
+                && actions.smartShuffleHandler.explicitCalls == callsBeforeNext + 1,
+                @"next click after confirmed Off must select Shuffle even while entity mode lags");
+        ((FakeSmartShuffle *)actions.smartShuffleHandler).staleEntityMode = NO;
+        actions.smartShuffleHandler.mode = 0;
         actions.allowed = NO;
         require(EeveeSpicyPerformControl(@"play", state) == 0 && actions.paused, @"restriction must reject resume");
         require(EeveeSpicyPerformControl(@"next", state) == 0 && actions.trackNumber == 0, @"restriction must reject skip");

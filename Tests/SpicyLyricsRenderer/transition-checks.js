@@ -333,12 +333,16 @@ window.runSpicyTransitionChecks = async function (phase) {
     const row=document.querySelector('.interlude'), group=row.querySelector('.dot-group');
     const sample = () => ({time:performance.now(),opacity:Number(getComputedStyle(row).opacity),
       scale:parseFloat(getComputedStyle(group).scale),height:row.getBoundingClientRect().height});
+    const enteredAt=performance.now();
     SpicyQA.observe({...paused,positionMs:2100});
     const entrance=[];
     for(const deadline=performance.now()+420;performance.now()<deadline;){await frame();entrance.push(sample());}
     check(`${surface}: pause-row entrance fades through the PC envelope instead of appearing fully opaque`,
       entrance.filter(s=>s.opacity>.05 && s.opacity<.95).length>=3
         && entrance.at(-1).opacity===1 && entrance.at(-1).scale>=.99,entrance);
+    check(`${surface}: mobile entrance remains visibly fading beyond the short PC row fade`,
+      entrance.some(s=>s.time-enteredAt>=150 && s.time-enteredAt<=220 && s.opacity>.1 && s.opacity<.98),
+      entrance.map(s=>({elapsed:s.time-enteredAt,opacity:s.opacity})));
     SpicyQA.observe({...paused,positionMs:1000});await wait(450);await waitForSteadyFrames();
     SpicyQA.observe({...paused,positionMs:2100});
     const uninterrupted=[];let bootstrapped=false;

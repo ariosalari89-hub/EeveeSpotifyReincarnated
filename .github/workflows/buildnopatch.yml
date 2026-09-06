@@ -94,6 +94,13 @@ jobs:
             Tests/SpicyLyricsRequestConsumers/main.swift -o "$RUNNER_TEMP/spicy-request-tests"
           "$RUNNER_TEMP/spicy-request-tests"
 
+      - name: Test native preview feed availability
+        run: |
+          xcrun swiftc Sources/EeveeSpotify/Lyrics/SpicyLyricsNativePreview.swift \
+            Tests/SpicyLyricsIOS/NativeScrollFeedFixture.swift \
+            Tests/SpicyLyricsNativePreview/main.swift -o "$RUNNER_TEMP/spicy-native-preview-tests"
+          "$RUNNER_TEMP/spicy-native-preview-tests"
+
       - name: Test Spicy Lyrics native control dispatch
         run: bash Tests/SpicyLyricsNativeControls/run.sh
 
