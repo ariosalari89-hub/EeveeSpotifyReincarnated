@@ -12,7 +12,10 @@ window.runSpicyTransitionChecks = async function (phase) {
   const brightGlyph = element => {
     if (!desktopPaint) return getComputedStyle(element).webkitTextFillColor === 'rgb(255, 255, 255)';
     const s = getComputedStyle(element), line = element.closest('.lyric-line');
-    return Number(getComputedStyle(line).opacity)===1 && s.backgroundImage!=='none'
+    const alpha = Number(s.getPropertyValue('--gradient-alpha'));
+    const solidWhite = alpha===1 ? 'rgb(255, 255, 255)' : `rgba(255, 255, 255, ${alpha})`;
+    return Number(getComputedStyle(line).opacity)===1
+      && (s.backgroundImage!=='none' || s.webkitTextFillColor===solidWhite)
       && parseFloat(s.getPropertyValue('--gradient-position'))>=100;
   };
   const brightToken = token => desktopPaint
@@ -276,13 +279,19 @@ window.runSpicyTransitionChecks = async function (phase) {
     check(`${surface}: active syllables retain the desktop glyph-clipped row underpaint`,
       underpaint.length>0 && underpaint.every(s=>s.gradient===underpaintExpected&&s.clip==='text'),underpaint);
     SpicyQA.observe({...paused,positionMs:0});await frame();await frame();
-    const initial=getComputedStyle(lead).backgroundImage;
+    const initialStyle=getComputedStyle(lead);
+    const initial={gradient:initialStyle.backgroundImage,fill:initialStyle.webkitTextFillColor,
+      position:parseFloat(initialStyle.getPropertyValue('--gradient-position'))};
     check(`${surface}: desktop sweep starts before the glyph edge`,
-      initial===gradient('linear-gradient(90deg,rgba(255,255,255,.85) -20%,rgba(255,255,255,.5) 0%)'),initial);
+      initial.position===-20 && (initial.gradient===gradient('linear-gradient(90deg,rgba(255,255,255,.85) -20%,rgba(255,255,255,.5) 0%)')
+        || (initial.gradient==='none' && initial.fill==='rgba(255, 255, 255, 0.5)')),initial);
     SpicyQA.observe({...paused,positionMs:800});await frame();await frame();
-    const finished=getComputedStyle(lead).backgroundImage;
+    const finishedStyle=getComputedStyle(lead);
+    const finished={gradient:finishedStyle.backgroundImage,fill:finishedStyle.webkitTextFillColor,
+      position:parseFloat(finishedStyle.getPropertyValue('--gradient-position'))};
     check(`${surface}: completed words retain desktop white without a clipped overlay`,
-      finished===gradient('linear-gradient(90deg,rgba(255,255,255,.85) 100%,rgba(255,255,255,.5) 120%)')
+      finished.position===100 && (finished.gradient===gradient('linear-gradient(90deg,rgba(255,255,255,.85) 100%,rgba(255,255,255,.5) 120%)')
+        || (finished.gradient==='none' && finished.fill==='rgba(255, 255, 255, 0.85)'))
         && ['none','normal'].includes(getComputedStyle(lead,'::after').content),finished);
     SpicyQA.lyrics.line.Content=[{Type:'Vocal',Text:'Stay with me',StartTime:0,EndTime:4}];
     SpicyQA.scenario('line',{...paused,positionMs:2000});await frame();await frame();
@@ -427,6 +436,17 @@ window.runSpicyTransitionChecks = async function (phase) {
     pageGhosts.length > 0 && pageGhosts.every(g=>g.hidden===0 && g.tokens>0 && g.tokens<20),pageGhosts);
   check('hidden caption pages do not receive repeated glyph style writes during a page transition',
     hiddenPageNodes > 0 && hiddenPageWrites === 0,{hiddenPageNodes,hiddenPageWrites});
+  if (desktopPaint) {
+    const uniformLetters = [...document.querySelectorAll('#lyrics .inline-visible .letter')]
+      .filter(letter => letter.getClientRects().length)
+      .filter(letter => [-20,100].includes(parseFloat(letter.style.getPropertyValue('--gradient-position'))))
+      .map(letter => ({position:parseFloat(letter.style.getPropertyValue('--gradient-position')),
+        background:getComputedStyle(letter).backgroundImage,fill:getComputedStyle(letter).webkitTextFillColor}));
+    check('caption uniform glyphs retain desktop ink alpha without repeated gradient masks',
+      uniformLetters.length > 1 && uniformLetters.every(letter => letter.background === 'none'
+        && letter.fill === (letter.position === -20 ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.85)')),
+      uniformLetters);
+  }
   SpicyQA.observe({ ...paused, positionMs: 500 });
   await frame();
   const rewoundWord = [...document.querySelectorAll('#lyrics .inline-visible .token')].find(e=>e.textContent==='Pageword0 ');

@@ -171,6 +171,14 @@ button { -webkit-tap-highlight-color: transparent; }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+.lyric-line:not(.not-sung):is(.active, .preview-held, .inline-visible) :is(.token:not(.emphasis), .letter).gradient-before {
+  background-image: none;
+  -webkit-text-fill-color: rgba(255,255,255,var(--gradient-alpha-end));
+}
+.lyric-line:not(.not-sung):is(.active, .preview-held, .inline-visible) :is(.token:not(.emphasis), .letter).gradient-after {
+  background-image: none;
+  -webkit-text-fill-color: rgba(255,255,255,var(--gradient-alpha));
+}
 .token::after { content: none; display: none; }
 .token.joins-next { transform-origin: right center; }
 .token.joins-previous { transform-origin: left center; }

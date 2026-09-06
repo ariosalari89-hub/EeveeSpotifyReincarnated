@@ -718,6 +718,15 @@
     return nextIsNear ? index : -1;
   }
 
+  function paintGlyphGradient(element, gradient) {
+    element.style.setProperty("--gradient-position", gradient);
+    const position = parseFloat(gradient);
+    // Outside the sweep, the gradient is uniform across the glyph. Solid ink
+    // preserves that alpha without allocating a separate text-gradient mask.
+    element.classList.toggle("gradient-before", position <= -20);
+    element.classList.toggle("gradient-after", position >= 100);
+  }
+
   function paintEffects(owner, element, kind, progress, dt, snap, override, shouldPaint = true) {
     owner.effects ||= effects.create(kind);
     const target = override || effects.targets(kind, progress);
@@ -887,7 +896,7 @@
         if (shouldPaint && token.paintFill !== fill) {
           token.paintFill = fill;
           token.element.style.setProperty("--fill", fill);
-          token.element.style.setProperty("--gradient-position", gradient);
+          paintGlyphGradient(token.element, gradient);
         }
         const motionProgress = token.letters.length
           ? (position - token.start) / (token.end - token.start - 250) : progress;
@@ -897,7 +906,7 @@
           const letterGradient = `${target.gradient.toFixed(2)}%`;
           if (shouldPaint && letter.paintGradient !== letterGradient) {
             letter.paintGradient = letterGradient;
-            letter.element.style.setProperty("--gradient-position", letterGradient);
+            paintGlyphGradient(letter.element, letterGradient);
           }
           paintEffects(letter, letter.element, "letter", 0, dt, snapEffects, target, shouldPaint);
         });
