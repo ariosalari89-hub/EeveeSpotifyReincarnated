@@ -61,7 +61,7 @@ final class LocalAudioLibrary {
               let modified = attributes[.modificationDate] as? Date,
               let created = attributes[.creationDate] as? Date,
               let audio = try? AVAudioFile(forReading: url), audio.length > 0 else { return nil }
-        return LocalAudioFile(id: device.stringValue + ":" + inode.stringValue, fileURL: url,
+        return LocalAudioFile(id: device.stringValue + ":" + inode.stringValue, fileURL: url.resolvingSymlinksInPath(),
                               size: size.int64Value, modified: modified, created: created)
     }
 
