@@ -828,7 +828,7 @@ struct QAFailure: Error { let message: String }
             _ = try await evaluateTransitionScript(String(contentsOf: file, encoding: .utf8) + "\n;true")
         }
         var rows = [[String: Any]]()
-        let desktopPhases = ["interlude", "paint", "motion", "emphasis", "type", "layout", "contrast"]
+        let desktopPhases = ["interlude", "dot-envelope", "paint", "motion", "emphasis", "type", "layout", "contrast"]
             .flatMap { phase in ["fullscreen", "card", "inline"].map { "desktop-\(phase)-\($0)" } }
             + ["desktop-shuffle-fullscreen", "desktop-backdrop-fullscreen"]
         let phases = baseline ? ["inline", "card"]

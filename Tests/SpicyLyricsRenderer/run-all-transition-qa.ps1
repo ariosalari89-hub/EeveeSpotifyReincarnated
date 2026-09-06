@@ -9,7 +9,7 @@ try {
     Get-Content (Join-Path $PSScriptRoot 'browser-fixture.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
     Get-Content (Join-Path $PSScriptRoot 'transition-checks.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
     $phases=@('inline','card','background','highlight','card-layout')
-    foreach($phase in @('interlude','paint','motion','emphasis','type','layout','contrast')) {
+    foreach($phase in @('interlude','dot-envelope','paint','motion','emphasis','type','layout','contrast')) {
         foreach($surface in @('fullscreen','card','inline')) { $phases+="desktop-$phase-$surface" }
     }
     $phases+=@('desktop-shuffle-fullscreen','desktop-backdrop-fullscreen')

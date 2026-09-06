@@ -588,7 +588,6 @@
 
   function stopEmbeddedMotion() {
     cancelCaptionMotion();
-    state.lines.forEach(line => { line.dotEntrance?.cancel(); line.dotEntrance = null; });
     state.lastEffectsTime = null;
     state.effectsMoving = false;
     state.cardScroll = null;
@@ -813,21 +812,11 @@
           if (active) line.element.setAttribute("aria-current", "true");
           else line.element.removeAttribute("aria-current");
         }
-        if (line.kind === "interlude") {
-          line.dotEntrance?.cancel();
-          line.dotEntrance = null;
-          if (active && !reduceMotion() && !forceScroll && position < line.end - 500) {
-            line.dotEntrance = line.element.querySelector(".dot-group").animate(
-              [{ scale: "0" }, { scale: "1" }], { duration: 300, easing: "ease" }
-            );
-          }
-        }
       }
       if (line.kind === "interlude") {
         const exiting = active && position > line.end - 500;
         if (line.dotExiting !== exiting) {
           line.dotExiting = exiting;
-          if (exiting) { line.dotEntrance?.cancel(); line.dotEntrance = null; }
           line.element.classList.toggle("pre-hidden", exiting);
         }
       }

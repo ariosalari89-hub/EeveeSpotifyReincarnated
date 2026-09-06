@@ -51,8 +51,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .contrast-veil {
   z-index: 1;
-  background: linear-gradient(180deg, rgba(8,10,14,.62), rgba(8,10,14,.64) 48%, rgba(4,6,11,.78)),
-    rgba(5,7,12,.2);
+  background: linear-gradient(180deg, rgba(8,10,14,.62) 20%, rgba(8,10,14,.5) 48%, rgba(4,6,11,.68));
 }
 
 #app {
@@ -191,7 +190,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .letter.space-letter { white-space: pre; min-width: .3ch; }
 .rtl .token { --gradient-degrees: -90deg; }
 .lyric-line.line-timed > .line-text { --gradient-degrees: 180deg; --gradient-alpha-end: .35; --gradient-position: inherit; }
-.lyric-line.background .token, .lyric-line.background .letter { --gradient-alpha: .6; --gradient-alpha-end: .3; }
+.lyric-line.background .token, .lyric-line.background .letter { --gradient-alpha: .85; --gradient-alpha-end: .3; }
 .lyric-line.not-sung :is(.token:not(.emphasis), .letter),
 .lyric-line.line-timed.not-sung > .line-text {
   background-image: none;
@@ -210,14 +209,16 @@ button { -webkit-tap-highlight-color: transparent; }
 .line-translation { display: block; margin-top: .38em; font-size: .46em; line-height: 1.22; letter-spacing: -.012em; color: var(--muted); font-weight: 630; }
 .lyric-line.background { font-size: calc(var(--lead-font-size) * .75); font-weight: 600; margin: -1% 0 1%; }
 .lyric-line.background.active { opacity: 1; }
-.lyric-line.interlude { min-height: 62px; display: flex; align-items: center; gap: .2em; cursor: default; }
+.lyric-line.interlude { min-height: 62px; display: flex; align-items: center; gap: .2em; cursor: default; opacity: 0; transition: opacity .14s ease, transform .14s ease; }
+.lyric-line.interlude.active { opacity: 1; }
 .lyric-line.interlude .dot { display: inline-block; font-size: 1.3em; line-height: .65; color: #fff; transform: translateY(calc(var(--effect-y, 0) * 1em / 1.3)); scale: var(--effect-scale, .75); opacity: var(--effect-opacity, .35); }
-.dot-group { display: inline-flex; align-items: center; gap: .18rem; scale: 1; transform-origin: center; transition: scale .3s ease; }
-.interlude.pre-hidden .dot-group { scale: 0; transition: scale .4s cubic-bezier(.6,-.19,.89,.33); }
+.dot-group { display: inline-flex; align-items: center; gap: .18rem; scale: 1; opacity: 1; transform-origin: center; transition: scale .3s ease, opacity .3s ease; }
+.interlude:is(.pre-hidden, :not(.active)) .dot-group { scale: 0; transition: scale .4s cubic-bezier(.6,-.19,.89,.33), opacity .4s ease-in-out; }
+.interlude.pre-hidden .dot-group { opacity: 0; }
 @supports (transition-timing-function: linear(0, 1)) {
-  .interlude.pre-hidden .dot-group { transition-timing-function: linear(0, -0.006 9.4%, -0.029 18%, -0.157 43.3%, -0.185 51.4%, -0.189 55.9%, -0.182 60%, -0.163 63.9%, -0.133 67.6%, -0.074 72.3%, 0.006 76.7%, 0.238 85%, 0.566 92.7%, 1); }
+  .interlude:is(.pre-hidden, :not(.active)) .dot-group { transition-timing-function: linear(0, -0.006 9.4%, -0.029 18%, -0.157 43.3%, -0.185 51.4%, -0.189 55.9%, -0.182 60%, -0.163 63.9%, -0.133 67.6%, -0.074 72.3%, 0.006 76.7%, 0.238 85%, 0.566 92.7%, 1), ease-in-out; }
 }
-#lyrics .lyric-line.interlude:not(.active) { display: none; height: 0; min-height: 0; margin: 0; padding: 0; overflow: hidden; }
+#lyrics .lyric-line.interlude:not(.active) { display: flex; height: 0; min-height: 0; margin: 0; padding: 0; overflow: hidden; }
 
 .lyrics-state { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: rgba(255,255,255,.74); font-size: 15px; font-weight: 650; text-align: center; }
 .lyrics-state p { margin: 0; max-width: 250px; line-height: 1.4; }
@@ -408,9 +409,11 @@ html[data-surface="inline"] .lyrics-state p { margin: 0; }
 
 @media (prefers-contrast: more) {
   :root { --muted: rgba(255,255,255,.9); --dim: #ccc; }
+  .contrast-veil { background: rgba(8,10,14,.7); }
   .icon-button, .settings-sheet { border: 1px solid rgba(255,255,255,.32); }
   #lyrics .lyric-line { opacity: 1; --line-blur: 0px !important; }
   #lyrics .lyric-line :is(.token, .letter, .line-text) { --gradient-alpha: 1; --gradient-alpha-end: .85; }
 }
+.native-high-contrast .contrast-veil { background: rgba(8,10,14,.7); }
 .native-high-contrast #lyrics .lyric-line { opacity: 1; --line-blur: 0px !important; }
 .native-high-contrast #lyrics .lyric-line :is(.token, .letter, .line-text) { --gradient-alpha: 1; --gradient-alpha-end: .85; }

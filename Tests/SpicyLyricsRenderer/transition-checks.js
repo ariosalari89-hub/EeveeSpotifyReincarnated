@@ -128,11 +128,13 @@ window.runSpicyTransitionChecks = async function (phase) {
   if (phase.startsWith('desktop-backdrop-')) {
     const surface = phase.slice('desktop-backdrop-'.length);
     bootstrap(surface,true);
-    const veil = getComputedStyle(document.querySelector('.contrast-veil')).backgroundImage;
+    const veilStyle = getComputedStyle(document.querySelector('.contrast-veil'));
+    const veil = veilStyle.backgroundImage;
     const backdrop = getComputedStyle(document.querySelector('#artwork-backdrop'));
-    check(`${surface}: the lighter cover veil preserves more artwork color at the existing blur`,
-      veil.includes('0.62') && veil.includes('0.64') && veil.includes('0.78')
-        && backdrop.filter.includes('blur(6px)'),{veil,filter:backdrop.filter});
+    check(`${surface}: artwork has a single lighter veil without a stacked dark base at the existing blur`,
+      veilStyle.backgroundColor==='rgba(0, 0, 0, 0)'
+        && veil.includes('0.5) 48%') && backdrop.filter.includes('blur(6px)'),
+      {veil,base:veilStyle.backgroundColor,filter:backdrop.filter});
   }
   if (phase === 'desktop-shuffle-fullscreen') {
     bootstrap('fullscreen',true);
@@ -269,9 +271,9 @@ window.runSpicyTransitionChecks = async function (phase) {
     const actual={lead:getComputedStyle(lead).backgroundImage,backing:getComputedStyle(backing).backgroundImage};
     const expected={
       lead:gradient('linear-gradient(90deg,rgba(255,255,255,.85) 40%,rgba(255,255,255,.5) 60%)'),
-      backing:gradient('linear-gradient(90deg,rgba(255,255,255,.6) 40%,rgba(255,255,255,.3) 60%)')
+      backing:gradient('linear-gradient(90deg,rgba(255,255,255,.85) 40%,rgba(255,255,255,.3) 60%)')
     };
-    check(`${surface}: lead and backing vocals use the desktop soft sweep and separate brightness`,
+    check(`${surface}: highlighted backing matches lead brightness while its unsung sweep stays dim`,
       actual.lead===expected.lead && actual.backing===expected.backing,{actual,expected});
     const underpaint = [...document.querySelectorAll('.lyric-line.active > .line-text')]
       .map(e=>({gradient:getComputedStyle(e).backgroundImage,clip:getComputedStyle(e).backgroundClip}));
@@ -303,6 +305,46 @@ window.runSpicyTransitionChecks = async function (phase) {
     check(`${surface}: the desktop spring owns glyph glow without an additional CSS shadow transition`,
       !lineTransition.split(',').map(value=>value.trim()).some(value=>value==='text-shadow'||value==='all'),lineTransition);
     reference.remove();
+  }
+  if (phase.startsWith('desktop-dot-envelope-')) {
+    const surface = phase.slice('desktop-dot-envelope-'.length);
+    bootstrap(surface);
+    SpicyQA.lyrics.line.Content = [
+      {Type:'Vocal',Text:'Stay with me',StartTime:0,EndTime:2},
+      {Type:'Vocal',Text:'Here we go',StartTime:8,EndTime:11}
+    ];
+    SpicyQA.scenario('line',{...paused,positionMs:1000});
+    await document.fonts.ready;await wait(450);await waitForSteadyFrames();
+    const row=document.querySelector('.interlude'), group=row.querySelector('.dot-group');
+    const sample = () => ({time:performance.now(),opacity:Number(getComputedStyle(row).opacity),
+      scale:parseFloat(getComputedStyle(group).scale),height:row.getBoundingClientRect().height});
+    SpicyQA.observe({...paused,positionMs:2100});
+    const entrance=[];
+    for(const deadline=performance.now()+420;performance.now()<deadline;){await frame();entrance.push(sample());}
+    check(`${surface}: pause-row entrance fades through the PC envelope instead of appearing fully opaque`,
+      entrance.filter(s=>s.opacity>.05 && s.opacity<.95).length>=3
+        && entrance.at(-1).opacity===1 && entrance.at(-1).scale>=.99,entrance);
+    SpicyQA.observe({...paused,positionMs:1000});await wait(450);await waitForSteadyFrames();
+    SpicyQA.observe({...paused,positionMs:2100});
+    const uninterrupted=[];let bootstrapped=false;
+    const start=performance.now();
+    for(const deadline=start+420;performance.now()<deadline;){
+      await frame();uninterrupted.push(sample());
+      if(!bootstrapped && performance.now()-start>=60){bootstrap(surface);bootstrapped=true;}
+    }
+    const jumps=uninterrupted.slice(1).map((s,i)=>({dt:s.time-uninterrupted[i].time,
+      delta:Math.abs(s.scale-uninterrupted[i].scale)})).filter(s=>s.delta>.32);
+    check(`${surface}: a native bootstrap during entrance does not snap the dots to full size`,
+      uninterrupted.length>=8 && !jumps.length && uninterrupted.at(-1).scale>=.99,
+      {samples:uninterrupted,jumps});
+    SpicyQA.observe({...paused,positionMs:7520});
+    const exit=[];
+    for(const deadline=performance.now()+470;performance.now()<deadline;){
+      await frame();exit.push({...sample(),groupOpacity:Number(getComputedStyle(group).opacity)});
+    }
+    check(`${surface}: pause-dot exit fades before its row collapses`,
+      exit.filter(s=>s.groupOpacity>.05 && s.groupOpacity<.95).length>=5
+        && exit.every(s=>s.height>0) && exit.at(-1).groupOpacity===0 && exit.at(-1).scale===0,exit);
   }
   if (phase.startsWith('desktop-interlude-')) {
     const surface = phase.slice('desktop-interlude-'.length);
