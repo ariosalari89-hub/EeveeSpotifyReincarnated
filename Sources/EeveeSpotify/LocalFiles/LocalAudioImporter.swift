@@ -39,6 +39,9 @@ final class LocalAudioImporter {
                     let name = source.deletingPathExtension().lastPathComponent + suffix + ext
                     let destination = directory.appendingPathComponent(name)
                     if FileManager.default.fileExists(atPath: destination.path) {
+                        if FileManager.default.contentsEqual(atPath: source.path, andPath: destination.path) {
+                            return LocalAudioImportResult(sourceName: source.lastPathComponent, outcome: .alreadyPresent(destination))
+                        }
                         index += 1
                         continue
                     }
