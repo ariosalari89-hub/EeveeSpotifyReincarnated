@@ -9,3 +9,15 @@ xcrun swiftc -swift-version 5 -framework AVFoundation -framework ImageIO \
   Tests/LocalAudioImport/main.swift Tests/LocalAudioImport/LibraryChecks.swift \
   Tests/LocalAudioImport/ArtworkChecks.swift Tests/LocalAudioImport/ArtworkServiceChecks.swift -o "$QA_DIR/local-audio-tests"
 "$QA_DIR/local-audio-tests" 2>&1 | tee "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"
+xcrun clang -fobjc-arc -ISources/EeveeSpotifyC/include -c \
+  Sources/EeveeSpotifyC/LocalAudioNativeArtwork.m -o "$QA_DIR/artwork-adapter.o"
+xcrun clang -fobjc-arc -c Tests/LocalAudioNativeArtwork/Fixtures.m -o "$QA_DIR/artwork-fixtures.o"
+xcrun swiftc -swift-version 5 -framework AVFoundation -framework ImageIO \
+  -ISources/EeveeSpotifyC/include -import-objc-header Tests/LocalAudioNativeArtwork/Fixtures.h \
+  Sources/EeveeSpotify/LocalFiles/LocalAudioImporter.swift \
+  Sources/EeveeSpotify/LocalFiles/LocalAudioLibrary.swift \
+  Sources/EeveeSpotify/LocalFiles/LocalAudioArtworkReader.swift \
+  Sources/EeveeSpotify/LocalFiles/LocalAudioArtworkService.swift \
+  Tests/LocalAudioNativeArtwork/main.swift "$QA_DIR/artwork-adapter.o" "$QA_DIR/artwork-fixtures.o" \
+  -o "$QA_DIR/native-artwork-tests"
+"$QA_DIR/native-artwork-tests" 2>&1 | tee -a "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"

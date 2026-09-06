@@ -4,9 +4,13 @@ import AVFoundation
 final class LocalAudioArtworkService {
     private static let marker = "/.eevee-local-artwork-v1/"
     private let library: LocalAudioLibrary
+    private let directory: URL
     private let queue = DispatchQueue(label: "EeveeSpotify.local-artwork", qos: .utility)
 
-    init(directory: URL) { library = LocalAudioLibrary(directory: directory) }
+    init(directory: URL) {
+        library = LocalAudioLibrary(directory: directory)
+        self.directory = directory.resolvingSymlinksInPath()
+    }
 
     func imageURL(forTrackURI uri: String) -> URL? {
         guard LocalTrackIdentity(uri) != nil else { return nil }
@@ -18,16 +22,18 @@ final class LocalAudioArtworkService {
 
     @discardableResult
     func load(_ url: URL, isCancelled: @escaping () -> Bool, completion: @escaping (Data?) -> Void) -> Bool {
-        let components = url.absoluteString.components(separatedBy: ":")
-        guard components.count == 3, components[0] == "spotify", components[1] == "localfileimage",
-              let payload = components[2].removingPercentEncoding, payload.hasPrefix(Self.marker),
-              let identity = LocalTrackIdentity(String(payload.dropFirst(Self.marker.count))) else { return false }
+        guard let request = request(for: url) else { return false }
         queue.async { [library] in
             guard !isCancelled(), let files = try? library.files() else { completion(nil); return }
             var matches: [LocalAudioFile] = []
             for file in files {
                 guard !isCancelled() else { completion(nil); return }
-                if identity.matches(file) { matches.append(file) }
+                switch request {
+                case .track(let identity):
+                    if identity.matches(file) { matches.append(file) }
+                case .file(let location):
+                    if location.resolvingSymlinksInPath() == file.fileURL.resolvingSymlinksInPath() { matches.append(file) }
+                }
                 if matches.count > 1 { completion(nil); return }
             }
             guard let file = matches.first else { completion(nil); return }
@@ -42,6 +48,21 @@ final class LocalAudioArtworkService {
             completion(isCancelled() ? nil : artwork)
         }
         return true
+    }
+
+    private enum Request { case track(LocalTrackIdentity), file(URL) }
+
+    private func request(for url: URL) -> Request? {
+        let parts = url.absoluteString.components(separatedBy: ":")
+        guard parts.count == 3, parts[0] == "spotify", parts[1] == "localfileimage",
+              let payload = parts[2].removingPercentEncoding else { return nil }
+        if payload.hasPrefix(Self.marker) {
+            return LocalTrackIdentity(String(payload.dropFirst(Self.marker.count))).map(Request.track)
+        }
+        guard payload.hasPrefix("/") else { return nil }
+        let location = URL(fileURLWithPath: payload).standardizedFileURL
+        guard location.deletingLastPathComponent().resolvingSymlinksInPath() == directory else { return nil }
+        return .file(location)
     }
 }
 
