@@ -18,6 +18,10 @@ func makeAudio(at url: URL, value: Float = 0.125) throws {
     try file.write(from: buffer)
 }
 
+func tryAudioFrames(_ url: URL) -> AVAudioFramePosition? {
+    try? AVAudioFile(forReading: url).length
+}
+
 func withDirectories(_ test: (URL, URL) throws -> Void) throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("local-audio-test-" + UUID().uuidString)
     let input = root.appendingPathComponent("input", isDirectory: true)
@@ -78,6 +82,30 @@ do {
         let files = try FileManager.default.contentsOfDirectory(atPath: output.path)
         try expect(files == ["Repeat.wav"], "reimport must not create a second song file")
         print("PASS: repeated selection reports already present without making another copy")
+    }
+    try withDirectories { input, output in
+        let playable = input.appendingPathComponent("Keep me.wav")
+        let fake = input.appendingPathComponent("Not audio.wav")
+        let empty = input.appendingPathComponent("Empty.wav")
+        let missing = input.appendingPathComponent("Missing.wav")
+        let folder = input.appendingPathComponent("Folder.wav")
+        let link = input.appendingPathComponent("Link.wav")
+        try makeAudio(at: playable)
+        try Data("This is not an audio file".utf8).write(to: fake)
+        try Data().write(to: empty)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: playable)
+        let results = LocalAudioImporter(directory: output).importFiles([fake, empty, missing, folder, link, playable])
+        try expect(results.count == 6, "mixed selections need an individual result for every item")
+        try expect(results.prefix(5).allSatisfy { if case .failed = $0.outcome { return true }; return false },
+                   "invalid, empty, missing, directory and symbolic-link selections must be rejected as failed")
+        guard case .copied(let song) = results[5].outcome else {
+            throw TestFailure(description: "a failed item must not discard another selected song")
+        }
+        let files = try FileManager.default.contentsOfDirectory(atPath: output.path)
+        try expect(files == ["Keep me.wav"], "only complete playable audio may enter the native song source")
+        try expect(tryAudioFrames(song) == 4_410, "the successful part of a mixed batch remains readable")
+        print("PASS: invalid inputs fail individually while valid selected audio survives")
     }
     print("PASS")
 } catch {

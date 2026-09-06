@@ -23,6 +23,7 @@ Apple's [document-picker contract](https://developer.apple.com/documentation/uik
 ## Product and ownership
 
 - Add a Local Files destination to the existing Eevee settings list, using its current navigation, native grouped-list presentation, system text and green action color.
+- Implement that destination as a UIKit grouped-table controller hosted by the existing SwiftUI settings navigation. The invoking controller presents the system picker directly, avoiding global-window presentation and allowing the native UI test to operate standard table and picker callbacks without inspecting SwiftUI internals.
 - The page owns an Import audio files command and an Open Local Files command. The latter navigates to the observed native route; it is not playback or an indexing-success receipt.
 - The file picker owns provider browsing, downloading its selected copies, cancellation and permission UI. No fake permission dialog, broad folder scan, clipboard inspection or account changes.
 - The import module owns validation, copying, filename collision handling, partial results and cancellation. Spotify owns metadata indexing, local-track identity, playlists, playback and its Local audio files setting.
