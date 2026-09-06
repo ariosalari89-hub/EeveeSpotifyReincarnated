@@ -78,6 +78,19 @@ struct EeveeSettingsView: View {
                     imageSystemName: "quote.bubble.fill"
                 )
             }
+
+            Button {
+                pushSettingsController(
+                    with: LocalFilesSettingsView(),
+                    title: "local_files_title".localized
+                )
+            } label: {
+                NavigationSectionView(
+                    color: .green,
+                    title: "local_files_title".localized,
+                    imageSystemName: "music.note"
+                )
+            }
             
             Button {
                 pushSettingsController(
