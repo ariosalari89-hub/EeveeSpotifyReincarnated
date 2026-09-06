@@ -163,6 +163,21 @@ do {
         try expect(FileManager.default.fileExists(atPath: original.path), "import must not modify a linked external original")
         print("PASS: existing symbolic links cannot redirect a local song's returned output")
     }
+    try withDirectories { input, output in
+        let name = String(repeating: "音", count: 83) + ".wav"
+        let original = input.appendingPathComponent(name)
+        try makeAudio(at: original, value: 0.125)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try makeAudio(at: output.appendingPathComponent(name), value: 0.75)
+        let results = LocalAudioImporter(directory: output).importFiles([original])
+        guard case .copied(let copied) = results[0].outcome else {
+            throw TestFailure(description: "a long Unicode song name must still get a non-overwriting copy")
+        }
+        try expect(copied.lastPathComponent == String(repeating: "音", count: 82) + " (2).wav",
+                   "collision naming must leave room for the suffix within 255 UTF-8 bytes without breaking Unicode")
+        try expect(tryAudioFrames(copied) == 4_410, "a shortened filename must retain playable audio and its extension")
+        print("PASS: long Unicode collision names are byte-bounded and remain readable")
+    }
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)
