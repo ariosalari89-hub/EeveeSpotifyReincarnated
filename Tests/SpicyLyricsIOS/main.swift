@@ -968,6 +968,16 @@ struct QAFailure: Error { let message: String }
               let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             throw QAFailure(message: "no transition results for \(phase)")
         }
+        if phase == "gradient-quality" && !baseline {
+            let capture: UIImage = try await withCheckedThrowingContinuation { continuation in
+                web.takeSnapshot(with: nil) { image, error in
+                    if let image = image { continuation.resume(returning: image) }
+                    else { continuation.resume(throwing: error ?? QAFailure(message: "native gradient snapshot is unavailable")) }
+                }
+            }
+            guard let png = capture.pngData() else { throw QAFailure(message: "native gradient snapshot has no image data") }
+            try png.write(to: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("qa-gradient.png"))
+        }
         return rows
     }
 
@@ -978,7 +988,7 @@ struct QAFailure: Error { let message: String }
             + ["desktop-shuffle-fullscreen", "desktop-backdrop-fullscreen"]
         let phases = baseline ? ["inline", "card"]
             : ["inline", "card", "background", "highlight", "card-layout", "background-style", "background-speed", "background-motion-perception", "background-lifecycle",
-               "gradient-recovery", "shuffle-availability", "shuffle-settlement"] + desktopPhases
+               "gradient-recovery", "gradient-quality", "shuffle-availability", "shuffle-settlement"] + desktopPhases
         for phase in phases {
             let phaseRows = try await rendererTransitionPhase(phase, baseline: baseline)
             rows += phaseRows

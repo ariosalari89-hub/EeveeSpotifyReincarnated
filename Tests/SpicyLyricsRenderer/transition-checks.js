@@ -148,6 +148,59 @@ window.runSpicyTransitionChecks = async function (phase) {
       fallback.includes('42, 126, 145') && next.includes('196, 136, 50')
         && !next.includes('204, 51, 51') && missing==='none', {fallback,next,missing});
   }
+  if (phase === 'gradient-quality') {
+    const palette=[[204,51,51],[51,102,204],[187,155,49],[57,129,100]];
+    const artwork=document.createElement('canvas');artwork.width=artwork.height=64;
+    const context=artwork.getContext('2d');
+    palette.forEach((rgb,index)=>{context.fillStyle=`rgb(${rgb.join(',')})`;context.fillRect(index%2*32,Math.floor(index/2)*32,32,32);});
+    const originalRAF=window.requestAnimationFrame, originalPut=CanvasRenderingContext2D.prototype.putImageData;
+    const costs=[];let activeSample=null;
+    // Measure the real animation callbacks that reach the browser's canvas
+    // output boundary; no shipping field functions or collaborators are mocked.
+    CanvasRenderingContext2D.prototype.putImageData=function(...args){
+      if(activeSample && this.canvas.classList.contains('gradient-field'))activeSample.painted=true;
+      return originalPut.apply(this,args);
+    };
+    window.requestAnimationFrame=function(callback){
+      return originalRAF.call(window,timestamp=>{
+        const previous=activeSample, sample={painted:false}, start=performance.now();activeSample=sample;
+        try{return callback(timestamp);}
+        finally {if(sample.painted)costs.push(performance.now()-start);activeSample=previous;}
+      });
+    };
+    try {
+      const playing={isPlaying:true,isPaused:false,isAdvancing:true};
+      SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{backgroundStyle:'gradient',dynamicBackground:true,backgroundSpeed:100}});
+      SpicyQA.scenario('karaoke',{...playing,positionMs:7400});
+      SpicyQA.sendSession({...playing,positionMs:7400,track:{...SpicyQA.tracks.karaoke,artwork:artwork.toDataURL(),dominantColor:''}});
+      const layer=document.querySelector('#artwork-backdrop');
+      for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(layer.querySelector('canvas:not([hidden])'))break;}
+      await waitForSteadyFrames();
+      const canvas=layer.querySelector('canvas'), pixels=()=>canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+      const before=pixels();await wait(3000);await frame();const after=pixels();
+      const counts=palette.map(()=>0);let changed=0;
+      for(let offset=0;offset<after.length;offset+=4){
+        if(Math.abs(before[offset]-after[offset])+Math.abs(before[offset+1]-after[offset+1])+Math.abs(before[offset+2]-after[offset+2])>12)changed++;
+        const distances=palette.map(rgb=>rgb.reduce((sum,value,channel)=>sum+(value-after[offset+channel])**2,0));
+        counts[distances.indexOf(Math.min(...distances))]++;
+      }
+      const area=canvas.width*canvas.height, fractions=counts.map(count=>count/area), sorted=costs.slice().sort((a,b)=>a-b);
+      const p95=sorted[Math.floor(sorted.length*.95)];
+      check('native gradient keeps four substantial source-color regions while its internal field flows',
+        fractions.every(value=>value>=.08) && changed/area>=.1 && getComputedStyle(layer).transform==='none',
+        {fractions,changedFraction:changed/area,transform:getComputedStyle(layer).transform});
+      check('gradient painting stays within the native fixture animation-callback budget',
+        costs.length>=15 && p95<16,{samples:costs.length,p95CallbackMs:p95,maxCallbackMs:sorted.at(-1)});
+      SpicyQA.sendSession(paused);await frame();await frame();
+      const frozen=canvas.toDataURL(), count=costs.length;await wait(250);await frame();
+      check('pausing stops native gradient paint callbacks as well as visible motion',
+        costs.length===count && frozen===canvas.toDataURL(),{before:count,after:costs.length});
+    } finally {
+      SpicyQA.sendSession(paused);
+      window.requestAnimationFrame=originalRAF;
+      CanvasRenderingContext2D.prototype.putImageData=originalPut;
+    }
+  }
   if (phase === 'background-speed') {
     SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{dynamicBackground:true}});
     SpicyQA.scenario('karaoke',{isPlaying:true,isPaused:false,isAdvancing:true});

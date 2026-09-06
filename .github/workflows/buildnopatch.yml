@@ -168,6 +168,7 @@ jobs:
             ${{ runner.temp }}/qa-renderer-baseline.json
             ${{ runner.temp }}/qa-renderer-results.json
             ${{ runner.temp }}/qa-portrait.png
+            ${{ runner.temp }}/qa-gradient.png
             ${{ runner.temp }}/qa-landscape.png
             ${{ runner.temp }}/qa-landscape-screen.png
             ${{ runner.temp }}/qa-card.png
