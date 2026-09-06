@@ -230,10 +230,12 @@
       this.ready = this.style === "gradient" ? this.gradientPalette.length > 0 : this.artworkLoaded;
       // Bright covers need protection behind the glyphs, not a dark film
       // across the entire artwork. Normal/dark covers keep this very light.
-      const brightness = Math.max(0, ...this.palette.map(rgb =>
+      const palette = this.style === "gradient" ? this.gradientPalette : this.palette;
+      const brightness = Math.max(0, ...palette.map(rgb =>
         (rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722) / 255));
+      const readability = model.clamp((brightness - .45) * 1.08, 0, .6);
       document.documentElement.style.setProperty("--artwork-readability",
-        String(this.ready ? model.clamp((brightness - .45) * 1.08, 0, .6) : 0));
+        String(this.ready ? Math.min(.6, readability + (this.style === "gradient" ? .08 : 0)) : 0));
       if (!this.ready) this.layer.style.backgroundImage = "none";
       else if (this.style !== "gradient") this.layer.style.backgroundImage = `url(${JSON.stringify(this.artwork)})`;
       else {
