@@ -1,94 +1,101 @@
 (() => {
   "use strict";
 
+  // Mobile owns lifecycle; the pinned PC engine owns all image processing.
+  // Keep the desktop's default 300x150 backing store and CSS scaling.
   class GradientField {
     constructor(parent) {
       this.canvas = document.createElement("canvas");
       this.canvas.className = "gradient-field";
       this.canvas.setAttribute("aria-hidden", "true");
-      this.canvas.width = this.canvas.height = 96;
       this.canvas.hidden = true;
       parent.appendChild(this.canvas);
-      this.context = this.canvas.getContext("2d", { alpha: false });
-      this.frame = this.context?.createImageData(96, 96);
-      this.palette = [];
+      this.source = null;
       this.phase = 0;
+      this.rate = .1;
       this.speed = 1;
+      this.wanted = false;
       this.active = false;
+      this.ready = false;
       this.lastTime = null;
-      this.lastPaint = null;
       this.request = 0;
+      this.loadedOnce = false;
       this.tick = this.tick.bind(this);
+      this.engine = this.createEngine();
+      this.canvas.addEventListener("webglcontextlost", event => {
+        event.preventDefault();
+        this.ready = false;
+        this.canvas.hidden = true;
+        this.synchronize();
+        this.engine = null;
+      });
+      this.canvas.addEventListener("webglcontextrestored", () => {
+        this.engine = this.createEngine();
+        this.setImage(this.source);
+      });
     }
 
-    setPalette(palette) {
-      if (JSON.stringify(palette) === JSON.stringify(this.palette)) return;
-      this.palette = palette.map(rgb => rgb.slice());
-      this.canvas.hidden = !this.context || !this.palette.length;
-      if (!this.canvas.hidden) this.paint();
+    createEngine() {
+      try {
+        return new window.Kawarp(this.canvas, {
+          warpIntensity: 1, blurPasses: 8, animationSpeed: .1, saturation: 1.5,
+          dithering: .008, transitionDuration: 500, tintIntensity: 0, scale: 1
+        });
+      } catch (_) { return null; }
+    }
+
+    setImage(source) {
+      this.source = source;
+      this.ready = false;
+      if (source && this.engine) {
+        try {
+          // Static/reduced-motion users receive the current art immediately.
+          // Playing uses the PC's 500ms first / 1000ms subsequent crossfade.
+          this.engine.transitionDuration = this.wanted ? (this.loadedOnce ? 1000 : 500) : 0;
+          this.engine.loadImageElement(source);
+          this.loadedOnce = true;
+          this.ready = true;
+          this.paint();
+        } catch (_) { /* A tainted or unreadable image uses the static CSS fallback. */ }
+      }
+      this.canvas.hidden = !this.ready;
+      this.synchronize();
+      return this.ready;
     }
 
     setMotion(active, speed) {
-      const now = performance.now();
-      this.advance(now);
-      this.speed = speed / 100;
-      this.active = !!(active && this.context && this.palette.length);
-      this.lastTime = this.active ? now : null;
-      if (this.active && !this.request) this.request = requestAnimationFrame(this.tick);
-      if (!this.active && this.request) {
+      this.wanted = !!active;
+      this.speed = Math.max(.1, Math.min(5, Number(speed) / 100 || 1));
+      this.synchronize();
+    }
+
+    synchronize() {
+      const active = !!(this.wanted && this.ready && this.engine);
+      if (active === this.active) return;
+      this.active = active;
+      this.lastTime = active ? performance.now() : null;
+      if (active && !this.request) this.request = requestAnimationFrame(this.tick);
+      if (!active && this.request) {
         cancelAnimationFrame(this.request);
         this.request = 0;
       }
     }
 
-    advance(now) {
-      if (this.active && this.lastTime !== null) {
-        this.phase += Math.min(100, Math.max(0, now - this.lastTime)) * .00015 * this.speed;
-      }
-      this.lastTime = now;
-    }
-
     tick(now) {
       this.request = 0;
       if (!this.active) return;
-      this.advance(now);
-      if (this.lastPaint === null || now - this.lastPaint >= 32) {
-        this.paint();
-        this.lastPaint = now;
-      }
+      const dt = Math.max(0, now - this.lastTime) / 1000;
+      this.lastTime = now;
+      // Identical to Kawarp's renderLoop clock. Owning scheduling here permits
+      // frozen static frames and lifecycle suspension without a resume jump.
+      this.rate += (this.speed - this.rate) * .05;
+      this.phase += dt * this.rate;
+      this.paint();
       this.request = requestAnimationFrame(this.tick);
     }
 
     paint() {
-      if (!this.context || !this.palette.length) return;
-      const [first, second = first, third = first, fourth = second] = this.palette;
-      const colors = [first, second, third, fourth];
-      const pixels = this.frame.data;
-      const time = this.phase;
-      const curl = 2.1 + 1.3 * Math.sin(time * .67);
-      const centerX = .09 * Math.sin(time * .83);
-      const centerY = .09 * Math.sin(time * .71);
-      const fold = .18 * Math.sin(time * .93);
-      for (let y = 0; y < 96; y++) {
-        for (let x = 0; x < 96; x++) {
-          const u = (x + .5) / 48 - 1 - centerX;
-          const v = (y + .5) / 48 - 1 - centerY;
-          const angle = curl * Math.exp(-(u * u + v * v) * .85) + time * .16;
-          const cosine = Math.cos(angle), sine = Math.sin(angle);
-          const materialX = u * cosine - v * sine + centerX;
-          const materialY = u * sine + v * cosine + centerY;
-          const horizontal = .5 + .5 * Math.tanh((materialX + fold * Math.sin(materialY * 3)) * 4.5);
-          const vertical = .5 + .5 * Math.tanh((materialY - fold * Math.sin(materialX * 3)) * 4.5);
-          const weights = [(1 - horizontal) * (1 - vertical), horizontal * (1 - vertical),
-            (1 - horizontal) * vertical, horizontal * vertical];
-          const offset = (y * 96 + x) * 4;
-          for (let channel = 0; channel < 3; channel++) {
-            pixels[offset + channel] = colors.reduce((sum, rgb, index) => sum + rgb[channel] * weights[index], 0);
-          }
-          pixels[offset + 3] = 255;
-        }
-      }
-      this.context.putImageData(this.frame, 0, 0);
+      if (this.ready && this.engine) this.engine.renderFrame(this.phase);
     }
   }
 

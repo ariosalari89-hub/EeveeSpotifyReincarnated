@@ -27,6 +27,11 @@ window.runSpicyTransitionChecks = async function (phase) {
     return getComputedStyle(backdrop).transform + (canvas && !canvas.hidden
       && getComputedStyle(canvas).display !== 'none' ? canvas.toDataURL() : '');
   };
+  const canvasPixels = canvas => {
+    const copy = document.createElement('canvas'); copy.width = canvas.width; copy.height = canvas.height;
+    const context = copy.getContext('2d'); context.drawImage(canvas, 0, 0);
+    return context.getImageData(0, 0, copy.width, copy.height).data;
+  };
   const waitForSteadyFrames = async () => {
     // A cold simulator can still be migrating system data after boot. Require
     // an observable starting cadence, not an arbitrary extra sleep or a lower
@@ -153,13 +158,13 @@ window.runSpicyTransitionChecks = async function (phase) {
     const artwork=document.createElement('canvas');artwork.width=artwork.height=64;
     const context=artwork.getContext('2d');
     palette.forEach((rgb,index)=>{context.fillStyle=`rgb(${rgb.join(',')})`;context.fillRect(index%2*32,Math.floor(index/2)*32,32,32);});
-    const originalRAF=window.requestAnimationFrame, originalPut=CanvasRenderingContext2D.prototype.putImageData;
+    const originalRAF=window.requestAnimationFrame, originalDraw=WebGLRenderingContext.prototype.drawArrays;
     const costs=[];let activeSample=null;
     // Measure the real animation callbacks that reach the browser's canvas
     // output boundary; no shipping field functions or collaborators are mocked.
-    CanvasRenderingContext2D.prototype.putImageData=function(...args){
+    WebGLRenderingContext.prototype.drawArrays=function(...args){
       if(activeSample && this.canvas.classList.contains('gradient-field'))activeSample.painted=true;
-      return originalPut.apply(this,args);
+      return originalDraw.apply(this,args);
     };
     window.requestAnimationFrame=function(callback){
       return originalRAF.call(window,timestamp=>{
@@ -176,19 +181,20 @@ window.runSpicyTransitionChecks = async function (phase) {
       const layer=document.querySelector('#artwork-backdrop');
       for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(layer.querySelector('canvas:not([hidden])'))break;}
       await waitForSteadyFrames();
-      const canvas=layer.querySelector('canvas'), pixels=()=>canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+      const canvas=layer.querySelector('canvas'), pixels=()=>canvasPixels(canvas);
       const before=pixels();await wait(3000);await frame();const after=pixels();
-      const counts=palette.map(()=>0);let changed=0;
+      let changed=0,peak=0;
       for(let offset=0;offset<after.length;offset+=4){
         if(Math.abs(before[offset]-after[offset])+Math.abs(before[offset+1]-after[offset+1])+Math.abs(before[offset+2]-after[offset+2])>12)changed++;
-        const distances=palette.map(rgb=>rgb.reduce((sum,value,channel)=>sum+(value-after[offset+channel])**2,0));
-        counts[distances.indexOf(Math.min(...distances))]++;
+        peak=Math.max(peak,after[offset],after[offset+1],after[offset+2]);
       }
-      const area=canvas.width*canvas.height, fractions=counts.map(count=>count/area), sorted=costs.slice().sort((a,b)=>a-b);
+      const area=canvas.width*canvas.height, sorted=costs.slice().sort((a,b)=>a-b);
       const p95=sorted[Math.floor(sorted.length*.95)];
-      check('native gradient keeps four substantial source-color regions while its internal field flows',
-        fractions.every(value=>value>=.08) && changed/area>=.1 && getComputedStyle(layer).transform==='none',
-        {fractions,changedFraction:changed/area,transform:getComputedStyle(layer).transform});
+      // Palette-area quotas described the superseded approximation. Exact PC
+      // pixel comparisons now own image quality; this checks integrated motion.
+      check('native PC gradient paints actual cover pixels and moves internally without a CSS transform',
+        peak>40 && changed/area>=.1 && getComputedStyle(layer).transform==='none',
+        {peak,changedFraction:changed/area,transform:getComputedStyle(layer).transform});
       check('gradient painting stays within the native fixture animation-callback budget',
         costs.length>=15 && p95<16,{samples:costs.length,p95CallbackMs:p95,maxCallbackMs:sorted.at(-1)});
       SpicyQA.sendSession(paused);await frame();await frame();
@@ -198,8 +204,11 @@ window.runSpicyTransitionChecks = async function (phase) {
     } finally {
       SpicyQA.sendSession(paused);
       window.requestAnimationFrame=originalRAF;
-      CanvasRenderingContext2D.prototype.putImageData=originalPut;
+      WebGLRenderingContext.prototype.drawArrays=originalDraw;
     }
+  }
+  if (phase === 'gradient-pc-parity') {
+    results.push(...window.runPCGradientChecks(window.SpicyDesktopKawarp));
   }
   if (phase === 'background-speed') {
     SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{dynamicBackground:true}});
@@ -220,8 +229,7 @@ window.runSpicyTransitionChecks = async function (phase) {
       const picker=document.querySelector('#background-style');picker.value=style;picker.dispatchEvent(new Event('change',{bubbles:true}));await frame();
       for(const speed of [25,200]) {
         if(style==='gradient' && backdrop.querySelector('canvas')) {
-          const canvas=backdrop.querySelector('canvas'),context=canvas.getContext('2d');
-          const pixels=()=>context.getImageData(0,0,canvas.width,canvas.height).data;
+          const canvas=backdrop.querySelector('canvas'),pixels=()=>canvasPixels(canvas);
           const before=canvas.toDataURL();
           slider.value=String(speed);slider.dispatchEvent(new Event('input',{bubbles:true}));
           slider.dispatchEvent(new Event('change',{bubbles:true}));
@@ -260,8 +268,10 @@ window.runSpicyTransitionChecks = async function (phase) {
               && advance<=elapsed*Math.max(s.beforeRate,s.speed/100)+20)
           && (s.speed===25?s.rate>.15 && s.rate<.4:s.rate>1.7 && s.rate<2.3))
         && (gradientSamples.length===0 || (gradientSamples.length===2
-          && gradientSamples.every(s=>s.continuous && s.changePerSecond>0)
-          && gradientSamples[1].changePerSecond>gradientSamples[0].changePerSecond*2))
+          // The PC eases toward new speeds; exact rate/phase parity is checked
+          // separately against its independent renderer, not inferred from
+          // how much an arbitrary patch of a nonlinear image changes in 400ms.
+          && gradientSamples.every(s=>s.continuous && s.changePerSecond>0)))
         && request.type==='setPreference' && request.key==='backgroundSpeed' && request.value===200
         && output==='2×' && slider.disabled && backgroundPaint(backdrop)===frozen,
       {initial,samples,gradientSamples,request,output,disabled:slider.disabled,frozen:frozen.slice(0,80)});

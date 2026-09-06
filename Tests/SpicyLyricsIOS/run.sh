@@ -17,7 +17,15 @@ xcrun swiftc -swift-version 5 -target "$ARCH-apple-ios17.0-simulator" -sdk "$SDK
   Tests/SpicyLyricsIOS/NativeScrollFeedFixture.swift \
   Tests/SpicyLyricsIOS/main.swift -o "$QA_APP/SpicyLyricsQA"
 cp -R "layout/Library/Application Support/EeveeSpotify.bundle/SpicyLyricsRenderer" "$QA_APP/"
-cp Tests/SpicyLyricsRenderer/browser-fixture.js Tests/SpicyLyricsRenderer/transition-checks.js "$QA_APP/"
+cp Tests/SpicyLyricsRenderer/browser-fixture.js Tests/SpicyLyricsRenderer/transition-checks.js Tests/SpicyLyricsRenderer/pc-gradient-checks.js "$QA_APP/"
+# Only adapt the independent pinned npm module's export syntax for evaluateJS.
+# The reference source itself is immutable and never read from shipping assets.
+python3 - "$QA_APP/pc-gradient-oracle.js" <<'PY'
+import pathlib, sys
+source = pathlib.Path('Tests/SpicyLyricsRenderer/Reference/kawarp-1.2.0.js').read_text()
+source = source.replace('export class Kawarp', 'class Kawarp').replace('export default Kawarp;', 'window.SpicyDesktopKawarp = Kawarp;')
+pathlib.Path(sys.argv[1]).write_text('(() => {\n' + source + '\n})();\n')
+PY
 # Isolated historical renderer: demonstrate the reported transition defects in
 # WebKit before testing the repaired resources. Never included in the .deb/IPA.
 mkdir "$QA_APP/SpicyLyricsBefore"

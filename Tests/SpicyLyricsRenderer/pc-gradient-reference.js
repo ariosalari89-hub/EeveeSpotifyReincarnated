@@ -17,6 +17,8 @@ reference.loadImageElement(source);
 reference.animationSpeed = 1;
 reference.start();
 const mobile = new window.SpicyGradientField(document.querySelector("#mobile"));
+// Playback preferences arrive before an asynchronous artwork decode completes.
+mobile.setMotion(true, 100);
 if (typeof mobile.setImage === "function") mobile.setImage(source);
 else mobile.setPalette([[227, 40, 89], [21, 125, 237], [224, 167, 46], [38, 143, 97]]);
 mobile.setMotion(true, 100);

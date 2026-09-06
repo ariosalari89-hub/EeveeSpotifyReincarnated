@@ -1,6 +1,7 @@
 import pathlib
 import shutil
 import subprocess
+import hashlib
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -25,6 +26,14 @@ c_header = (ROOT / "Sources/EeveeSpotifyC/include/Tweak.h").read_text(encoding="
 assert 'src="renderer-model.js?v=5"' in index
 assert 'src="renderer-effects.js?v=5"' in index
 assert 'src="gradient-field.js?v=5"' in index
+assert 'src="kawarp-1.2.0.js?v=5"' in index
+# Preserve the independent upstream oracle and ship the complete pinned core
+# with only module-export adaptation. Its MIT notice must accompany the asset.
+reference = (ROOT / "Tests/SpicyLyricsRenderer/Reference/kawarp-1.2.0.js").read_bytes()
+assert hashlib.sha256(reference).hexdigest() == "f36a99dcb0d9167d450d1009ff6e4a0f1659b17352cd1be0644f0a26e1a58cc5"
+adapted = reference.decode().replace("export class Kawarp", "class Kawarp").replace("export default Kawarp;", "window.Kawarp = Kawarp;")
+assert adapted.strip() in (BUNDLE / "kawarp-1.2.0.js").read_text(encoding="utf-8")
+assert (BUNDLE / "KAWARP-LICENSE").read_text() == (ROOT / "Tests/SpicyLyricsRenderer/Reference/KAWARP-LICENSE").read_text()
 assert 'src="renderer.js?v=5"' in index
 assert 'href="styles.css?v=5"' in index
 assert "const RENDERER_PROTOCOL_VERSION = 5" in renderer

@@ -47,7 +47,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 #artwork-backdrop.is-animated { animation-play-state: running; }
 #artwork-backdrop[data-style="gradient"] {
-  filter: saturate(2.5);
+  filter: saturate(2.5) brightness(.65);
   background-size: 100% 100%;
   transform: none;
   animation: none;
@@ -63,6 +63,14 @@ button { -webkit-tap-highlight-color: transparent; }
   background: linear-gradient(180deg, rgba(8,10,14,.62) 14%, rgba(8,10,14,.1) 36%, rgba(8,10,14,.1) 64%, rgba(4,6,11,.68) 87%);
 }
 .contrast-veil::after { content: ""; position: absolute; inset: 14% 0 10%; background: linear-gradient(transparent, rgba(8,10,14,var(--artwork-readability,0)) 20%, rgba(8,10,14,var(--artwork-readability,0)) 80%, transparent); }
+/* Kawarp already includes the PC vignette and colour treatment. Do not stack
+   the cover-mode veil or sampled-palette shade on top of its gradient. */
+#artwork-backdrop[data-style="gradient"] + .contrast-veil { background: transparent; }
+#artwork-backdrop[data-style="gradient"] + .contrast-veil::after { display: none; }
+.native-high-contrast #artwork-backdrop[data-style="gradient"] + .contrast-veil { background: rgba(8,10,14,.7); }
+@media (prefers-contrast: more) {
+  #artwork-backdrop[data-style="gradient"] + .contrast-veil { background: rgba(8,10,14,.7); }
+}
 
 #app {
   position: relative;

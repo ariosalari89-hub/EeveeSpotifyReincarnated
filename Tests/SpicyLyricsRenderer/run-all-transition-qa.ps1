@@ -8,7 +8,10 @@ try {
     & agent-browser --session $session open ([Uri]$page).AbsoluteUri
     Get-Content (Join-Path $PSScriptRoot 'browser-fixture.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
     Get-Content (Join-Path $PSScriptRoot 'transition-checks.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
-    $phases=@('inline','card','background','highlight','card-layout','background-style','background-speed','background-motion-perception','background-lifecycle','gradient-recovery','gradient-quality','shuffle-availability','shuffle-settlement')
+    $oracle=Get-Content (Join-Path $PSScriptRoot 'Reference/kawarp-1.2.0.js') -Raw -Encoding utf8
+    ('(() => {'+$oracle.Replace('export class Kawarp','class Kawarp').Replace('export default Kawarp;','window.SpicyDesktopKawarp = Kawarp;')+'})();') | & agent-browser --session $session eval --stdin | Out-Null
+    Get-Content (Join-Path $PSScriptRoot 'pc-gradient-checks.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
+    $phases=@('inline','card','background','highlight','card-layout','background-style','background-speed','background-motion-perception','background-lifecycle','gradient-recovery','gradient-quality','gradient-pc-parity','shuffle-availability','shuffle-settlement')
     foreach($phase in @('interlude','dot-envelope','paint','motion','emphasis','type','layout','contrast')) {
         foreach($surface in @('fullscreen','card','inline')) { $phases+="desktop-$phase-$surface" }
     }

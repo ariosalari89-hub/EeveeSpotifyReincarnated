@@ -226,8 +226,7 @@
 
     paint() {
       this.layer.dataset.style = this.style;
-      this.gradient.setPalette(this.gradientPalette);
-      this.ready = this.style === "gradient" ? this.gradientPalette.length > 0 : this.artworkLoaded;
+      this.ready = this.style === "gradient" ? this.gradient.ready || this.gradientPalette.length > 0 : this.artworkLoaded;
       // Bright covers need protection behind the glyphs, not a dark film
       // across the entire artwork. Normal/dark covers keep this very light.
       const palette = this.style === "gradient" ? this.gradientPalette : this.palette;
@@ -235,7 +234,7 @@
         (rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722) / 255));
       const readability = model.clamp((brightness - .45) * 1.08, 0, .6);
       document.documentElement.style.setProperty("--artwork-readability",
-        String(this.ready ? Math.min(.6, readability + (this.style === "gradient" ? .08 : 0)) : 0));
+        String(this.ready && this.style !== "gradient" ? readability : 0));
       if (!this.ready) this.layer.style.backgroundImage = "none";
       else if (this.style !== "gradient") this.layer.style.backgroundImage = `url(${JSON.stringify(this.artwork)})`;
       else {
@@ -293,11 +292,12 @@
     }
 
     syncMotion() {
-      const active = this.ready && this.enabled && this.playing
+      const wanted = this.enabled && this.playing
         && state.surface !== "inline" && state.lifecyclePhase === "visible"
         && !document.hidden && !reduceMotion();
+      const active = this.ready && wanted;
       this.layer.classList.toggle("is-animated", active);
-      this.gradient.setMotion(active && this.style === "gradient", this.speed);
+      this.gradient.setMotion(wanted && this.style === "gradient", this.speed);
       for (const animation of this.layer.getAnimations()) {
         if (animation.playbackRate !== this.speed / 100) animation.updatePlaybackRate(this.speed / 100);
       }
@@ -309,6 +309,7 @@
       this.dominantColor = dominantColor;
       const request = ++this.artworkRequest;
       this.artworkLoaded = false;
+      this.gradient.setImage(null);
       const hex = /^#?([0-9a-f]{6})$/i.exec(dominantColor)?.[1];
       const fallback = hex ? [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16)) : null;
       this.palette = fallback ? [fallback, fallback.map(c => Math.round(c * .6))] : [];
@@ -325,6 +326,7 @@
         if (sampled.length) this.palette = sampled;
         const accents = this.colorsFrom(image, true);
         if (accents.length) this.gradientPalette = accents;
+        this.gradient.setImage(image);
         this.artworkLoaded = true;
         this.paint();
       };

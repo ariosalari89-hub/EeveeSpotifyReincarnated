@@ -932,7 +932,9 @@ struct QAFailure: Error { let message: String }
         }
         guard ready else { throw QAFailure(message: "transition renderer not ready") }
         _ = try await evaluateTransitionScript("window.SpicyNative.receive({type:'bootstrap',payload:{surface:'\(surface)',preferences:{fontSize:100,playbackOffset:0,dynamicBackground:false}}});true")
-        for name in ["browser-fixture", "transition-checks"] {
+        let scripts = ["browser-fixture", "transition-checks"]
+            + (phase == "gradient-pc-parity" ? ["pc-gradient-oracle", "pc-gradient-checks"] : [])
+        for name in scripts {
             guard let file = Bundle.main.url(forResource: name, withExtension: "js") else {
                 throw QAFailure(message: "missing isolated transition test")
             }
@@ -988,7 +990,7 @@ struct QAFailure: Error { let message: String }
             + ["desktop-shuffle-fullscreen", "desktop-backdrop-fullscreen"]
         let phases = baseline ? ["inline", "card"]
             : ["inline", "card", "background", "highlight", "card-layout", "background-style", "background-speed", "background-motion-perception", "background-lifecycle",
-               "gradient-recovery", "gradient-quality", "shuffle-availability", "shuffle-settlement"] + desktopPhases
+               "gradient-recovery", "gradient-quality", "gradient-pc-parity", "shuffle-availability", "shuffle-settlement"] + desktopPhases
         for phase in phases {
             let phaseRows = try await rendererTransitionPhase(phase, baseline: baseline)
             rows += phaseRows
