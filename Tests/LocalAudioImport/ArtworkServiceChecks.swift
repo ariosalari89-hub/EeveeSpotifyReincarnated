@@ -128,6 +128,26 @@ func runLocalAudioArtworkServiceChecks() throws {
         // physical-device frame-rate or universal performance claim.
         try expect(elapsed < 1, "twelve path-based covers must finish within one second in the 200-song native fixture")
     }
+    try withDirectories { input, output in
+        let manager = FileManager.default
+        try manager.createDirectory(at: output, withIntermediateDirectories: true)
+        let plain = URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/synthetic-tone.mp3")
+        for index in 0..<199 {
+            try manager.copyItem(at: plain, to: output.appendingPathComponent("Song \(index).mp3"))
+        }
+        try manager.copyItem(at: URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.m4a"),
+                             to: output.appendingPathComponent("ZZZ cover.m4a"))
+        let service = LocalAudioArtworkService(directory: output)
+        let uri = "spotify:local:A%2FB+%2B+%E9%9F%B3:Windows%3A+Summer:Midnight+Library:0"
+        let request = service.imageURL(forTrackURI: uri)!
+        let start = ProcessInfo.processInfo.systemUptime
+        for _ in 0..<4 {
+            let cover = try serviceArtwork(service, request)
+            try expect(cover != nil, "a missing player cover must resolve the unique full identity in a larger collection")
+        }
+        let elapsed = ProcessInfo.processInfo.systemUptime - start
+        print(String(format: "MEASURE: 4 full-identity covers in a 200-song collection: %.3f seconds", elapsed))
+    }
 }
 
 private func nativeArtworkURL(_ file: URL) -> URL {
