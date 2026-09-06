@@ -46,7 +46,8 @@ window.runSpicyTransitionChecks = async function (phase) {
       await frame();
       const line = document.querySelector('#lyrics .inline-visible');
       const rect = line?.getBoundingClientRect();
-      stableFrames = !document.hidden && innerHeight === 52 && line?.textContent === text
+      stableFrames = !document.hidden && innerHeight === 52
+        && line?.textContent.replace(/\s+/g,' ').trim() === text.trim()
         && rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight ? stableFrames + 1 : 0;
       if (stableFrames >= 6) return;
     }
@@ -455,7 +456,13 @@ window.runSpicyTransitionChecks = async function (phase) {
   SpicyQA.lyrics.karaoke.Content = [{ Type: 'Vocal', Lead: { StartTime: 0, EndTime: 20,
     Syllables: Array.from({length: 20}, (_,i) => ({Text: `Pageword${i} `,StartTime:i,EndTime:i+1})) }}];
   SpicyQA.scenario('karaoke', { ...paused, positionMs: 500 });
-  await wait(350);
+  // Page construction measures and wraps every provider word. On a cold
+  // WebKit process its first composite can outlast a fixed 350 ms timer.
+  // Establish the same actually painted starting phrase as the simple-caption
+  // check, then observe a steady cadence before sending the page-change input.
+  // The transition window and intermediate-opacity assertion remain unchanged.
+  await waitForPaintedCaption(Array.from({length:20},(_,i)=>`Pageword${i} `).join(''));
+  const pageCadenceBeforeMs = await waitForSteadyFrames();
   const nativeFrame = window.requestAnimationFrame;
   const pageCallbacks = [], pageFrameTimes = [], pageStyleReads = [], pageLayerProfiles = [];
   let recordPageFrames = true;
@@ -464,7 +471,7 @@ window.runSpicyTransitionChecks = async function (phase) {
     callback(timestamp);
     if (recordPageFrames) pageCallbacks.push({name:callback.name,ms:performance.now()-started});
   });
-  const pageStarted = performance.now();
+  const pageStarted = performance.now(), pageStartedAtMs = Date.now();
   SpicyQA.observe({ ...paused, positionMs: 15500 });
   const pageOpacity = [];
   const pageGhosts = [];
@@ -492,7 +499,8 @@ window.runSpicyTransitionChecks = async function (phase) {
   const currentWord = [...document.querySelectorAll('#lyrics .inline-visible .token')].find(e=>e.textContent==='Pageword15 ');
   check('caption word-boundary pages blend and keep the actual timed word visible',
     pageOpacity.some(o=>o>.05&&o<.95) && currentWord.getClientRects().length>0 && !document.querySelector('.caption-outgoing'),
-    {opacity:pageOpacity,frameTimes:pageFrameTimes,styleReads:pageStyleReads,callbacks:pageCallbacks,layerProfiles:pageLayerProfiles});
+    {opacity:pageOpacity,frameTimes:pageFrameTimes,startedAtMs:pageStartedAtMs,cadenceBeforeMs:pageCadenceBeforeMs,
+      styleReads:pageStyleReads,callbacks:pageCallbacks,layerProfiles:pageLayerProfiles});
   check('the outgoing caption snapshot contains only its visible word-boundary page',
     pageGhosts.length > 0 && pageGhosts.every(g=>g.hidden===0 && g.tokens>0 && g.tokens<20),pageGhosts);
   check('hidden caption pages do not receive repeated glyph style writes during a page transition',
