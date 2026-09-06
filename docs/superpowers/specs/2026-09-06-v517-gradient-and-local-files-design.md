@@ -123,24 +123,46 @@ physical-device, screen-reader/human-task and signed Spotify-runtime limits expl
 
 ## Completion checklist and public test seams
 
-- [ ] Public playback/preferences messages produce broad, vivid two-/four-color regions
+- [x] Public playback/preferences messages produce broad, vivid two-/four-color regions
       with dark, gray, bright, monochrome, invalid and changing artwork.
-- [ ] Rendered frames prove nonrigid internal color deformation and sustained distinct
+- [x] Rendered frames prove nonrigid internal color deformation and sustained distinct
       colors; slow/default/fast motion is visible, continuous and bounded in frame cost.
-- [ ] Pause, background/visibility, inline, disabled and reduced-motion stop all gradient
+- [x] Pause, background/visibility, inline, disabled and reduced-motion stop all gradient
       frame work; resume and speed changes preserve continuity.
-- [ ] Pixel contrast, actual mobile/card/landscape geometry and automated accessibility
+- [x] Pixel contrast, actual mobile/card/landscape geometry and automated accessibility
       checks pass for the changed background, including the bright-artwork extremes.
-- [ ] The imported-file interface lists the supported scope after restart and reports
+- [x] The imported-file interface lists the supported scope after restart and reports
       actual rename/remove outcomes; exact-target confirmation and retained edits work.
-- [ ] Real temporary audio fixtures cover collision, Unicode, traversal, symlink,
+- [x] Real temporary audio fixtures cover collision, Unicode, traversal, symlink,
       replacement, disappearance, cancellation, re-entry and permission/write failures.
-- [ ] Actual MP3/MP4 embedded art, absent art, corrupt/oversized art, duplicate identities
+- [x] Actual MP3/MP4 embedded art, absent art, corrupt/oversized art, duplicate identities
       and stale requests exercise the public artwork/native adapter seam.
-- [ ] Native UI and WKWebView tests pass with scoped integration limitations recorded.
-- [ ] Existing renderer, import, playback, lyrics and package checks remain green.
-- [ ] A fresh build is inspected and assembled into a distinct v5.17 IPA; exact injected
+- [x] Native UI and WKWebView tests pass with scoped integration limitations recorded.
+- [x] Existing renderer, import, playback, lyrics and package checks remain green.
+- [x] A fresh build is inspected and assembled into a distinct v5.17 IPA; exact injected
       payloads and the final archive are checked and delivered with evidence.
+
+### Completion evidence — September 6, 2026
+
+Build 34056103486 passed on source `1e2596261001eaafeed37f8b891de1e31e6a2088`:
+159 browser and 159 WKWebView checks, 32 core import/file/artwork checks, 11 native
+UI flow groups, six layouts/90 audited rows, six metadata-bridge checks and the
+existing lifecycle/control suites. Sustained color retention was measured through
+90 seconds. Native Gradient callback p95 was 9 ms across 84 paints and pause stopped
+further painting. Actual final native and browser captures were inspected.
+
+The independent final archive checks confirm 48 exact fresh replacement entries,
+1,013 unchanged base entries, the six tested renderer resources, one Eevee injection,
+all previous effective English values and no detected QA payload. The separate
+`EeveeSpotify-9.1.76-SpicyLyrics-v5.17-Sideloadly.ipa` is 134,062,331 bytes, SHA-256
+`ab66cc62efb1881e2e41bb2ffc84f76947127be717335a6b93f92d41c0e14721`.
+
+Detailed reports, original failing captures, repeats and the release notes are in
+the workspace's v5.17 evidence/output folder, not in the shipped app. The default
+PC-style inactive fade is retained and is not an AA contrast claim. Real-device
+Spotify artwork in the four requested surfaces, indexing/playlist propagation,
+playback across file changes, installation and assistive-technology interaction
+remain unverified. The earlier unrelated process restart remains undiagnosed.
 
 ## Implementation sequence
 
