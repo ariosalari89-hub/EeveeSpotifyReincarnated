@@ -47,6 +47,24 @@ do {
         try expect(buffer.frameLength == 4_410, "the output must be consumable by the platform audio reader")
         print("PASS: selected audio becomes a playable, byte-preserving Documents copy")
     }
+    try withDirectories { input, output in
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let original = input.appendingPathComponent("Shared title.wav")
+        let existing = output.appendingPathComponent("Shared title.wav")
+        try makeAudio(at: original, value: 0.25)
+        try makeAudio(at: existing, value: 0.75)
+        let existingBytes = try Data(contentsOf: existing)
+        let result = LocalAudioImporter(directory: output).importFiles([original])
+        guard let copied = result.first?.fileURL else {
+            throw TestFailure(description: "a different song with an existing name must receive its own copy")
+        }
+        try expect(copied.lastPathComponent == "Shared title (2).wav", "a name collision must use a distinct visible filename")
+        let preservedBytes = try Data(contentsOf: existing)
+        let copiedBytes = try Data(contentsOf: copied)
+        let sourceBytes = try Data(contentsOf: original)
+        try expect(preservedBytes == existingBytes && copiedBytes == sourceBytes, "neither colliding song may be overwritten")
+        print("PASS: different songs with the same filename both survive")
+    }
     print("PASS")
 } catch {
     fputs("FAIL: \(error)\n", stderr)
