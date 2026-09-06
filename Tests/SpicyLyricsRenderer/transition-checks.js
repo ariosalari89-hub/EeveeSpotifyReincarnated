@@ -158,6 +158,7 @@ window.runSpicyTransitionChecks = async function (phase) {
     const artwork=document.createElement('canvas');artwork.width=artwork.height=64;
     const context=artwork.getContext('2d');
     palette.forEach((rgb,index)=>{context.fillStyle=`rgb(${rgb.join(',')})`;context.fillRect(index%2*32,Math.floor(index/2)*32,32,32);});
+    const track={...SpicyQA.tracks.karaoke,artwork:artwork.toDataURL(),dominantColor:''};
     const originalRAF=window.requestAnimationFrame, originalDraw=WebGLRenderingContext.prototype.drawArrays;
     const costs=[];let activeSample=null;
     // Measure the real animation callbacks that reach the browser's canvas
@@ -177,7 +178,7 @@ window.runSpicyTransitionChecks = async function (phase) {
       const playing={isPlaying:true,isPaused:false,isAdvancing:true};
       SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:false,preferences:{backgroundStyle:'gradient',dynamicBackground:true,backgroundSpeed:100}});
       SpicyQA.scenario('karaoke',{...playing,positionMs:7400});
-      SpicyQA.sendSession({...playing,positionMs:7400,track:{...SpicyQA.tracks.karaoke,artwork:artwork.toDataURL(),dominantColor:''}});
+      SpicyQA.sendSession({...playing,positionMs:7400,track});
       const layer=document.querySelector('#artwork-backdrop');
       for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(layer.querySelector('canvas:not([hidden])'))break;}
       await waitForSteadyFrames();
@@ -197,12 +198,14 @@ window.runSpicyTransitionChecks = async function (phase) {
         {peak,changedFraction:changed/area,transform:getComputedStyle(layer).transform});
       check('gradient painting stays within the native fixture animation-callback budget',
         costs.length>=15 && p95<16,{samples:costs.length,p95CallbackMs:p95,maxCallbackMs:sorted.at(-1)});
-      SpicyQA.sendSession(paused);await frame();await frame();
+      SpicyQA.sendSession({...paused,track});await frame();await frame();
       const frozen=canvas.toDataURL(), count=costs.length;await wait(250);await frame();
       check('pausing stops native gradient paint callbacks as well as visible motion',
-        costs.length===count && frozen===canvas.toDataURL(),{before:count,after:costs.length});
+        !canvas.hidden && costs.length===count && frozen===canvas.toDataURL(),{before:count,after:costs.length,visible:!canvas.hidden});
     } finally {
-      SpicyQA.sendSession(paused);
+      // Keep the verified cover available for the native post-phase screenshot.
+      // A bare fixture session would restore its default cover-less track.
+      SpicyQA.sendSession({...paused,track});
       window.requestAnimationFrame=originalRAF;
       WebGLRenderingContext.prototype.drawArrays=originalDraw;
     }

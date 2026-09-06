@@ -151,6 +151,13 @@ final class QAAppDelegate: UIResponder, UIApplicationDelegate {
             try await waitUntil("picker completion must copy the selected song and show its Copied result") {
                 picker(in: navigation) == nil && cell("local_files_result", in: list)?.accessibilityValue == "Copied"
             }
+            // The presentation pointer clears at the start of dismissal, before
+            // a physical tap can reach the inventory. Do not invoke the table
+            // delegate while the system picker is still leaving the screen.
+            try await waitUntil("the native picker must finish dismissal before the next inventory action") {
+                systemPicker.viewIfLoaded?.window == nil && !systemPicker.isBeingDismissed &&
+                    navigation.transitionCoordinator == nil
+            }
             let copied = documents.appendingPathComponent("Picked song.wav")
             let copiedBytes = try Data(contentsOf: copied)
             let preservedBytes = try Data(contentsOf: original)
