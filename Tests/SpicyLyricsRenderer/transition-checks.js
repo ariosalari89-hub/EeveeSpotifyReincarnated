@@ -443,37 +443,26 @@ window.runSpicyTransitionChecks = async function (phase) {
     try {
       for (const [variant, css] of [
         ['control-before', ''],
-        ['hidden-pool', ''],
-        ['underpaint-off', '.lyric-line.active > .line-text { background-image: none !important; }'],
-        ['glyph-shadow-off', '.token,.letter { text-shadow: none !important; }'],
-        ['ghostless', ''],
+        ['gpu-translate', '.token,.letter { transform:translate3d(0,calc(var(--effect-y,.01) * var(--lead-font-size)),0)!important; }'],
+        ['glyph-motion-off', '.token,.letter { transform:none!important;scale:1!important; }'],
+        ['glyph-gradient-off', '.token,.letter { background-image:none!important;-webkit-text-fill-color:white!important; }'],
+        ['flat-glyph-paint', '.lyric-line.active > .line-text,.token,.letter { background-image:none!important;-webkit-text-fill-color:white!important;text-shadow:none!important; }.lyric-line.effects-near,.lyric-line.effects-near * {will-change:auto!important;backface-visibility:visible!important}.token,.letter{transform:none!important;scale:1!important}'],
+        ['adjacent-page', ''],
         ['control-after', '']
       ]) {
         profileStyle.textContent = css;
-        SpicyQA.scenario('karaoke', { ...paused, positionMs: 500 });
+        SpicyQA.scenario('karaoke', { ...paused, positionMs: variant === 'adjacent-page' ? 2500 : 500 });
         await wait(350);
         const before = [];
         for (let i = 0; i < 6; i++) { await frame(); before.push(performance.now()); }
         const started = performance.now(), times = [], opacities = [];
-        const hiddenPool = document.createDocumentFragment();
-        const diagnosticObserver = new MutationObserver(() => {
-          if (variant === 'hidden-pool') {
-            document.querySelectorAll('#lyrics .inline-visible > .line-text > [hidden]')
-              .forEach(node => hiddenPool.appendChild(node));
-          } else if (variant === 'ghostless') document.querySelector('.caption-outgoing')?.remove();
-        });
-        diagnosticObserver.observe(document.querySelector('.lyrics-pane'),
-          {childList:true,subtree:true,attributes:true,attributeFilter:['hidden']});
-        try {
-          SpicyQA.observe({ ...paused, positionMs: 15500 });
-          for (const end = started + 400; performance.now() < end;) {
-            await frame();
-            times.push(performance.now() - started);
-            opacities.push(Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity));
-          }
-          pageLayerProfiles.push({variant,before:before.slice(1).map((t,i)=>t-before[i]),times,opacities,
-            pooledNodes:hiddenPool.childNodes.length});
-        } finally { diagnosticObserver.disconnect(); }
+        SpicyQA.observe({ ...paused, positionMs: variant === 'adjacent-page' ? 3500 : 15500 });
+        for (const end = started + 400; performance.now() < end;) {
+          await frame();
+          times.push(performance.now() - started);
+          opacities.push(Number(getComputedStyle(document.querySelector('#lyrics .inline-visible')).opacity));
+        }
+        pageLayerProfiles.push({variant,before:before.slice(1).map((t,i)=>t-before[i]),times,opacities});
       }
     } finally { profileStyle.remove(); }
   }
