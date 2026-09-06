@@ -126,8 +126,13 @@ extension QAAppDelegate {
         let retry = fileAlert(in: navigation)!
         retry.textFields!.first!.text = "Renamed on phone"
         retry.textFields!.first!.sendActions(for: .editingDidEndOnExit)
+        var readySamples = 0
         try await waitUntil("correcting a filename error must close the editor and retain the selected copy") {
-            fileAlert(in: navigation) == nil && cell("local_files_file", label: "Renamed on phone.wav", in: list) != nil
+            let row = cell("local_files_file", label: "Renamed on phone.wav", in: list)
+            let ready = fileAlert(in: navigation) == nil && !retry.isBeingDismissed &&
+                row?.isUserInteractionEnabled == true && row?.accessibilityTraits.contains(.notEnabled) == false
+            readySamples = ready ? readySamples + 1 : 0
+            return readySamples >= 2
         }
     }
 }
