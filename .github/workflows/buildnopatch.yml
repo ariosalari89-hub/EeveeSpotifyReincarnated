@@ -105,6 +105,7 @@ jobs:
         run: bash Tests/SpicyLyricsNativeControls/run.sh
 
       - name: Test Spicy Lyrics in iOS WebKit and UIKit
+        timeout-minutes: 15
         run: bash Tests/SpicyLyricsIOS/run.sh
 
       - name: Upload iOS integration result
@@ -114,6 +115,7 @@ jobs:
           name: SpicyLyrics-iOS-QA
           path: |
             ${{ runner.temp }}/spicy-ios-qa-result.txt
+            ${{ runner.temp }}/spicy-ios-qa-progress.txt
             ${{ runner.temp }}/spicy-metadata-qa-result.txt
             ${{ runner.temp }}/qa-portrait.png
             ${{ runner.temp }}/qa-landscape.png

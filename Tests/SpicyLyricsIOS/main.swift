@@ -160,6 +160,16 @@ struct QAFailure: Error { let message: String }
     var checks: [String] = []
     init(source: UIViewController, scene: UIWindowScene) { self.source = source; self.scene = scene }
 
+    // Persist phase boundaries independently of final completion. A stalled
+    // simulator or recording service must not hide already-executed checks.
+    func checkpoint(_ phase: String) {
+        let heading = "QA phase: \(phase) at \(ISO8601DateFormatter().string(from: Date()))"
+        let report = ([heading] + checks).joined(separator: "\n")
+        let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("qa-progress.txt")
+        try? report.write(to: path, atomically: true, encoding: .utf8)
+    }
+
     func testNativeAvailability() async throws {
         let trackID = "3N1zlgIGnFcnNiTuDaeYzy"
         let track = QALyricsAvailabilityTrack("spotify:track:" + trackID)
@@ -710,11 +720,14 @@ struct QAFailure: Error { let message: String }
     }
     func run() async {
         do {
+            checkpoint("starting native availability")
             try await testNativeAvailability()
+            checkpoint("native availability and actual display capture passed")
             // Keep the isolated renderer assertions independent of the later
             // external display-capture handshake and native lifecycle fixtures.
             try await testRendererTransitions(baseline: true)
             try await testRendererTransitions(baseline: false)
+            checkpoint("all current WebKit transitions passed")
             SpicyLyricsFullscreenCoordinator.shared.attach(to: source)
             guard let preparing = scene.keyWindow, preparing.rootViewController !== source,
                   preparing.rootViewController?.view.subviews.count == 2 else {
@@ -785,6 +798,7 @@ struct QAFailure: Error { let message: String }
             try await waitForSettledLandscape()
             try await snapshot("qa-landscape")
             try await captureSimulatorScreen()
+            checkpoint("landscape display captured; closing fullscreen")
             guard let overlay = scene.keyWindow else { throw QAFailure(message: "close has no persistent window") }
             _ = try await evaluate("document.querySelector('#close-button').click()")
             // Check the real completion state: a cold simulator can deliver the
@@ -800,7 +814,9 @@ struct QAFailure: Error { let message: String }
                 throw QAFailure(message: "close must dispose persistent window and restore the original window within 3 seconds")
             }
             checks.append("close disposes persistent window and restores original window in \(ProcessInfo.processInfo.systemUptime - closeStarted)s")
+            checkpoint("fullscreen close passed; starting embedded lifecycle")
             try await testEmbeddedSurfaces()
+            checkpoint("embedded lifecycle passed; finishing suite")
             finish(result: "PASS")
         } catch {
             finish(result: "FAIL: \(error)\n\(await failureDiagnostics())")
@@ -872,6 +888,7 @@ struct QAFailure: Error { let message: String }
                 throw QAFailure(message: "no transition results")
             }
             rows += phaseRows
+            checkpoint("\(baseline ? "baseline" : "current") WebKit \(phase): \(phaseRows.filter { $0["pass"] as? Bool == true }.count)/\(phaseRows.count) checks passed")
         }
         var failures = [String]()
         for row in rows {

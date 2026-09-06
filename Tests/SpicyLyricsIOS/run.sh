@@ -94,7 +94,16 @@ xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 # individual app, rotation, close and screenshot assertions keep their deadlines.
 # The desktop-parity phases add independent three-surface motion/paint checks;
 # only the overall suite budget grows, not any assertion's sampling deadline.
+QA_LAST_PROGRESS=""
 for iteration in {1..200}; do
+  if [ -s "$CONTAINER/Documents/qa-progress.txt" ]; then
+    IFS= read -r QA_PROGRESS < "$CONTAINER/Documents/qa-progress.txt" || true
+    if [ "$QA_PROGRESS" != "$QA_LAST_PROGRESS" ]; then
+      printf '%s\n' "$QA_PROGRESS"
+      cp "$CONTAINER/Documents/qa-progress.txt" "$RUNNER_TEMP/spicy-ios-qa-progress.txt"
+      QA_LAST_PROGRESS="$QA_PROGRESS"
+    fi
+  fi
   if [ -f "$CONTAINER/Documents/qa-availability-ready.txt" ] && [ ! -f "$CONTAINER/Documents/qa-availability-done.txt" ]; then
     echo "Availability display capture requested at $(date -u +%FT%TZ)"
     xcrun simctl io "$DEVICE" screenshot --type=png "$RUNNER_TEMP/qa-availability-screen.png"
