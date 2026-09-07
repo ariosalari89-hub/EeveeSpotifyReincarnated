@@ -55,8 +55,13 @@ final class LocalAudioArtworkService {
 
     private func request(for url: URL) -> Request? {
         let parts = url.absoluteString.components(separatedBy: ":")
-        guard parts.count == 3, parts[0] == "spotify", parts[1] == "localfileimage",
-              let payload = parts[2].removingPercentEncoding else { return nil }
+        guard parts.count >= 3, parts[0] == "spotify", parts[1] == "localfileimage" else { return nil }
+        // The core image loader uses the same four identity fields as a local
+        // track; it does not go through the legacy encoded-file-path factory.
+        if parts.count == 6 {
+            return LocalTrackIdentity("spotify:local:" + parts.dropFirst(2).joined(separator: ":")).map(Request.track)
+        }
+        guard parts.count == 3, let payload = parts[2].removingPercentEncoding else { return nil }
         if payload.hasPrefix(Self.marker) {
             return LocalTrackIdentity(String(payload.dropFirst(Self.marker.count))).map(Request.track)
         }

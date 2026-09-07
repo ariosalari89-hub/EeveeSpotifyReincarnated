@@ -32,6 +32,71 @@ static void replace(Class cls, SEL selector, Method method, IMP implementation) 
 }
 
 static char requestGenerationKey;
+static char coreFallbackKey;
+
+static void installCoreFallback(EeveeLocalArtworkLoader loader) {
+    Class cls = NSClassFromString(@"SPTCoreImageLoaderRequest");
+    SEL loadSelector = NSSelectorFromString(@"load");
+    SEL urlSelector = NSSelectorFromString(@"URL");
+    SEL errorSelector = NSSelectorFromString(@"dispatchError:");
+    SEL successSelector = NSSelectorFromString(@"dispatchSuccess:");
+    Method load = class_getInstanceMethod(cls, loadSelector);
+    Method error = class_getInstanceMethod(cls, errorSelector);
+    if (!compatible(load, 'v', 0, NO) || !compatible(error, 'v', 1, YES) ||
+        !compatible(class_getInstanceMethod(cls, urlSelector), '@', 0, NO) ||
+        !compatible(class_getInstanceMethod(cls, NSSelectorFromString(@"cancelled")), 'B', 0, NO) ||
+        !compatible(class_getInstanceMethod(cls, successSelector), 'v', 1, YES)) return;
+
+    IMP originalLoad = method_getImplementation(load);
+    IMP originalError = method_getImplementation(error);
+    IMP loadReplacement = imp_implementationWithBlock(^(id request) {
+        @synchronized(request) {
+            objc_setAssociatedObject(request, &requestGenerationKey, [NSObject new], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(request, &coreFallbackKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        ((void (*)(id, SEL))originalLoad)(request, loadSelector);
+    });
+    IMP errorReplacement = imp_implementationWithBlock(^(id request, NSError *nativeError) {
+        NSURL *url = objectValue(request, urlSelector);
+        if (![url isKindOfClass:NSURL.class] || ![url.absoluteString hasPrefix:@"spotify:localfileimage:"]) {
+            ((void (*)(id, SEL, id))originalError)(request, errorSelector, nativeError);
+            return;
+        }
+        NSObject *generation;
+        @synchronized(request) {
+            if (objc_getAssociatedObject(request, &coreFallbackKey)) return;
+            generation = objc_getAssociatedObject(request, &requestGenerationKey) ?: [NSObject new];
+            objc_setAssociatedObject(request, &requestGenerationKey, generation, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(request, &coreFallbackKey, generation, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        BOOL (^obsolete)(void) = ^BOOL {
+            return cancelled(request) || objc_getAssociatedObject(request, &requestGenerationKey) != generation ||
+                ![objectValue(request, urlSelector) isEqual:url];
+        };
+        NSObject *replyLock = [NSObject new];
+        __block BOOL replied = NO;
+        BOOL owned = loader(url, obsolete, ^(NSData *data) {
+            @synchronized(replyLock) { if (replied) return; replied = YES; }
+            if (obsolete()) return;
+            if (data.length) {
+                Method success = class_getInstanceMethod(object_getClass(request), successSelector);
+                if (compatible(success, 'v', 1, YES)) {
+                    ((void (*)(id, SEL, id))method_getImplementation(success))(request, successSelector, data);
+                }
+            } else {
+                ((void (*)(id, SEL, id))originalError)(request, errorSelector, nativeError);
+            }
+        });
+        if (!owned) {
+            objc_setAssociatedObject(request, &coreFallbackKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            ((void (*)(id, SEL, id))originalError)(request, errorSelector, nativeError);
+        }
+    });
+    // Native successes stay native. Only a failed owned local request reaches
+    // the embedded reader, then returns through Spotify's original callbacks.
+    replace(cls, errorSelector, error, errorReplacement);
+    replace(cls, loadSelector, load, loadReplacement);
+}
 
 BOOL EeveeLocalAudioInstallArtwork(EeveeLocalArtworkURLProvider provider, EeveeLocalArtworkLoader loader) {
     static dispatch_once_t once;
@@ -109,6 +174,7 @@ BOOL EeveeLocalAudioInstallArtwork(EeveeLocalArtworkURLProvider provider, EeveeL
         // Register the loader first: a newly supplied URL always has a handler.
         replace(requestClass, loadSelector, load, loadReplacement);
         replace(trackClass, metadataSelector, metadata, metadataReplacement);
+        installCoreFallback(loader);
         installed = YES;
     });
     return installed;
