@@ -6,7 +6,7 @@
 
 // Optional, read-only UIKit observations. No Swift storage, global image setter,
 // forced layout, view mutation, or retained player/view hierarchy is involved.
-static char ownerKey, rootKey;
+static char ownerKey, rootKey, reusedKey, reusingKey;
 static NSUInteger nextView;
 static Class viewClass, imageViewClass, encoreClass;
 static EeveeLocalArtworkDiagnostic viewDiagnostic;
@@ -160,20 +160,33 @@ static BOOL installCover(NSString *name, NSString *surface) {
     IMP originalCover = method_getImplementation(cover), originalLayout = method_getImplementation(layout), originalReuse = method_getImplementation(reuse);
     observe(cls, coverSelector, cover, ^id(id owner) {
         id root = ((id (*)(id, SEL))originalCover)(owner, coverSelector);
-        capture(owner, root, surface);
+        if (NSThread.isMainThread && ![objc_getAssociatedObject(owner, &reusingKey) boolValue] && [root isKindOfClass:viewClass]) {
+            objc_setAssociatedObject(owner, &reusedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            capture(owner, root, surface);
+        }
         return root;
     });
     observe(cls, layoutSelector, layout, ^(id owner) {
         ((void (*)(id, SEL))originalLayout)(owner, layoutSelector);
-        if (NSThread.isMainThread) snapshot(objc_getAssociatedObject(owner, &ownerKey));
+        if (!NSThread.isMainThread) return;
+        EeveeArtworkViewObservation *observation = objc_getAssociatedObject(owner, &ownerKey);
+        if (observation) snapshot(observation);
+        else if (![objc_getAssociatedObject(owner, &reusedKey) boolValue]) {
+            // Swift can bypass the Objective-C getter. Inspect only the known
+            // cell's existing public hierarchy; never invoke/create its provider.
+            capture(owner, owner, surface);
+        }
     });
     observe(cls, reuseSelector, reuse, ^(id owner) {
         if (NSThread.isMainThread) {
+            objc_setAssociatedObject(owner, &reusedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(owner, &reusingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             EeveeArtworkViewObservation *observation = objc_getAssociatedObject(owner, &ownerKey);
             observation.active = NO;
             objc_setAssociatedObject(owner, &ownerKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
         ((void (*)(id, SEL))originalReuse)(owner, reuseSelector);
+        if (NSThread.isMainThread) objc_setAssociatedObject(owner, &reusingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     });
     return YES;
 }

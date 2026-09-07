@@ -41,6 +41,20 @@ establishes these boundaries:
 4. Keep observers optional: a missing class/signature disables only that
    observer. Retain the existing bounded, redacted diagnostic export.
 
+If Swift configures a cover without dispatching the Objective-C getter, the
+first layout of the named cover cell observes its existing public hierarchy.
+It does not invoke or instantiate the provider. Reuse stops both root and
+cell-layout observations until a new cover getter supplies an observed root;
+queued snapshots hold weak references and must not retain either view or owner.
+An image object seen under conflicting URL identities remains unlinked for its
+lifetime, rather than being relabeled as a different song's image.
+
+View flags are structural observations, not proof of visible pixels. `visible`
+counts populated image views that are mounted, non-hidden, nonzero-sized and
+have positive alpha along the inspected hierarchy. It cannot prove absence of
+occlusion, clipping, transforms, or other rendering faults. A truncated or
+unreadable hierarchy has `complete=0`; unknown image identity is `image=0`.
+
 ## Agreed verification boundaries
 
 Use the existing native-adapter installation and diagnostic-export interfaces.
