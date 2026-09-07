@@ -34,15 +34,22 @@ try {
         & agent-browser --session $session set viewport $size[0] $size[1] | Out-Null
         $result=Eval-Gradient @'
 (async()=>{
-  await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
   const layer=document.querySelector('#artwork-backdrop'),canvas=layer.querySelector('canvas');
-  const controls=[...document.querySelectorAll('.topbar button,.transport button,#seek-control')].map(element=>{
-    const rect=element.getBoundingClientRect();return {id:element.id,x:rect.x,y:rect.y,right:rect.right,bottom:rect.bottom};});
+  let controls=[],stable=0;
+  for(const deadline=performance.now()+3000;performance.now()<deadline;){
+    await new Promise(requestAnimationFrame);
+    controls=[...document.querySelectorAll('.topbar button,.transport button,#seek-control')].map(element=>{
+      const rect=element.getBoundingClientRect(),style=getComputedStyle(element);
+      return {id:element.id,x:rect.x,y:rect.y,right:rect.right,bottom:rect.bottom,
+        visible:rect.width>0&&rect.height>0&&style.visibility==='visible'&&Number(style.opacity)>.05};});
+    stable=controls.length===8&&controls.every(control=>control.visible)?stable+1:0;
+    if(stable>=3)break;
+  }
   const outside=controls.filter(rect=>rect.x<-.5||rect.y<-.5||rect.right>innerWidth+.5||rect.bottom>innerHeight+.5);
   const veil=getComputedStyle(document.querySelector('.contrast-veil'));
   const field=canvas.getBoundingClientRect(),expectedWidth=Math.max(innerWidth,innerHeight);
-  return JSON.stringify({viewport:[innerWidth,innerHeight],field:field.toJSON(),outside,filter:getComputedStyle(layer).filter,
-    pass:!outside.length&&!canvas.hidden&&canvas.width===300&&canvas.height===150&&veil.backgroundImage==='none'
+  return JSON.stringify({viewport:[innerWidth,innerHeight],field:field.toJSON(),controls,outside,filter:getComputedStyle(layer).filter,
+    pass:stable>=3&&!outside.length&&!canvas.hidden&&canvas.width===300&&canvas.height===150&&veil.backgroundImage==='none'
       &&Math.abs(field.width-expectedWidth)<.5&&Math.abs(field.height-innerHeight)<.5
       &&Math.abs(field.left+field.width/2-innerWidth/2)<.5&&getComputedStyle(layer).overflowX==='hidden'
       &&document.documentElement.scrollWidth<=innerWidth});
