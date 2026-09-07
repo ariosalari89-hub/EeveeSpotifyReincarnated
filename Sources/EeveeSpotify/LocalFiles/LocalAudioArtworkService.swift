@@ -6,10 +6,12 @@ final class LocalAudioArtworkService {
     private let library: LocalAudioLibrary
     private let directory: URL
     private let queue = DispatchQueue(label: "EeveeSpotify.local-artwork", qos: .utility)
+    private let diagnostic: ((String) -> Void)?
 
     init(directory: URL, diagnostic: ((String) -> Void)? = nil) {
         library = LocalAudioLibrary(directory: directory)
         self.directory = directory.resolvingSymlinksInPath()
+        self.diagnostic = diagnostic
     }
 
     func imageURL(forTrackURI uri: String) -> URL? {
@@ -23,7 +25,11 @@ final class LocalAudioArtworkService {
     @discardableResult
     func load(_ url: URL, isCancelled: @escaping () -> Bool, completion: @escaping (Data?) -> Void) -> Bool {
         guard let request = request(for: url) else { return false }
-        queue.async { [library] in
+        switch request {
+        case .track: diagnostic?("reader request=track")
+        case .file: diagnostic?("reader request=file")
+        }
+        queue.async { [library, diagnostic] in
             guard !isCancelled() else { completion(nil); return }
             var matches: [LocalAudioFile] = []
             switch request {
@@ -46,7 +52,9 @@ final class LocalAudioArtworkService {
                 artwork = LocalAudioArtworkReader.artwork(in: location)
                 if library.file(at: location) != file { artwork = nil }
             }
-            completion(isCancelled() ? nil : artwork)
+            let result = isCancelled() ? nil : artwork
+            if let result = result { diagnostic?("reader result=artwork bytes=\(result.count)") }
+            completion(result)
         }
         return true
     }
