@@ -176,14 +176,18 @@ struct EeveeSettingsView: View {
             Section(header: Text("debug_title".localized), footer: Text("debug_section_footer".localized)) {
                 Button {
                     let logPath = NSTemporaryDirectory() + "eeveespotify_debug.log"
-                    guard FileManager.default.fileExists(atPath: logPath),
-                          let logData = FileManager.default.contents(atPath: logPath),
-                          logData.count > 0 else {
+                    var logURLs: [URL] = []
+                    if let artworkLog = LocalAudioArtworkDiagnostics.shared.exportSnapshot() {
+                        logURLs.append(artworkLog)
+                    }
+                    if let logData = FileManager.default.contents(atPath: logPath), !logData.isEmpty {
+                        logURLs.append(URL(fileURLWithPath: logPath))
+                    }
+                    guard !logURLs.isEmpty else {
                         PopUpHelper.showPopUp(message: "no_debug_log_found".localized, buttonText: "no_debug_log_found_ok".localized)
                         return
                     }
-                    let logURL = URL(fileURLWithPath: logPath)
-                    let activityVC = UIActivityViewController(activityItems: [logURL], applicationActivities: nil)
+                    let activityVC = UIActivityViewController(activityItems: logURLs, applicationActivities: nil)
                     if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                        let rootVC = scene.windows.first?.rootViewController {
                         var topVC = rootVC

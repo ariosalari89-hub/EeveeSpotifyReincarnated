@@ -4,11 +4,12 @@ import EeveeSpotifyC
 enum NativeLocalAudioArtwork {
     static func install() -> Bool {
         guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return false }
-        let service = LocalAudioArtworkService(directory: directory)
-        return EeveeLocalAudioInstallArtwork({ uri in
+        let diagnostic = LocalAudioArtworkDiagnostics.shared
+        let service = LocalAudioArtworkService(directory: directory, diagnostic: diagnostic.record)
+        return EeveeLocalAudioInstallArtworkWithDiagnostics({ uri in
             service.imageURL(forTrackURI: uri)?.absoluteString
         }, { url, cancelled, completion in
             service.load(url, isCancelled: cancelled, completion: completion)
-        })
+        }, diagnostic.record)
     }
 }
