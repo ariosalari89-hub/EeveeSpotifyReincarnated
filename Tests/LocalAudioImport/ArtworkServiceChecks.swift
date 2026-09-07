@@ -3,6 +3,28 @@ import ImageIO
 import CoreGraphics
 
 func runLocalAudioArtworkServiceChecks() throws {
+    try withDirectories { _, output in
+        let source = URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.m4a")
+        _ = LocalAudioImporter(directory: output).importFiles([source])
+        let traceLock = NSLock()
+        var trace: [String] = []
+        let service = LocalAudioArtworkService(directory: output, diagnostic: { event in
+            traceLock.lock(); defer { traceLock.unlock() }
+            trace.append(event)
+        })
+        let uri = "spotify:local:A%2FB+%2B+%E9%9F%B3:Windows%3A+Summer:Midnight+Library:0"
+        let data = try serviceArtwork(service, service.imageURL(forTrackURI: uri)!)
+        traceLock.lock()
+        let events = trace
+        traceLock.unlock()
+        try expect(data != nil && events.contains("reader request=track") &&
+                   events.contains(where: { $0.hasPrefix("reader result=artwork bytes=") }),
+                   "an artwork diagnostic must distinguish an accepted track request and returned artwork without changing its image result")
+        try expect(!events.joined().contains("Midnight") && !events.joined().contains("Windows") &&
+                   !events.joined().contains(output.path) && !events.joined().contains(uri),
+                   "artwork diagnostics must not disclose track fields or the imported directory")
+        print("PASS: embedded-artwork request and result diagnostics preserve returned art and omit private identifiers")
+    }
     try withDirectories { input, output in
         let original = input.appendingPathComponent("Different filename.m4a")
         try FileManager.default.copyItem(at: URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.m4a"), to: original)

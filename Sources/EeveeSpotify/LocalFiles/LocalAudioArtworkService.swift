@@ -7,7 +7,7 @@ final class LocalAudioArtworkService {
     private let directory: URL
     private let queue = DispatchQueue(label: "EeveeSpotify.local-artwork", qos: .utility)
 
-    init(directory: URL) {
+    init(directory: URL, diagnostic: ((String) -> Void)? = nil) {
         library = LocalAudioLibrary(directory: directory)
         self.directory = directory.resolvingSymlinksInPath()
     }
