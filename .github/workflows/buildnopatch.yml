@@ -152,7 +152,14 @@ jobs:
 
       - name: Test Spicy Lyrics in iOS WebKit and UIKit
         if: ${{ !inputs.qa_only || !startsWith(inputs.qa_scope, 'local_audio') }}
-        timeout-minutes: 15
+        # Cold simulator setup and the preceding independent native suites took
+        # almost ten minutes in 34097103537. Per-assertion deadlines do not grow.
+        timeout-minutes: 20
+        env:
+          # Continuous video is an optional debugging artifact, not an oracle.
+          # Keep every real screenshot and motion assertion while measuring
+          # normal app rendering without a concurrent encoder workload.
+          SPICY_QA_RECORD_VIDEO: '0'
         run: bash Tests/SpicyLyricsIOS/run.sh
 
       - name: Upload shared-simulator local audio verification

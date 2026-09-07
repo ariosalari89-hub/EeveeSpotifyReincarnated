@@ -49,6 +49,8 @@ RUNTIME=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; r=[r for 
 [ -n "$RUNTIME" ] || { echo "No iOS simulator runtime available" >&2; exit 1; }
 DEVICE=$(xcrun simctl create SpicyLyricsQA com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$RUNTIME")
 QA_VIDEO_PID=""
+QA_RECORD_VIDEO="${SPICY_QA_RECORD_VIDEO:-1}"
+case "$QA_RECORD_VIDEO" in 0|1) ;; *) echo "SPICY_QA_RECORD_VIDEO must be 0 or 1" >&2; exit 1 ;; esac
 stop_capture() {
   if [ -n "$QA_VIDEO_PID" ]; then
     kill -INT "$QA_VIDEO_PID" 2>/dev/null || true
@@ -76,6 +78,7 @@ xcrun simctl install "$DEVICE" "$QA_APP"
 # the capture allowance while the app has already settled in landscape.
 CONTAINER=$(xcrun simctl get_app_container "$DEVICE" local.spicylyrics.qa data)
 xcrun simctl io "$DEVICE" screenshot --type=png "$QA_DIR/preflight-screen.png"
+if [ "$QA_RECORD_VIDEO" = 1 ]; then
 xcrun simctl io "$DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/qa-session.mp4" >"$QA_DIR/video.log" 2>&1 &
 QA_VIDEO_PID=$!
 # Cold encoder initialization can consume nearly a minute while blocking other
@@ -98,10 +101,12 @@ for attempt in {1..120}; do
 done
 cat "$QA_DIR/video.log"
 [ "$recording_ready" = true ] || { echo "Simulator recorder did not initialize before app launch" >&2; exit 1; }
+fi
 # A second actual display capture proves that the initialized encoder no longer
-# blocks the screenshot channel used by the app's 60-second handshake.
+# blocks the screenshot channel when enabled. This capture still runs without
+# optional video; the app's 60-second handshake and all assertions are unchanged.
 xcrun simctl io "$DEVICE" screenshot --type=png "$QA_DIR/recording-preflight-screen.png"
-echo "Simulator recording and screenshot channels ready; launching native suite"
+echo "Simulator screenshot channel ready; continuous-video=$QA_RECORD_VIDEO; launching native suite"
 xcrun simctl launch "$DEVICE" local.spicylyrics.qa
 # Include the conditional 21-second healthy-recovery setup in the suite budget;
 # individual app, rotation, close and screenshot assertions keep their deadlines.
