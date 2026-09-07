@@ -152,6 +152,23 @@ window.runSpicyTransitionChecks = async function (phase) {
     check('gradient uses current native cover color when pixels are unavailable and rejects stale artwork',
       fallback.includes('42, 126, 145') && next.includes('196, 136, 50')
         && !next.includes('204, 51, 51') && missing==='none', {fallback,next,missing});
+    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,16,16);
+    send({artwork:canvas.toDataURL(),dominantColor:''});
+    const veil=document.querySelector('.contrast-veil');
+    let pale='';
+    for(const deadline=performance.now()+3000;performance.now()<deadline;){
+      await frame();pale=getComputedStyle(veil).backgroundColor;
+      if(Number(pale.match(/[\d.]+/g)?.[3])>=.38)break;
+    }
+    ctx.fillStyle='#803322';ctx.fillRect(0,0,16,16);
+    send({artwork:canvas.toDataURL(),dominantColor:''});
+    let normal='';
+    for(const deadline=performance.now()+3000;performance.now()<deadline;){
+      await frame();normal=getComputedStyle(veil).backgroundColor;
+      if(normal==='rgba(0, 0, 0, 0)')break;
+    }
+    check('pale gradient readability protection clears when a normal cover arrives',
+      Number(pale.match(/[\d.]+/g)?.[3])>=.38 && normal==='rgba(0, 0, 0, 0)',{pale,normal});
   }
   if (phase === 'gradient-quality') {
     const palette=[[204,51,51],[51,102,204],[187,155,49],[57,129,100]];

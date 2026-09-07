@@ -234,9 +234,11 @@
       const palette = this.style === "gradient" ? this.gradientPalette : this.palette;
       const brightness = Math.max(0, ...palette.map(rgb =>
         (rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722) / 255));
-      const readability = model.clamp((brightness - .45) * 1.08, 0, .6);
+      const readability = this.style === "gradient"
+        ? model.clamp((brightness - .65) * 1.2, 0, .42)
+        : model.clamp((brightness - .45) * 1.08, 0, .6);
       document.documentElement.style.setProperty("--artwork-readability",
-        String(this.ready && this.style !== "gradient" ? readability : 0));
+        String(this.ready ? readability : 0));
       if (!this.ready) this.layer.style.backgroundImage = "none";
       else if (this.style !== "gradient") this.layer.style.backgroundImage = `url(${JSON.stringify(this.artwork)})`;
       else {

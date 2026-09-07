@@ -13,14 +13,15 @@ function Eval-Gradient([string]$script) {
 try {
     & agent-browser --session $session open ([Uri]$page).AbsoluteUri
     Get-Content (Join-Path $PSScriptRoot 'browser-fixture.js') -Raw -Encoding utf8 | & agent-browser --session $session eval --stdin | Out-Null
-    $artwork='data:image/png;base64,'+[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $ArtworkPath)))
+    $mime=if([IO.Path]::GetExtension($ArtworkPath)-in@('.jpg','.jpeg')){'image/jpeg'}else{'image/png'}
+    $artwork="data:$mime;base64,"+[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $ArtworkPath)))
     $null=Eval-Gradient @'
 (()=>{
   SpicyQA.lyrics.line.Content=[
     {Type:'Vocal',Text:'One more moment',StartTime:0,EndTime:10},
     {Type:'Vocal',Text:'Nothing fades away',StartTime:10,EndTime:18},
     {Type:'Vocal',Text:'Here until the morning',StartTime:18,EndTime:25}];
-  SpicyQA.tracks.line.title='Embedded artwork';SpicyQA.tracks.line.artist='Local verification';
+  SpicyQA.tracks.line.title='Gradient preview';SpicyQA.tracks.line.artist='Illustrative lyrics';
   SpicyQA.tracks.line.album='Illustrative lyric fixture';
   SpicyQA.send('bootstrap',{surface:'fullscreen',reduceMotion:true,preferences:{backgroundStyle:'gradient',dynamicBackground:false}});
   SpicyQA.scenario('line',{positionMs:7400,isPlaying:false,isPaused:true,isAdvancing:false});
@@ -39,9 +40,12 @@ try {
     const rect=element.getBoundingClientRect();return {id:element.id,x:rect.x,y:rect.y,right:rect.right,bottom:rect.bottom};});
   const outside=controls.filter(rect=>rect.x<-.5||rect.y<-.5||rect.right>innerWidth+.5||rect.bottom>innerHeight+.5);
   const veil=getComputedStyle(document.querySelector('.contrast-veil'));
-  return JSON.stringify({viewport:[innerWidth,innerHeight],outside,filter:getComputedStyle(layer).filter,
+  const field=canvas.getBoundingClientRect(),expectedWidth=Math.max(innerWidth,innerHeight);
+  return JSON.stringify({viewport:[innerWidth,innerHeight],field:field.toJSON(),outside,filter:getComputedStyle(layer).filter,
     pass:!outside.length&&!canvas.hidden&&canvas.width===300&&canvas.height===150&&veil.backgroundImage==='none'
-      &&veil.backgroundColor==='rgba(0, 0, 0, 0)'&&document.documentElement.scrollWidth<=innerWidth});
+      &&Math.abs(field.width-expectedWidth)<.5&&Math.abs(field.height-innerHeight)<.5
+      &&Math.abs(field.left+field.width/2-innerWidth/2)<.5&&getComputedStyle(layer).overflowX==='hidden'
+      &&document.documentElement.scrollWidth<=innerWidth});
 })()
 '@
         $results+=$result
