@@ -88,3 +88,27 @@ BOOL EeveeArtworkFixtureViewStates(NSURL *URL, NSError *error) {
     [bar viewDidLoad];
     return bar.loads == 1 && bar.view == barImage && barImage.image == image && barImage.layouts == 0;
 }
+
+BOOL EeveeArtworkFixtureSharedImage(NSURL *firstURL, NSURL *secondURL, NSError *error) {
+    UIImage *shared = [UIImage new];
+    if (!EeveeArtworkFixtureConsumerForwarding(firstURL, shared, error) ||
+        !EeveeArtworkFixtureConsumerForwarding(secondURL, shared, error)) return NO;
+    EeveeArtworkFixtureCoverBase *cell = [_TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl new];
+    UIImageView *root = [UIImageView new];
+    root.window = [NSObject new]; root.image = shared; cell.storedCover = root;
+    return [cell coverArtView] == root && root.image == shared && root.layouts == 0;
+}
+
+BOOL EeveeArtworkFixtureViewLifetime(void) {
+    __weak id releasedOwner, releasedRoot;
+    @autoreleasepool {
+        EeveeArtworkFixtureCoverBase *cell = [_TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl new];
+        UIImageView *root = [UIImageView new];
+        root.window = [NSObject new]; cell.storedCover = root;
+        releasedOwner = cell; releasedRoot = root;
+        if ([cell coverArtView] != root) return NO;
+        [cell prepareForReuse];
+    }
+    // Delayed observation blocks are still pending on the main queue here.
+    return releasedOwner == nil && releasedRoot == nil;
+}

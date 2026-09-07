@@ -31,6 +31,11 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
                 "the actual image consumer must receive every original local/catalog success, nil image, time, context and error")
     try require(EeveeArtworkFixtureViewStates(imageURL, error),
                 "observing cover and mini-player views must preserve original getters, layouts, image, visibility, size and reuse behavior")
+    let secondURL = URL(string: "spotify:localfileimage:PrivateCanary:Second:PrivateCanary:0")!
+    let second = EeveeArtworkFixtureTrack("spotify:local:PrivateCanary:Second:PrivateCanary:0", ["image_url": secondURL.absoluteString])
+    try require(EeveeArtworkFixtureCoverURL(second, 0) == secondURL &&
+                EeveeArtworkFixtureSharedImage(imageURL, secondURL, error) && EeveeArtworkFixtureViewLifetime(),
+                "shared native image objects and queued observations must preserve image, layout and released-view lifetimes")
     let events = try trace()
     func field(_ name: String, in event: String) -> String? {
         event.split(separator: " ").first { $0.hasPrefix(name + "=") }.map { String($0.dropFirst(name.count + 1)) }
@@ -43,6 +48,12 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
         try require(events.contains(where: { $0.hasPrefix("native binding kind=\(kind) ") && field("image", in: $0) == identity }),
                     "the same selected URL must retain its trace identity across native cover sizes")
     }
+    let localBindings = events.filter { $0.hasPrefix("native binding kind=standard ") && field("route", in: $0) == "local" }
+    try require(Set(localBindings.compactMap { field("image", in: $0) }).subtracting(["0"]).count == 2,
+                "two distinct local cover URLs must receive different anonymous trace identities")
+    try require(events.contains(where: { $0.hasPrefix("native view surface=cover ") && field("kind", in: $0) == "image" &&
+                    $0.hasSuffix("filled=1 visible=1 linked=0") }),
+                "an image object shared by two cover URLs must be reported as unlinked, never attributed to the wrong song")
     for stage in ["request", "remote-image", "consumer-image", "consumer-error"] {
         try require(events.contains(where: { $0.hasPrefix("native display stage=\(stage) ") && field("image", in: $0) == identity }),
                     "the exported trace must connect the selected local cover to its native \(stage) boundary")

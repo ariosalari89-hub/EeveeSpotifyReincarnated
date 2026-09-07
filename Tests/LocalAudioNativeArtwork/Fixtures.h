@@ -18,4 +18,6 @@ BOOL EeveeArtworkFixtureRemoteForwarding(NSURL *URL, id request, NSData *data, N
 NSURL * _Nullable EeveeArtworkFixtureCoverURL(id track, NSInteger size);
 BOOL EeveeArtworkFixtureConsumerForwarding(NSURL *URL, id image, NSError *error);
 BOOL EeveeArtworkFixtureViewStates(NSURL *URL, NSError *error);
+BOOL EeveeArtworkFixtureSharedImage(NSURL *firstURL, NSURL *secondURL, NSError *error);
+BOOL EeveeArtworkFixtureViewLifetime(void);
 NS_ASSUME_NONNULL_END
