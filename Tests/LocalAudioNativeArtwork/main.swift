@@ -63,6 +63,7 @@ do {
                 EeveeArtworkFixtureErrors(core) == 0 && EeveeArtworkFixtureOriginalLoads(core) == 1,
                 "a failed native v2 player-art request must recover the imported cover through the native success callback")
     print("PASS: an existing native v2 player-art URL recovers embedded cover data after native loading fails")
+    try verifyCoreArtworkBoundaries(service: service, directory: directory, imageURL: playerImageURL)
     try verifyNativeArtworkBoundaries(service: service, directory: directory, imageURL: imageURL, uri: uri)
 } catch {
     fputs("FAIL: \(error)\n", stderr)

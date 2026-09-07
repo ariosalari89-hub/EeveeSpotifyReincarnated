@@ -51,8 +51,18 @@ button { -webkit-tap-highlight-color: transparent; }
   background-size: 100% 100%;
   transform: none;
   animation: none;
+  overflow: hidden;
 }
-.gradient-field { display: none; width: 100%; height: 100%; }
+.gradient-field {
+  display: none;
+  position: absolute;
+  left: 50%;
+  /* Keep desktop-sized colour regions on a portrait screen. Cropping the
+     field preserves their breadth; squeezing the full UV plane makes bands. */
+  width: max(100vw, 100vh);
+  height: 100%;
+  transform: translateX(-50%);
+}
 #artwork-backdrop[data-style="gradient"] .gradient-field { display: block; }
 @keyframes artwork-drift {
   from { transform: scale(1.24) translate3d(-4%, 4%, 0); }

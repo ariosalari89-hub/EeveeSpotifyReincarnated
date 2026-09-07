@@ -2,7 +2,8 @@
   "use strict";
 
   // Mobile owns lifecycle; the pinned PC engine owns all image processing.
-  // Keep the desktop's default 300x150 backing store and CSS scaling.
+  // Keep the desktop's default 300x150 backing store. CSS centre-crops the
+  // field in portrait; changing GPU resolution would not fix UV stretching.
   class GradientField {
     constructor(parent) {
       this.canvas = document.createElement("canvas");

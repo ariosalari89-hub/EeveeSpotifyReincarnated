@@ -183,6 +183,13 @@ window.runSpicyTransitionChecks = async function (phase) {
       for(const deadline=performance.now()+3000;performance.now()<deadline;){await frame();if(layer.querySelector('canvas:not([hidden])'))break;}
       await waitForSteadyFrames();
       const canvas=layer.querySelector('canvas'), pixels=()=>canvasPixels(canvas);
+      const projection=canvas.getBoundingClientRect(), viewport=layer.getBoundingClientRect();
+      const fieldWidth=Math.max(viewport.width,viewport.height);
+      check('portrait gradient centre-crops a broad field without changing landscape projection',
+        Math.abs(projection.width-fieldWidth)<.5 && Math.abs(projection.height-viewport.height)<.5 &&
+        Math.abs(projection.left+projection.width/2-(viewport.left+viewport.width/2))<.5 &&
+        getComputedStyle(layer).overflowX==='hidden' && document.documentElement.scrollWidth<=innerWidth,
+        {field:projection.toJSON(),viewport:viewport.toJSON(),clip:getComputedStyle(layer).overflowX});
       const before=pixels();await wait(3000);await frame();const after=pixels();
       let changed=0,peak=0;
       for(let offset=0;offset<after.length;offset+=4){
