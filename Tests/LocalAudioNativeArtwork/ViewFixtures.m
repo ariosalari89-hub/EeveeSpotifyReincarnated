@@ -89,6 +89,9 @@ BOOL EeveeArtworkFixtureViewStates(NSURL *URL, NSError *error) {
         // Layout after reuse must not be attributed to the old cover owner.
         root.bounds = CGRectZero;
         [root layoutSubviews];
+        cell.bounds = CGRectZero;
+        [cell layoutSubviews];
+        if (cell.layouts != 2) return NO;
     }
     _TtC18NowPlaying_BarImpl25BarCoverArtViewController *bar = [_TtC18NowPlaying_BarImpl25BarCoverArtViewController new];
     UIImageView *barImage = [UIImageView new];
@@ -120,6 +123,19 @@ BOOL EeveeArtworkFixtureViewLifetime(void) {
     }
     // Delayed observation blocks are still pending on the main queue here.
     return releasedOwner == nil && releasedRoot == nil;
+}
+
+BOOL EeveeArtworkFixtureDirectCoverLayout(NSURL *URL, NSError *error) {
+    UIImage *image = [UIImage new];
+    if (!EeveeArtworkFixtureConsumerForwarding(URL, image, error)) return NO;
+    EeveeArtworkFixtureCoverBase *cell = [_TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl new];
+    UIImageView *root = [UIImageView new];
+    cell.window = [NSObject new]; root.window = cell.window;
+    root.image = image; root.superview = cell; cell.subviews = @[root]; cell.storedCover = root;
+    // Native Swift can configure its component directly, without dispatching
+    // the Objective-C cover getter. UIKit still delivers the cell's layout.
+    [cell layoutSubviews];
+    return cell.layouts == 1 && root.layouts == 0 && root.image == image && cell.subviews.firstObject == root;
 }
 #else
 BOOL EeveeArtworkFixtureUnsupportedViews(void) {

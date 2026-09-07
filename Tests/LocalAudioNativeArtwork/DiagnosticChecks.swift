@@ -36,6 +36,8 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
                 "the actual image consumer must receive every original local/catalog success, nil image, time, context and error")
     try require(EeveeArtworkFixtureViewStates(imageURL, error),
                 "observing cover and mini-player views must preserve original getters, layouts, image, visibility, size and reuse behavior")
+    try require(EeveeArtworkFixtureDirectCoverLayout(imageURL, error),
+                "a directly configured native cover must retain its original layout and image behavior")
     let secondURL = URL(string: "spotify:localfileimage:PrivateCanary:Second:PrivateCanary:0")!
     let second = EeveeArtworkFixtureTrack("spotify:local:PrivateCanary:Second:PrivateCanary:0", ["image_url": secondURL.absoluteString])
     try require(EeveeArtworkFixtureCoverURL(second, 0) == secondURL &&
@@ -78,6 +80,9 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
         try require(!snapshots.contains(where: { field("sized", in: $0) == "0" }),
                     "a reused cover view must stop reporting changes under its old owner")
     }
+    try require(events.contains(where: { $0.hasPrefix("native view surface=cover ") && field("kind", in: $0) == "other" &&
+                    $0.hasSuffix("filled=1 visible=1 linked=1") }),
+                "a cover configured directly in Swift must remain observable through its public cell hierarchy without calling its cover getter")
     try require(events.contains(where: { $0.hasPrefix("native view surface=bar ") && $0.hasSuffix("filled=1 visible=1 linked=1") }) &&
                 events.contains(where: { $0.hasPrefix("native view-image surface=cover ") && field("image", in: $0) == identity }),
                 "view observations must include the mini-player and connect a loaded image object to the native cover")

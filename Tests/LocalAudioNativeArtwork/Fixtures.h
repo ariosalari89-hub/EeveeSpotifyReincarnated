@@ -20,5 +20,6 @@ BOOL EeveeArtworkFixtureConsumerForwarding(NSURL *URL, id image, NSError *error)
 BOOL EeveeArtworkFixtureViewStates(NSURL *URL, NSError *error);
 BOOL EeveeArtworkFixtureSharedImage(NSURL *firstURL, NSURL *secondURL, NSError *error);
 BOOL EeveeArtworkFixtureViewLifetime(void);
+BOOL EeveeArtworkFixtureDirectCoverLayout(NSURL *URL, NSError *error);
 BOOL EeveeArtworkFixtureUnsupportedViews(void);
 NS_ASSUME_NONNULL_END
