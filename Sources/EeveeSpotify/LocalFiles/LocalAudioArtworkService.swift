@@ -24,37 +24,64 @@ final class LocalAudioArtworkService {
 
     @discardableResult
     func load(_ url: URL, isCancelled: @escaping () -> Bool, completion: @escaping (Data?) -> Void) -> Bool {
-        guard let request = request(for: url) else { return false }
+        guard let request = request(for: url) else {
+            diagnostic?("reader request=unowned")
+            return false
+        }
         switch request {
         case .track: diagnostic?("reader request=track")
         case .file: diagnostic?("reader request=file")
         }
         queue.async { [library, diagnostic] in
-            guard !isCancelled() else { completion(nil); return }
+            func fail(_ reason: String) {
+                diagnostic?("reader result=" + reason)
+                completion(nil)
+            }
+            guard !isCancelled() else { fail("cancelled"); return }
             var matches: [LocalAudioFile] = []
+            var missingReason = "no-match"
             switch request {
             case .track(let identity):
-                guard let files = try? library.files() else { completion(nil); return }
-                for file in files {
-                    guard !isCancelled() else { completion(nil); return }
-                    if identity.matches(file) { matches.append(file) }
-                    if matches.count > 1 { completion(nil); return }
+                guard let files = try? library.files() else { fail("library-unavailable"); return }
+                diagnostic?("reader inventory files=\(files.count)")
+                var scanned = 0, artist = 0, album = 0, title = 0, duration = 0
+                func reportScan() {
+                    diagnostic?("reader scan files=\(scanned) matches=\(matches.count) artist=\(artist) album=\(album) title=\(title) duration=\(duration)")
                 }
+                for file in files {
+                    guard !isCancelled() else { fail("cancelled"); return }
+                    let mismatch = identity.mismatches(file)
+                    scanned += 1
+                    if mismatch & 1 != 0 { artist += 1 }
+                    if mismatch & 2 != 0 { album += 1 }
+                    if mismatch & 4 != 0 { title += 1 }
+                    if mismatch & 8 != 0 { duration += 1 }
+                    if mismatch == 0 { matches.append(file) }
+                    if matches.count > 1 { reportScan(); fail("ambiguous"); return }
+                }
+                reportScan()
             case .file(let location):
+                missingReason = "file-missing"
                 if let file = library.file(at: location) { matches = [file] }
             }
-            guard let file = matches.first else { completion(nil); return }
+            guard let file = matches.first else { fail(missingReason); return }
             var error: NSError?
             var artwork: Data?
+            var missingArtworkReason = "no-artwork"
             NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: file.fileURL, options: [], error: &error) { location in
-                guard !isCancelled(), location.resolvingSymlinksInPath() == file.fileURL.resolvingSymlinksInPath(),
-                      library.file(at: location) == file else { return }
+                guard !isCancelled() else { missingArtworkReason = "cancelled"; return }
+                guard location.resolvingSymlinksInPath() == file.fileURL.resolvingSymlinksInPath(),
+                      library.file(at: location) == file else { missingArtworkReason = "file-changed"; return }
                 artwork = LocalAudioArtworkReader.artwork(in: location)
-                if library.file(at: location) != file { artwork = nil }
+                if library.file(at: location) != file { artwork = nil; missingArtworkReason = "file-changed" }
             }
-            let result = isCancelled() ? nil : artwork
-            if let result = result { diagnostic?("reader result=artwork bytes=\(result.count)") }
-            completion(result)
+            let stopped = isCancelled()
+            if let result = stopped ? nil : artwork {
+                diagnostic?("reader result=artwork bytes=\(result.count)")
+                completion(result)
+            } else {
+                fail(stopped ? "cancelled" : (error == nil ? missingArtworkReason : "coordination-failed"))
+            }
         }
         return true
     }
@@ -103,7 +130,7 @@ private struct LocalTrackIdentity {
         value.replacingOccurrences(of: "+", with: " ").removingPercentEncoding?.precomposedStringWithCanonicalMapping
     }
 
-    func matches(_ file: LocalAudioFile) -> Bool {
+    func mismatches(_ file: LocalAudioFile) -> UInt8 {
         let asset = AVURLAsset(url: file.fileURL)
         let metadata = asset.commonMetadata
         func text(_ key: AVMetadataKey) -> String {
@@ -113,7 +140,11 @@ private struct LocalTrackIdentity {
         let candidateTitle = embeddedTitle.isEmpty && !title.isEmpty
             ? file.fileURL.deletingPathExtension().lastPathComponent.precomposedStringWithCanonicalMapping : embeddedTitle
         let duration = CMTimeGetSeconds(asset.duration)
-        return artist == text(.commonKeyArtist) && album == text(.commonKeyAlbumName) && title == candidateTitle &&
-            duration.isFinite && abs(duration - Double(seconds)) < 1
+        var result: UInt8 = 0
+        if artist != text(.commonKeyArtist) { result |= 1 }
+        if album != text(.commonKeyAlbumName) { result |= 2 }
+        if title != candidateTitle { result |= 4 }
+        if !(duration.isFinite && abs(duration - Double(seconds)) < 1) { result |= 8 }
+        return result
     }
 }
