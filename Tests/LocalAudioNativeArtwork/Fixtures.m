@@ -74,7 +74,7 @@ id EeveeArtworkFixtureCoreRequest(NSURL *URL, NSData *nativeData) {
     request.URL = URL; request.nativeData = nativeData; return request;
 }
 void EeveeArtworkFixtureLoad(id request) {
-    if ([request isKindOfClass:SPTCoreImageLoaderRequest.class]) [request load];
+    if ([request isKindOfClass:SPTCoreImageLoaderRequest.class]) [(SPTCoreImageLoaderRequest *)request load];
     else [request loadLocalFileImage];
 }
 void EeveeArtworkFixtureCancel(id request) { [request setCancelled:YES]; }
