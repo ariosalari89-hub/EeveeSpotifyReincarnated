@@ -29,6 +29,8 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
     try require(EeveeArtworkFixtureConsumerForwarding(imageURL, NSObject(), error) &&
                 EeveeArtworkFixtureConsumerForwarding(catalogURL, NSObject(), error),
                 "the actual image consumer must receive every original local/catalog success, nil image, time, context and error")
+    try require(EeveeArtworkFixtureViewStates(imageURL, error),
+                "observing cover and mini-player views must preserve original getters, layouts, image, visibility, size and reuse behavior")
     let events = try trace()
     func field(_ name: String, in event: String) -> String? {
         event.split(separator: " ").first { $0.hasPrefix(name + "=") }.map { String($0.dropFirst(name.count + 1)) }
@@ -45,6 +47,21 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
         try require(events.contains(where: { $0.hasPrefix("native display stage=\(stage) ") && field("image", in: $0) == identity }),
                     "the exported trace must connect the selected local cover to its native \(stage) boundary")
     }
+    for surface in ["cover", "legacy-cover"] {
+        let snapshots = events.filter { $0.hasPrefix("native view surface=\(surface) ") }
+        for flags in ["mounted=1 hidden=0 sized=1 images=1 filled=0 visible=0 linked=0",
+                      "mounted=1 hidden=0 sized=1 images=1 filled=1 visible=1 linked=1",
+                      "mounted=1 hidden=1 sized=1 images=1 filled=1 visible=0 linked=1",
+                      "mounted=1 hidden=0 sized=1 images=1 filled=1 visible=0 linked=1"] {
+            try require(snapshots.contains(where: { $0.hasSuffix(flags) }),
+                        "the \(surface) trace must distinguish the native empty, visible, hidden and zero-sized image states: \(flags)")
+        }
+        try require(!snapshots.contains(where: { field("sized", in: $0) == "0" }),
+                    "a reused cover view must stop reporting changes under its old owner")
+    }
+    try require(events.contains(where: { $0.hasPrefix("native view surface=bar ") && $0.hasSuffix("filled=1 visible=1 linked=1") }) &&
+                events.contains(where: { $0.hasPrefix("native view-image surface=cover ") && field("image", in: $0) == identity }),
+                "view observations must include the mini-player and connect a loaded image object to the native cover")
     for expected in ["native install metadata=1 legacy=1 core=1 remote=1",
                      "native legacy load route=local-owned",
                      "native core load route=local-v2",

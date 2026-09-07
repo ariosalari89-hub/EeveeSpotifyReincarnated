@@ -3,6 +3,14 @@
   "executableSHA256": "8ec29afac67d2a068e3b47f8fe6727c055f65472e1a96b0b9171fd29e9db05bd",
   "source": "Read-only Objective-C method-list extraction from the supplied ARM64 executable; no application binary is included.",
   "classes": {
+    "_TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl": {
+      "coverArtView": "@16@0:8", "prepareForReuse": "v16@0:8"
+    },
+    "_TtC28NowPlaying_ContentLayersImpl22LegacyCoverArtCellImpl": {
+      "coverArtView": "@16@0:8", "prepareForReuse": "v16@0:8"
+    },
+    "_TtC18NowPlaying_BarImpl25BarCoverArtViewController": { "viewDidLoad": "v16@0:8" },
+    "_TtCE15Encore_MediaKitO16EncoreFoundation6Encore9ImageView": { "layoutSubviews": "v16@0:8" },
     "NSDictionary": {
       "spt_metadata_coverArtURL": "@16@0:8",
       "spt_metadata_coverArtURLLarge": "@16@0:8",

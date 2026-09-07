@@ -17,4 +17,5 @@ NSString * _Nullable EeveeArtworkFixtureEncoding(NSString *className, NSString *
 BOOL EeveeArtworkFixtureRemoteForwarding(NSURL *URL, id request, NSData *data, NSError *error);
 NSURL * _Nullable EeveeArtworkFixtureCoverURL(id track, NSInteger size);
 BOOL EeveeArtworkFixtureConsumerForwarding(NSURL *URL, id image, NSError *error);
+BOOL EeveeArtworkFixtureViewStates(NSURL *URL, NSError *error);
 NS_ASSUME_NONNULL_END
