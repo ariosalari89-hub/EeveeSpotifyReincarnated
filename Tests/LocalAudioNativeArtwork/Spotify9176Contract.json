@@ -11,6 +11,13 @@
       "dispatchSuccess:": "v24@0:8@16",
       "dispatchError:": "v24@0:8@16"
     },
+    "SPTImageLoaderRemoteImplementation": {
+      "loadImageForURL:sourceIdentifier:size:scale:allowUpscaling:context:callback:persistenceKey:": "@84@0:8@16@24{CGSize=dd}32d48B56@60@68@76",
+      "loadRequest:": "v24@0:8@16",
+      "imageLoaderRequest:didLoadImageData:": "v32@0:8@16@24",
+      "completeRequest:withImage:source:": "v40@0:8@16@24@32",
+      "completeRequest:withError:source:": "v40@0:8@16@24@32"
+    },
     "SPTCoreImageLoaderRequest": {
       "URL": "@16@0:8",
       "cancelled": "B16@0:8",

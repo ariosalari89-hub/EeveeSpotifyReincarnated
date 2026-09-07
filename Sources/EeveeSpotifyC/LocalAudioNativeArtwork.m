@@ -179,3 +179,8 @@ BOOL EeveeLocalAudioInstallArtwork(EeveeLocalArtworkURLProvider provider, EeveeL
     });
     return installed;
 }
+
+BOOL EeveeLocalAudioInstallArtworkWithDiagnostics(EeveeLocalArtworkURLProvider provider, EeveeLocalArtworkLoader loader,
+                                                  EeveeLocalArtworkDiagnostic diagnostic) {
+    return EeveeLocalAudioInstallArtwork(provider, loader);
+}

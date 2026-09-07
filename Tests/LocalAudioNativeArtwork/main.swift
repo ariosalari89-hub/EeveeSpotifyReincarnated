@@ -21,9 +21,12 @@ do {
     let source = URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.m4a")
     let imports = LocalAudioImporter(directory: directory).importFiles([source])
     try require(imports.first?.fileURL != nil, "native artwork scenario requires a real imported audio copy")
-    let service = LocalAudioArtworkService(directory: directory)
-    let installed = EeveeLocalAudioInstallArtwork({ uri in service.imageURL(forTrackURI: uri)?.absoluteString },
-                                      { url, cancelled, completion in service.load(url, isCancelled: cancelled, completion: completion) })
+    let traceLock = NSLock()
+    var trace: [String] = []
+    let record: (String) -> Void = { event in traceLock.lock(); defer { traceLock.unlock() }; trace.append(event) }
+    let service = LocalAudioArtworkService(directory: directory, diagnostic: record)
+    let installed = EeveeLocalAudioInstallArtworkWithDiagnostics({ uri in service.imageURL(forTrackURI: uri)?.absoluteString },
+                                      { url, cancelled, completion in service.load(url, isCancelled: cancelled, completion: completion) }, record)
     try require(installed, "the local artwork adapter must install against the real Spotify 9.1.76 method signatures")
     let uri = "spotify:local:A%2FB+%2B+%E9%9F%B3:Windows%3A+Summer:Midnight+Library:0"
     let original: [String: Any] = ["title": "Midnight Library", "artist_name": "A/B + 音"]
@@ -65,6 +68,9 @@ do {
     print("PASS: an existing native v2 player-art URL recovers embedded cover data after native loading fails")
     try verifyCoreArtworkBoundaries(service: service, directory: directory, imageURL: playerImageURL)
     try verifyNativeArtworkBoundaries(service: service, directory: directory, imageURL: imageURL, uri: uri)
+    try verifyArtworkDiagnostics(imageURL: playerImageURL, data: data, trace: {
+        traceLock.lock(); defer { traceLock.unlock() }; return trace
+    })
 } catch {
     fputs("FAIL: \(error)\n", stderr)
     exit(1)

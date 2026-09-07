@@ -20,6 +20,7 @@ xcrun swiftc -swift-version 5 -framework AVFoundation -framework ImageIO \
   Sources/EeveeSpotify/LocalFiles/LocalAudioArtworkService.swift \
   Tests/LocalAudioNativeArtwork/main.swift Tests/LocalAudioNativeArtwork/BoundaryChecks.swift \
   Tests/LocalAudioNativeArtwork/CoreBoundaryChecks.swift \
+  Tests/LocalAudioNativeArtwork/DiagnosticChecks.swift \
   "$QA_DIR/artwork-adapter.o" "$QA_DIR/artwork-fixtures.o" \
   -o "$QA_DIR/native-artwork-tests"
 "$QA_DIR/native-artwork-tests" 2>&1 | tee -a "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"

@@ -14,4 +14,5 @@ NSInteger EeveeArtworkFixtureErrors(id request);
 NSInteger EeveeArtworkFixtureSuccesses(id request);
 NSError * _Nullable EeveeArtworkFixtureError(id request);
 NSString * _Nullable EeveeArtworkFixtureEncoding(NSString *className, NSString *selector);
+BOOL EeveeArtworkFixtureRemoteForwarding(NSURL *URL, id request, NSData *data, NSError *error);
 NS_ASSUME_NONNULL_END
