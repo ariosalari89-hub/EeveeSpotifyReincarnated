@@ -11,11 +11,11 @@ xcrun swiftc -swift-version 5 -framework AVFoundation -framework ImageIO \
   Tests/LocalAudioImport/ArtworkChecks.swift Tests/LocalAudioImport/ArtworkServiceChecks.swift \
   Tests/LocalAudioImport/DiagnosticExportChecks.swift -o "$QA_DIR/local-audio-tests"
 "$QA_DIR/local-audio-tests" 2>&1 | tee "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"
-xcrun clang -fobjc-arc -ISources/EeveeSpotifyC/include -c \
+xcrun clang -fobjc-arc -Werror=nullability-completeness -ISources/EeveeSpotifyC/include -c \
   Sources/EeveeSpotifyC/LocalAudioNativeArtwork.m -o "$QA_DIR/artwork-adapter.o"
-xcrun clang -fobjc-arc -ISources/EeveeSpotifyC/include -c \
+xcrun clang -fobjc-arc -Werror=nullability-completeness -ISources/EeveeSpotifyC/include -c \
   Sources/EeveeSpotifyC/LocalAudioArtworkTrace.m -o "$QA_DIR/artwork-trace.o"
-xcrun clang -fobjc-arc -ISources/EeveeSpotifyC/include -c \
+xcrun clang -fobjc-arc -Werror=nullability-completeness -ISources/EeveeSpotifyC/include -c \
   Sources/EeveeSpotifyC/LocalAudioArtworkViewTrace.m -o "$QA_DIR/artwork-view-trace.o"
 xcrun clang -fobjc-arc -c Tests/LocalAudioNativeArtwork/Fixtures.m -o "$QA_DIR/artwork-fixtures.o"
 xcrun clang -fobjc-arc -c Tests/LocalAudioNativeArtwork/DisplayFixtures.m -o "$QA_DIR/artwork-display-fixtures.o"
