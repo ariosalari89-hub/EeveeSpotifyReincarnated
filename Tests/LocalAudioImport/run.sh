@@ -6,8 +6,10 @@ xcrun swiftc -swift-version 5 -framework AVFoundation -framework ImageIO \
   Sources/EeveeSpotify/LocalFiles/LocalAudioLibrary.swift \
   Sources/EeveeSpotify/LocalFiles/LocalAudioArtworkReader.swift \
   Sources/EeveeSpotify/LocalFiles/LocalAudioArtworkService.swift \
+  Sources/EeveeSpotify/LocalFiles/LocalAudioArtworkDiagnostics.swift \
   Tests/LocalAudioImport/main.swift Tests/LocalAudioImport/LibraryChecks.swift \
-  Tests/LocalAudioImport/ArtworkChecks.swift Tests/LocalAudioImport/ArtworkServiceChecks.swift -o "$QA_DIR/local-audio-tests"
+  Tests/LocalAudioImport/ArtworkChecks.swift Tests/LocalAudioImport/ArtworkServiceChecks.swift \
+  Tests/LocalAudioImport/DiagnosticExportChecks.swift -o "$QA_DIR/local-audio-tests"
 "$QA_DIR/local-audio-tests" 2>&1 | tee "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"
 xcrun clang -fobjc-arc -ISources/EeveeSpotifyC/include -c \
   Sources/EeveeSpotifyC/LocalAudioNativeArtwork.m -o "$QA_DIR/artwork-adapter.o"
@@ -29,3 +31,8 @@ xcrun swiftc -swift-version 5 -parse-as-library -ISources/EeveeSpotifyC/include 
   -import-objc-header Tests/LocalAudioNativeArtwork/Fixtures.h Tests/LocalAudioNativeArtwork/Unsupported.swift \
   "$QA_DIR/artwork-adapter.o" "$QA_DIR/artwork-unsupported-fixtures.o" -o "$QA_DIR/native-artwork-unsupported-tests"
 "$QA_DIR/native-artwork-unsupported-tests" 2>&1 | tee -a "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"
+xcrun clang -fobjc-arc -DEEVEE_ARTWORK_INVALID_REMOTE -c Tests/LocalAudioNativeArtwork/Fixtures.m -o "$QA_DIR/artwork-unsupported-remote.o"
+xcrun swiftc -swift-version 5 -parse-as-library -ISources/EeveeSpotifyC/include \
+  -import-objc-header Tests/LocalAudioNativeArtwork/Fixtures.h Tests/LocalAudioNativeArtwork/UnsupportedRemote.swift \
+  "$QA_DIR/artwork-adapter.o" "$QA_DIR/artwork-unsupported-remote.o" -o "$QA_DIR/native-artwork-unsupported-remote-tests"
+"$QA_DIR/native-artwork-unsupported-remote-tests" 2>&1 | tee -a "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"
