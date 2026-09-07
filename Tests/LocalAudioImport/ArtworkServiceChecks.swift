@@ -25,6 +25,7 @@ func runLocalAudioArtworkServiceChecks() throws {
                    "artwork diagnostics must not disclose track fields or the imported directory")
         print("PASS: embedded-artwork request and result diagnostics preserve returned art and omit private identifiers")
     }
+    try checkArtworkFailureDiagnostics()
     try withDirectories { input, output in
         let original = input.appendingPathComponent("Different filename.m4a")
         try FileManager.default.copyItem(at: URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.m4a"), to: original)
@@ -174,6 +175,44 @@ func runLocalAudioArtworkServiceChecks() throws {
 
 private func nativeArtworkURL(_ file: URL) -> URL {
     URL(string: "spotify:localfileimage:" + file.path.utf8.map { String(format: "%%%02X", $0) }.joined())!
+}
+
+private func checkArtworkFailureDiagnostics() throws {
+    try withDirectories { _, output in
+        let fixtures = URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures")
+        _ = LocalAudioImporter(directory: output).importFiles([fixtures.appendingPathComponent("embedded-art.m4a")])
+        let urls = LocalAudioArtworkService(directory: output)
+        let prefix = "spotify:local:A%2FB+%2B+%E9%9F%B3:Windows%3A+Summer:"
+        func failure(_ url: URL, reason: String, cancelled: Bool = false, owned: Bool = true) throws -> [String] {
+            let lock = NSLock()
+            var trace: [String] = []
+            let service = LocalAudioArtworkService(directory: output, diagnostic: {
+                lock.lock(); defer { lock.unlock() }; trace.append($0)
+            })
+            let done = DispatchSemaphore(value: 0)
+            var result: Data?
+            let accepted = service.load(url, isCancelled: { cancelled }) { result = $0; done.signal() }
+            if owned { try expect(done.wait(timeout: .now() + 5) == .success, "a diagnostic request must finish") }
+            lock.lock(); let events = trace; lock.unlock()
+            try expect(accepted == owned && result == nil && events.contains(reason),
+                       "unavailable artwork must report its actual outcome without inventing image data: \(reason); observed=\(events)")
+            try expect(!events.joined().contains("PrivateCanary") && !events.joined().contains(output.path) &&
+                       !events.joined().contains("Windows") && !events.joined().contains("Midnight"),
+                       "failure diagnostics must expose only categories and counts, never identity fields or paths")
+            return events
+        }
+        let mismatched = try failure(urls.imageURL(forTrackURI: prefix + "PrivateCanary:0")!, reason: "reader result=no-match")
+        try expect(mismatched.contains("reader scan files=1 matches=0 artist=0 album=0 title=1 duration=0"),
+                   "a mismatch diagnostic must identify the differing field by count, without disclosing either value")
+        _ = try failure(urls.imageURL(forTrackURI: prefix + "Midnight+Library:0")!, reason: "reader result=cancelled", cancelled: true)
+        _ = try failure(nativeArtworkURL(output.appendingPathComponent("PrivateCanary.mp3")), reason: "reader result=file-missing")
+        _ = try failure(URL(string: "https://example.invalid/PrivateCanary")!, reason: "reader request=unowned", owned: false)
+        _ = LocalAudioImporter(directory: output).importFiles([fixtures.appendingPathComponent("synthetic-tone.mp3")])
+        _ = try failure(nativeArtworkURL(output.appendingPathComponent("synthetic-tone.mp3")), reason: "reader result=no-artwork")
+        _ = LocalAudioImporter(directory: output).importFiles([fixtures.appendingPathComponent("embedded-art.mp3")])
+        _ = try failure(urls.imageURL(forTrackURI: prefix + "Midnight+Library:0")!, reason: "reader result=ambiguous")
+        print("PASS: missing, mismatched, ambiguous, cancelled, unowned and art-free requests retain their outcomes in redacted diagnostics")
+    }
 }
 
 private func serviceArtwork(_ service: LocalAudioArtworkService, _ url: URL,
