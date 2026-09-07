@@ -23,7 +23,7 @@ func verifyCoreArtworkBoundaries(service: LocalAudioArtworkService, directory: U
         let failed = EeveeArtworkFixtureCoreRequest(URL(string: url)!, nil)
         EeveeArtworkFixtureLoad(failed)
         try drain()
-        let error = EeveeArtworkFixtureError(failed)
+        let error = EeveeArtworkFixtureError(failed).map { $0 as NSError }
         try require(EeveeArtworkFixtureSuccesses(failed) == 0 && EeveeArtworkFixtureErrors(failed) == 1 &&
                     error?.domain == "NativeImageFixture" && error?.code == 404,
                     "unowned or unavailable core artwork must preserve its original native error, never borrow a cover")
