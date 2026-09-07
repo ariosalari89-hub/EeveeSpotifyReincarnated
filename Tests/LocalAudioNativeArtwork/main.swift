@@ -21,9 +21,8 @@ do {
     let source = URL(fileURLWithPath: "Tests/LocalAudioImport/Fixtures/embedded-art.m4a")
     let imports = LocalAudioImporter(directory: directory).importFiles([source])
     try require(imports.first?.fileURL != nil, "native artwork scenario requires a real imported audio copy")
-    let traceLock = NSLock()
-    var trace: [String] = []
-    let record: (String) -> Void = { event in traceLock.lock(); defer { traceLock.unlock() }; trace.append(event) }
+    let diagnostics = LocalAudioArtworkDiagnostics(fileURL: directory.appendingPathComponent(".artwork-active.log"))
+    let record = diagnostics.record
     let service = LocalAudioArtworkService(directory: directory, diagnostic: record)
     let installed = EeveeLocalAudioInstallArtworkWithDiagnostics({ uri in service.imageURL(forTrackURI: uri)?.absoluteString },
                                       { url, cancelled, completion in service.load(url, isCancelled: cancelled, completion: completion) }, record)
@@ -69,7 +68,17 @@ do {
     try verifyCoreArtworkBoundaries(service: service, directory: directory, imageURL: playerImageURL)
     try verifyNativeArtworkBoundaries(service: service, directory: directory, imageURL: imageURL, uri: uri)
     try verifyArtworkDiagnostics(imageURL: playerImageURL, data: data, trace: {
-        traceLock.lock(); defer { traceLock.unlock() }; return trace
+        guard let snapshot = diagnostics.exportSnapshot() else {
+            throw Failure(description: "native pipeline observations must reach the actual artwork export")
+        }
+        let data = try Data(contentsOf: snapshot)
+        if let destination = ProcessInfo.processInfo.environment["ARTWORK_DIAGNOSTIC_SAMPLE"] {
+            try data.write(to: URL(fileURLWithPath: destination), options: .withoutOverwriting)
+        }
+        return String(decoding: data, as: UTF8.self).split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: " ", maxSplits: 2)
+            return parts.count == 3 && parts[0] == "[LocalArtwork]" && parts[1].hasPrefix("ms=") ? String(parts[2]) : nil
+        }
     })
 } catch {
     fputs("FAIL: \(error)\n", stderr)

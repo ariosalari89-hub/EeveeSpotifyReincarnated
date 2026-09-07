@@ -1,6 +1,6 @@
 import Foundation
 
-func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () -> [String]) throws {
+func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [String]) throws {
     let request = EeveeArtworkFixtureCoreRequest(imageURL, data)
     let error = NSError(domain: "PrivateCanary-domain", code: 71, userInfo: [
         NSLocalizedDescriptionKey: "PrivateCanary-description",
@@ -17,7 +17,7 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () -> [String]) 
     ])
     try require(EeveeArtworkFixtureMetadata(local)["title"] as? String == "PrivateCanary-title",
                 "diagnostic metadata inspection must retain native display fields")
-    let events = trace()
+    let events = try trace()
     for expected in ["native install metadata=1 legacy=1 core=1 remote=1",
                      "native legacy load route=local-owned",
                      "native core load route=local-v2",

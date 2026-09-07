@@ -142,6 +142,7 @@ jobs:
           name: LocalAudio-QA
           path: |
             ${{ runner.temp }}/local-audio-result.txt
+            ${{ runner.temp }}/local-audio-artwork-diagnostic.log
             ${{ runner.temp }}/local-audio-ui-result.txt
             ${{ runner.temp }}/local-audio-ui-progress.txt
             ${{ runner.temp }}/local-audio-layout.json
