@@ -82,6 +82,11 @@ static void imageResult(NSString *stage, id URL, id image) {
 
 void EeveeLocalArtworkTraceImage(id URL, id image) { imageResult(@"remote-image", URL, image); }
 
+NSUInteger EeveeLocalArtworkTraceImageIdentifier(id image) {
+    Class cls = NSClassFromString(@"UIImage");
+    return cls && [image isKindOfClass:cls] ? [objc_getAssociatedObject(image, &loadedImageKey) unsignedIntegerValue] : 0;
+}
+
 static BOOL installGetter(NSString *name, NSString *kind) {
     Class cls = NSDictionary.class;
     SEL selector = NSSelectorFromString(name);
@@ -130,4 +135,5 @@ void EeveeLocalArtworkTraceInstall(EeveeLocalArtworkDiagnostic diagnostic) {
         installGetter(@"spt_metadata_coverArtURLLarge", @"large") + installGetter(@"spt_metadata_coverArtURLXLarge", @"xlarge");
     BOOL consumer = installConsumer();
     diagnostic([NSString stringWithFormat:@"native display install getters=%lu consumer=%d", (unsigned long)getters, consumer]);
+    EeveeLocalArtworkTraceInstallViews(diagnostic);
 }

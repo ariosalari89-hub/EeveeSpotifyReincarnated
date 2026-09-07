@@ -5,3 +5,5 @@ void EeveeLocalArtworkTraceInstall(EeveeLocalArtworkDiagnostic _Nullable diagnos
 void EeveeLocalArtworkTraceMetadata(NSDictionary *dictionary, NSString *trackURI);
 void EeveeLocalArtworkTraceRequest(id _Nullable URL);
 void EeveeLocalArtworkTraceImage(id _Nullable URL, id _Nullable image);
+NSUInteger EeveeLocalArtworkTraceImageIdentifier(id _Nullable image);
+void EeveeLocalArtworkTraceInstallViews(EeveeLocalArtworkDiagnostic diagnostic);
