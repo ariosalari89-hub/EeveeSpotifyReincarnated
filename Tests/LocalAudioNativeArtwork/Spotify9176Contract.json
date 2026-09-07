@@ -3,6 +3,15 @@
   "executableSHA256": "8ec29afac67d2a068e3b47f8fe6727c055f65472e1a96b0b9171fd29e9db05bd",
   "source": "Read-only Objective-C method-list extraction from the supplied ARM64 executable; no application binary is included.",
   "classes": {
+    "NSDictionary": {
+      "spt_metadata_coverArtURL": "@16@0:8",
+      "spt_metadata_coverArtURLLarge": "@16@0:8",
+      "spt_metadata_coverArtURLXLarge": "@16@0:8"
+    },
+    "_TtC26ImageLoader_ImageLoaderKitP33_33D7ABF6E4C3EC1F400BFD35180212B719ImageLoaderDelegate": {
+      "imageLoader:didLoadImage:forURL:loadTime:context:": "v56@0:8@16@24@32d40@48",
+      "imageLoader:didFailToLoadImageForURL:error:context:": "v48@0:8@16@24@32@40"
+    },
     "SPTPlayerTrack": { "metadata": "@16@0:8", "URI": "@16@0:8" },
     "SPTLocalAVAssetImageLoaderRequest": {
       "URL": "@16@0:8",

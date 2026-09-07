@@ -14,6 +14,7 @@ xcrun swiftc -swift-version 5 -framework AVFoundation -framework ImageIO \
 xcrun clang -fobjc-arc -ISources/EeveeSpotifyC/include -c \
   Sources/EeveeSpotifyC/LocalAudioNativeArtwork.m -o "$QA_DIR/artwork-adapter.o"
 xcrun clang -fobjc-arc -c Tests/LocalAudioNativeArtwork/Fixtures.m -o "$QA_DIR/artwork-fixtures.o"
+xcrun clang -fobjc-arc -c Tests/LocalAudioNativeArtwork/DisplayFixtures.m -o "$QA_DIR/artwork-display-fixtures.o"
 xcrun swiftc -swift-version 5 -framework AVFoundation -framework ImageIO \
   -ISources/EeveeSpotifyC/include -import-objc-header Tests/LocalAudioNativeArtwork/Fixtures.h \
   Sources/EeveeSpotify/LocalFiles/LocalAudioImporter.swift \
@@ -24,7 +25,7 @@ xcrun swiftc -swift-version 5 -framework AVFoundation -framework ImageIO \
   Tests/LocalAudioNativeArtwork/main.swift Tests/LocalAudioNativeArtwork/BoundaryChecks.swift \
   Tests/LocalAudioNativeArtwork/CoreBoundaryChecks.swift \
   Tests/LocalAudioNativeArtwork/DiagnosticChecks.swift \
-  "$QA_DIR/artwork-adapter.o" "$QA_DIR/artwork-fixtures.o" \
+  "$QA_DIR/artwork-adapter.o" "$QA_DIR/artwork-fixtures.o" "$QA_DIR/artwork-display-fixtures.o" \
   -o "$QA_DIR/native-artwork-tests"
 ARTWORK_DIAGNOSTIC_SAMPLE="${RUNNER_TEMP:-$QA_DIR}/local-audio-artwork-diagnostic.log" \
   "$QA_DIR/native-artwork-tests" 2>&1 | tee -a "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"

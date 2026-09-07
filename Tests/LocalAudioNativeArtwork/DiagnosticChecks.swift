@@ -17,7 +17,34 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
     ])
     try require(EeveeArtworkFixtureMetadata(local)["title"] as? String == "PrivateCanary-title",
                 "diagnostic metadata inspection must retain native display fields")
+    let selected = EeveeArtworkFixtureTrack("spotify:local:PrivateCanary:PrivateCanary:PrivateCanary:0", [
+        "image_url": imageURL.absoluteString,
+        "image_large_url": imageURL.absoluteString,
+        "image_xlarge_url": imageURL.absoluteString
+    ])
+    for size in 0...2 {
+        try require(EeveeArtworkFixtureCoverURL(selected, size) == imageURL,
+                    "the native cover-URL getter must retain the selected URL at every artwork size")
+    }
+    try require(EeveeArtworkFixtureConsumerForwarding(imageURL, NSObject(), error) &&
+                EeveeArtworkFixtureConsumerForwarding(catalogURL, NSObject(), error),
+                "the actual image consumer must receive every original local/catalog success, nil image, time, context and error")
     let events = try trace()
+    func field(_ name: String, in event: String) -> String? {
+        event.split(separator: " ").first { $0.hasPrefix(name + "=") }.map { String($0.dropFirst(name.count + 1)) }
+    }
+    guard let binding = events.first(where: { $0.hasPrefix("native binding kind=standard ") && field("route", in: $0) == "local" }),
+          let identity = field("image", in: binding), identity != "0" else {
+        throw Failure(description: "the selected native cover URL needs an anonymous identity in the actual exported trace")
+    }
+    for kind in ["large", "xlarge"] {
+        try require(events.contains(where: { $0.hasPrefix("native binding kind=\(kind) ") && field("image", in: $0) == identity }),
+                    "the same selected URL must retain its trace identity across native cover sizes")
+    }
+    for stage in ["request", "remote-image", "consumer-image", "consumer-error"] {
+        try require(events.contains(where: { $0.hasPrefix("native display stage=\(stage) ") && field("image", in: $0) == identity }),
+                    "the exported trace must connect the selected local cover to its native \(stage) boundary")
+    }
     for expected in ["native install metadata=1 legacy=1 core=1 remote=1",
                      "native legacy load route=local-owned",
                      "native core load route=local-v2",
@@ -36,5 +63,5 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
     try require(!events.joined().contains("PrivateCanary") && !events.joined().contains("Midnight") &&
                 !events.joined().contains("Windows") && !events.joined().contains("https://"),
                 "native diagnostic output must exclude title fields, raw URLs, errors, context and cache keys")
-    print("PASS: native image diagnostics expose guarded hook, metadata, loader and callback stages without altering native effects or leaking identifiers")
+    print("PASS: selected cover URLs and native consumer callbacks share anonymous trace identities without altering native effects or leaking identifiers")
 }
