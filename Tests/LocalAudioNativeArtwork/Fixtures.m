@@ -38,6 +38,29 @@
 - (void)dispatchError:(NSError *)error { if (!self.cancelled) { self.error = error; self.errors += 1; } }
 @end
 
+@interface SPTCoreImageLoaderRequest : NSObject
+@property NSURL *URL;
+@property BOOL cancelled;
+@property NSData *data;
+@property NSData *nativeData;
+@property NSInteger originalLoads;
+@property NSInteger errors;
+@property NSInteger successes;
+@property NSError *error;
+- (void)load;
+- (void)dispatchSuccess:(NSData *)data;
+- (void)dispatchError:(NSError *)error;
+@end
+@implementation SPTCoreImageLoaderRequest
+- (void)load {
+    self.originalLoads += 1;
+    if (self.nativeData) [self dispatchSuccess:self.nativeData];
+    else [self dispatchError:[NSError errorWithDomain:@"NativeImageFixture" code:404 userInfo:nil]];
+}
+- (void)dispatchSuccess:(NSData *)data { if (!self.cancelled) { self.data = data; self.successes += 1; } }
+- (void)dispatchError:(NSError *)error { if (!self.cancelled) { self.error = error; self.errors += 1; } }
+@end
+
 id EeveeArtworkFixtureTrack(NSString *URI, NSDictionary *metadata) {
     SPTPlayerTrack *track = [SPTPlayerTrack new]; track.URI = [NSURL URLWithString:URI]; track.metadata = metadata; return track;
 }
@@ -46,7 +69,14 @@ NSURL *EeveeArtworkFixtureImageURL(id track) { return [track imageURL]; }
 id EeveeArtworkFixtureRequest(NSURL *URL) {
     SPTLocalAVAssetImageLoaderRequest *request = [SPTLocalAVAssetImageLoaderRequest new]; request.URL = URL; return request;
 }
-void EeveeArtworkFixtureLoad(id request) { [request loadLocalFileImage]; }
+id EeveeArtworkFixtureCoreRequest(NSURL *URL, NSData *nativeData) {
+    SPTCoreImageLoaderRequest *request = [SPTCoreImageLoaderRequest new];
+    request.URL = URL; request.nativeData = nativeData; return request;
+}
+void EeveeArtworkFixtureLoad(id request) {
+    if ([request isKindOfClass:SPTCoreImageLoaderRequest.class]) [request load];
+    else [request loadLocalFileImage];
+}
 void EeveeArtworkFixtureCancel(id request) { [request setCancelled:YES]; }
 void EeveeArtworkFixtureSetURL(id request, NSURL *URL) { [request setURL:URL]; }
 NSData *EeveeArtworkFixtureData(id request) { return [request data]; }

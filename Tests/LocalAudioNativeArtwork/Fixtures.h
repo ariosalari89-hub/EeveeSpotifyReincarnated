@@ -4,6 +4,7 @@ id EeveeArtworkFixtureTrack(NSString *URI, NSDictionary<NSString *, id> *metadat
 NSDictionary<NSString *, id> *EeveeArtworkFixtureMetadata(id track);
 NSURL * _Nullable EeveeArtworkFixtureImageURL(id track);
 id EeveeArtworkFixtureRequest(NSURL *URL);
+id EeveeArtworkFixtureCoreRequest(NSURL *URL, NSData * _Nullable nativeData);
 void EeveeArtworkFixtureLoad(id request);
 void EeveeArtworkFixtureCancel(id request);
 void EeveeArtworkFixtureSetURL(id request, NSURL *URL);

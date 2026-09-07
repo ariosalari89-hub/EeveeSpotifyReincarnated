@@ -50,6 +50,19 @@ do {
                 EeveeArtworkFixtureErrors(request) == 0 && EeveeArtworkFixtureOriginalLoads(request) == 0,
                 "an owned native request must deliver one actual cover without also starting the failing legacy load")
     print("PASS: real imported artwork flows through the guarded native player getter, image request and native callback")
+    // The native core's format string is spotify:localfileimage:%s%c%s%c%s%c%d.
+    // Unlike the legacy file-path route, the player can already supply this URL.
+    let playerImageURL = URL(string: "spotify:localfileimage:A%2FB+%2B+%E9%9F%B3:Windows%3A+Summer:Midnight+Library:0")!
+    let core = EeveeArtworkFixtureCoreRequest(playerImageURL, nil)
+    EeveeArtworkFixtureLoad(core)
+    let coreDeadline = Date().addingTimeInterval(5)
+    while EeveeArtworkFixtureData(core) == nil && Date() < coreDeadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    try require(EeveeArtworkFixtureData(core) == data && EeveeArtworkFixtureSuccesses(core) == 1 &&
+                EeveeArtworkFixtureErrors(core) == 0 && EeveeArtworkFixtureOriginalLoads(core) == 1,
+                "a failed native v2 player-art request must recover the imported cover through the native success callback")
+    print("PASS: an existing native v2 player-art URL recovers embedded cover data after native loading fails")
     try verifyNativeArtworkBoundaries(service: service, directory: directory, imageURL: imageURL, uri: uri)
 } catch {
     fputs("FAIL: \(error)\n", stderr)

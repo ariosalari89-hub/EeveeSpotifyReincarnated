@@ -10,6 +10,13 @@
       "loadLocalFileImage": "v16@0:8",
       "dispatchSuccess:": "v24@0:8@16",
       "dispatchError:": "v24@0:8@16"
+    },
+    "SPTCoreImageLoaderRequest": {
+      "URL": "@16@0:8",
+      "cancelled": "B16@0:8",
+      "load": "v16@0:8",
+      "dispatchSuccess:": "v24@0:8@16",
+      "dispatchError:": "v24@0:8@16"
     }
   }
 }
