@@ -1,4 +1,5 @@
 #import "LocalAudioNativeArtwork.h"
+#import "LocalAudioArtworkTrace.h"
 #import <objc/runtime.h>
 #import <string.h>
 #import <CoreGraphics/CGGeometry.h>
@@ -92,6 +93,7 @@ static BOOL installRemoteObserver(EeveeLocalArtworkDiagnostic diagnostic) {
     replace(cls, requestSelector, request, imp_implementationWithBlock(^id(id target, id URL, id source, CGSize size,
                                                                          double scale, BOOL upscaling, id context, id callback, id key) {
         diagnostic([@"native remote request route=" stringByAppendingString:artworkRoute(URL)]);
+        EeveeLocalArtworkTraceRequest(URL);
         return ((id (*)(id, SEL, id, id, CGSize, double, BOOL, id, id, id))originalRequest)
             (target, requestSelector, URL, source, size, scale, upscaling, context, callback, key);
     }));
@@ -110,6 +112,7 @@ static BOOL installRemoteObserver(EeveeLocalArtworkDiagnostic diagnostic) {
     }));
     replace(cls, imageSelector, image, imp_implementationWithBlock(^(id target, id imageRequest, id loadedImage, id source) {
         diagnostic([NSString stringWithFormat:@"native remote complete=image route=%@ present=%d", requestRoute(imageRequest), loadedImage != nil]);
+        EeveeLocalArtworkTraceImage(objectValue(imageRequest, NSSelectorFromString(@"URL")), loadedImage);
         ((void (*)(id, SEL, id, id, id))originalImage)(target, imageSelector, imageRequest, loadedImage, source);
     }));
     replace(cls, errorSelector, error, imp_implementationWithBlock(^(id target, id imageRequest, id nativeError, id source) {
@@ -239,6 +242,7 @@ BOOL EeveeLocalAudioInstallArtworkWithDiagnostics(EeveeLocalArtworkURLProvider p
             return;
         }
 
+        EeveeLocalArtworkTraceInstall(diagnostic);
         IMP originalLoad = method_getImplementation(load);
         IMP originalMetadata = method_getImplementation(metadata);
         IMP loadReplacement = imp_implementationWithBlock(^(id request) {
@@ -301,7 +305,9 @@ BOOL EeveeLocalAudioInstallArtworkWithDiagnostics(EeveeLocalArtworkURLProvider p
                     result[key] = imageURL;
                 }
             }
-            return [result copy];
+            NSDictionary *metadata = [result copy];
+            EeveeLocalArtworkTraceMetadata(metadata, uri);
+            return metadata;
         });
         // Register the loader first: a newly supplied URL always has a handler.
         replace(requestClass, loadSelector, load, loadReplacement);
