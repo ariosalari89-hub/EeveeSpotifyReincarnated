@@ -26,6 +26,11 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
         try require(EeveeArtworkFixtureCoverURL(selected, size) == imageURL,
                     "the native cover-URL getter must retain the selected URL at every artwork size")
     }
+    let missing = EeveeArtworkFixtureTrack("spotify:track:PrivateCanary-missing", [:])
+    let catalogTrack = EeveeArtworkFixtureTrack("spotify:track:PrivateCanary-catalog", ["image_url": catalogURL.absoluteString])
+    try require((0...2).allSatisfy { EeveeArtworkFixtureCoverURL(missing, $0) == nil } &&
+                EeveeArtworkFixtureCoverURL(catalogTrack, 0) == catalogURL,
+                "the diagnostic cover getters must preserve missing and catalog URL results")
     try require(EeveeArtworkFixtureConsumerForwarding(imageURL, NSObject(), error) &&
                 EeveeArtworkFixtureConsumerForwarding(catalogURL, NSObject(), error),
                 "the actual image consumer must receive every original local/catalog success, nil image, time, context and error")
@@ -49,6 +54,9 @@ func verifyArtworkDiagnostics(imageURL: URL, data: Data, trace: () throws -> [St
                     "the same selected URL must retain its trace identity across native cover sizes")
     }
     let localBindings = events.filter { $0.hasPrefix("native binding kind=standard ") && field("route", in: $0) == "local" }
+    try require(events.contains("native binding kind=standard track=0 image=0 route=missing") &&
+                events.contains("native binding kind=standard track=0 image=0 route=catalog"),
+                "missing and catalog bindings must stay distinguishable without acquiring a local image identity")
     try require(Set(localBindings.compactMap { field("image", in: $0) }).subtracting(["0"]).count == 2,
                 "two distinct local cover URLs must receive different anonymous trace identities")
     try require(events.contains(where: { $0.hasPrefix("native view surface=cover ") && field("kind", in: $0) == "image" &&

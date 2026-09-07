@@ -45,3 +45,10 @@ xcrun swiftc -swift-version 5 -parse-as-library -ISources/EeveeSpotifyC/include 
   -import-objc-header Tests/LocalAudioNativeArtwork/Fixtures.h Tests/LocalAudioNativeArtwork/UnsupportedRemote.swift \
   "$QA_DIR/artwork-adapter.o" "$QA_DIR/artwork-trace.o" "$QA_DIR/artwork-view-trace.o" "$QA_DIR/artwork-unsupported-remote.o" -o "$QA_DIR/native-artwork-unsupported-remote-tests"
 "$QA_DIR/native-artwork-unsupported-remote-tests" 2>&1 | tee -a "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"
+xcrun clang -fobjc-arc -DEEVEE_ARTWORK_INVALID_DISPLAY -c Tests/LocalAudioNativeArtwork/DisplayFixtures.m -o "$QA_DIR/artwork-unsupported-display.o"
+xcrun clang -fobjc-arc -DEEVEE_ARTWORK_INVALID_DISPLAY -c Tests/LocalAudioNativeArtwork/ViewFixtures.m -o "$QA_DIR/artwork-unsupported-view.o"
+xcrun swiftc -swift-version 5 -parse-as-library -ISources/EeveeSpotifyC/include \
+  -import-objc-header Tests/LocalAudioNativeArtwork/Fixtures.h Tests/LocalAudioNativeArtwork/UnsupportedDisplay.swift \
+  "$QA_DIR/artwork-adapter.o" "$QA_DIR/artwork-trace.o" "$QA_DIR/artwork-view-trace.o" "$QA_DIR/artwork-fixtures.o" \
+  "$QA_DIR/artwork-unsupported-display.o" "$QA_DIR/artwork-unsupported-view.o" -o "$QA_DIR/native-artwork-unsupported-display-tests"
+"$QA_DIR/native-artwork-unsupported-display-tests" 2>&1 | tee -a "${RUNNER_TEMP:-/tmp}/local-audio-result.txt"

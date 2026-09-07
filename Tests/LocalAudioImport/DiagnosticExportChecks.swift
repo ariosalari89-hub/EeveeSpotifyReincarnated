@@ -15,7 +15,7 @@ func runArtworkDiagnosticExportChecks() throws {
         }
         let initial = try Data(contentsOf: snapshot)
         let text = String(decoding: initial, as: UTF8.self)
-        try expect(snapshot != activeURL && text.contains("build=v5.20-diagnostic") &&
+        try expect(snapshot != activeURL && text.contains("build=v5.21-diagnostic format=2") &&
                    text.contains("reader request=track") && text.contains("reader result=no-match") &&
                    !text.contains("PrivateCanary") && !text.contains(input.path),
                    "the artwork export must contain its build and observed stages, excluding malformed or raw-data records")

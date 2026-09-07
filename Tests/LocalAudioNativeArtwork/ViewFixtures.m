@@ -33,11 +33,19 @@
 @interface EeveeArtworkFixtureCoverBase : UIView
 @property (nonatomic, strong) UIView *storedCover;
 @property (nonatomic) NSUInteger reuses;
+#ifdef EEVEE_ARTWORK_INVALID_DISPLAY
+- (NSInteger)coverArtView;
+#else
 - (UIView *)coverArtView;
+#endif
 - (void)prepareForReuse;
 @end
 @implementation EeveeArtworkFixtureCoverBase
+#ifdef EEVEE_ARTWORK_INVALID_DISPLAY
+- (NSInteger)coverArtView { return 17; }
+#else
 - (UIView *)coverArtView { return self.storedCover; }
+#endif
 - (void)prepareForReuse { self.reuses += 1; }
 @end
 @interface _TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl : EeveeArtworkFixtureCoverBase @end
@@ -53,6 +61,7 @@
 - (void)viewDidLoad { self.loads += 1; }
 @end
 
+#ifndef EEVEE_ARTWORK_INVALID_DISPLAY
 BOOL EeveeArtworkFixtureViewStates(NSURL *URL, NSError *error) {
     UIImage *image = [UIImage new];
     if (!EeveeArtworkFixtureConsumerForwarding(URL, image, error)) return NO;
@@ -112,3 +121,17 @@ BOOL EeveeArtworkFixtureViewLifetime(void) {
     // Delayed observation blocks are still pending on the main queue here.
     return releasedOwner == nil && releasedRoot == nil;
 }
+#else
+BOOL EeveeArtworkFixtureUnsupportedViews(void) {
+    for (Class cls in @[_TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl.class,
+                        _TtC28NowPlaying_ContentLayersImpl22LegacyCoverArtCellImpl.class]) {
+        EeveeArtworkFixtureCoverBase *cell = [cls new];
+        UIView *root = [_TtCE15Encore_MediaKitO16EncoreFoundation6Encore9ImageView new];
+        cell.storedCover = root;
+        if ([cell coverArtView] != 17) return NO;
+        [cell layoutSubviews]; [cell prepareForReuse];
+        if (cell.layouts != 1 || cell.reuses != 1 || root.layouts != 0) return NO;
+    }
+    return YES;
+}
+#endif

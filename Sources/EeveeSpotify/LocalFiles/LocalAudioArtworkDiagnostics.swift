@@ -17,7 +17,7 @@ final class LocalAudioArtworkDiagnostics {
 
     init(fileURL: URL) {
         self.fileURL = fileURL
-        let header = "[LocalArtwork] build=v5.20-diagnostic format=1 started=\(Date().description)\n"
+        let header = "[LocalArtwork] build=v5.21-diagnostic format=2 started=\(Date().description)\n"
         do {
             try Data(header.utf8).write(to: fileURL, options: .atomic)
             available = true

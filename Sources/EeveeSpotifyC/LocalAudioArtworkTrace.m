@@ -69,13 +69,19 @@ void EeveeLocalArtworkTraceRequest(id URL) {
 
 static void imageResult(NSString *stage, id URL, id image) {
     NSUInteger identity = imageIdentity(URL);
-    if (!identity) return;
     // UIKit is intentionally optional for the Foundation-only boundary tests.
     // Never attach state to arbitrary, potentially tagged native return values.
     Class imageClass = NSClassFromString(@"UIImage");
     if (imageClass && [image isKindOfClass:imageClass]) {
-        objc_setAssociatedObject(image, &loadedImageKey, @(identity), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        @synchronized(image) {
+            NSNumber *previous = objc_getAssociatedObject(image, &loadedImageKey);
+            // Cached/placeholder images can be shared by different URLs. Once
+            // ambiguous, keep the object unlinked for the rest of its lifetime.
+            NSUInteger linked = previous && previous.unsignedIntegerValue != identity ? 0 : identity;
+            objc_setAssociatedObject(image, &loadedImageKey, @(linked), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
     }
+    if (!identity) return;
     traceState.diagnostic([NSString stringWithFormat:@"native display stage=%@ image=%lu present=%d",
                            stage, (unsigned long)identity, image != nil]);
 }
